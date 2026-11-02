@@ -318,9 +318,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: mlugg/setup-zig@v1
-        with:
-          version: 0.17.0
+      - name: 安装 zig 0.17.0（与本地发版矩阵同版本）
+        run: |
+          set -euo pipefail
+          # mlugg/setup-zig 的版本索引对 0.17.0 返回 404，直接从官方下载。
+          # 0.14.1 起 tarball 命名是 arch 在前（zig-x86_64-linux-…）
+          cd "$RUNNER_TEMP"
+          curl -fsSLo zig.tar.xz \
+            "https://ziglang.org/download/0.17.0/zig-x86_64-linux-0.17.0.tar.xz"
+          tar -xJf zig.tar.xz
+          echo "$RUNNER_TEMP/zig-x86_64-linux-0.17.0" >> "$GITHUB_PATH"
+          # 断言拿到的就是发版用的版本，防止 URL 改版后静默装错
+          zig version | grep -qx 0.17.0 \
+            || { echo "::error::zig 版本与发版矩阵不一致，检查下载 URL"; exit 1; }
 
       - name: 安装 binutils（检查 PE 导入/导出表）
         if: matrix.apt != ''
