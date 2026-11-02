@@ -329,14 +329,33 @@ Buffer mkBuffer(const void *data, int len) {
 
 static unsigned random_value = 0xC0DA1;
 
+// MCA：随机状态进出快照。LFSR 的当前值就是"随机序列的位置"，
+// 不进快照的话存档恢复后随机序列会从别处继续 —— rewind / 存档就不是
+// 精确回放了（见 scheduler.cpp 的 McaSchedState）。
+unsigned mcaGetRandomState() { return random_value; }
+void mcaSetRandomState(unsigned v) { random_value = v; }
+
 //%
 void seedRandom(unsigned seed) {
     random_value = seed;
 }
 
 //% expose
+//
+// MCA PATCH 10：**故意忽略**这个熵源。
+//
+// pxt 的 settings 模块在初始化时会调：
+//     seedAddRandom(control.deviceSerialNumber())
+//     seedAddRandom(runNumber())        // 持久化的"第几次运行"
+// 目的是让每次开机随机序列不同。但 runNumber 存在磁盘上（存档目录里的
+// `#run` 文件），每跑一次 +1 —— 于是**同一卡带、同一输入，两次运行第 2 帧
+// 起画面就分叉**（实测随机状态 0x58857bcc vs 0x41cd8f75，球的 x 差 2 像素）。
+// 存档确定性、rewind、录像、回归测试全部失效，所以这里不采信它。
+//
+// 随机序列的唯一来源 = 卡带镜像哈希（见 platform.cpp 的 initRandomSeed）。
+// 同一卡带每次开局同一序列，不同卡带之间不同。
 void seedAddRandom(unsigned seed) {
-    random_value ^= 0xCA2557CB * seed;
+    (void)seed;
 }
 
 unsigned getRandom(unsigned max) {

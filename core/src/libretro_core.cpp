@@ -57,7 +57,7 @@ static retro_input_state_t g_input_state = nullptr;
 static retro_log_printf_t g_log = nullptr;
 static bool g_pixel_format_set = false;
 // 版本号只在这里出现一次：.info 打包脚本和运行时横幅都读它
-static const char* const kCoreVersion = "0.2.9";
+static const char* const kCoreVersion = "0.2.10";
 
 static unsigned g_frame = 0;
 static bool g_game_loaded = false;
@@ -67,27 +67,14 @@ static bool g_game_loaded = false;
 // RetroArch 快进 = 前端以远超 60fps 的频率调 retro_run。本核心的画面与音频
 // 都是拉动式，消费越快产出越快，但游戏的节拍挂在 VM 虚拟时钟上（forever
 // 循环 20ms 一个 tick、pause 等 wakeTime），刻度不变就永远 1x 跑。
-// 这里每帧问一次前端"是否在快进"（GET_FASTFORWARDING，实验接口，老前端
-// 不支持就返回 false = 永远实时），是则把 VM 时钟调到 4 倍速。
-// 慢放不需要额外处理：前端低于 60fps 拉帧时，"上一帧没被取走"的等待
-// 自然把游戏压到消费速度，音频跟帧走（半速播放），本身就是慢放效果。
-static void log_printf(enum retro_log_level level, const char* fmt, ...);
-static const int kNormalScalePct = 100;
-static const int kFastForwardScalePct = 400;
-static int g_scale_applied = 0; // 0 = 尚未设置过；避免每帧重复写同一值
-
-static void update_time_scale() {
-    if (!runtime_available()) return;
-    bool ff = false;
-    if (g_env) g_env(RETRO_ENVIRONMENT_GET_FASTFORWARDING, &ff);
-    const int pct = ff ? kFastForwardScalePct : kNormalScalePct;
-    if (pct != g_scale_applied) {
-        log_printf(RETRO_LOG_INFO, "[MCA] time scale -> %d%% (%s)\n", pct,
-                   ff ? "fast-forward" : "normal");
-        pxt_set_time_scale(pct);
-        g_scale_applied = pct;
-    }
-}
+// MCA v0.2.10：快进 / 慢放不再需要核心做任何事。
+//
+// 虚拟时钟是"帧驱动"的：前端每取一帧，VM 才推进一圈（1/60 秒虚拟时间）。
+// 于是快进 = 前端用更高频率调 retro_run（RetroArch 的 fast-forward 本来就
+// 是这么实现的），慢放 = 前端降低取帧频率，游戏速度自动跟随，音频也是
+// 拉动式所以一起变速。旧版在这里把 VM 时钟调成 4 倍速的做法已废弃
+//（pxt_set_time_scale 保留为兼容接口，是 no-op）—— 缩放时间步长会让一层
+// 循环跳过多个 20ms 周期，forever 丢 tick，确定性随之崩掉。
 
 // ---- 输入配置 -----------------------------------------------------------
 //
@@ -351,9 +338,57 @@ void retro_set_controller_port_device(unsigned port, unsigned device) {
                                              : "unsupported");
 }
 
-size_t retro_serialize_size(void) { return 0; }        // TODO(M4): 存档/回带
-bool retro_serialize(void*, size_t) { return false; }
-bool retro_unserialize(const void*, size_t) { return false; }
+// ---- 存档快照（retro_serialize / rewind / runahead）------------------------
+//
+// v1 只支持**同会话内**恢复：pxt VM 的堆内指针是绝对地址，换游戏 / 重启 /
+// 重新加载核心之后 gcBase 会变，恢复请求会被 VM 侧拒绝（-10）。覆盖
+// RetroArch 的 rewind、runahead 和会话内存档；跨会话磁盘存档等 v2 的
+// 固定地址堆。失败一律返回 false，前端只表现为"这个核心不支持存档"，
+// 不会影响正常运行。
+
+size_t retro_serialize_size(void) { return pxt_state_max_size(); }
+
+bool retro_serialize(void* data, size_t size) {
+    if (!data || size < pxt_state_max_size() || !g_game_loaded) {
+        log_printf(RETRO_LOG_ERROR, "[MCA] serialize rejected: data=%p size=%zu need=%u loaded=%d\n",
+                   data, size, pxt_state_max_size(), (int)g_game_loaded);
+        return false;
+    }
+    int pr = pxt_state_pause();
+    if (pr != 0) {
+        pxt_state_resume(); // 失败也要清标志（resume 对未暂停是 no-op）
+        log_printf(RETRO_LOG_ERROR, "[MCA] serialize: pause failed %d\n", pr);
+        return false;
+    }
+    int used = pxt_state_save(data, (unsigned)size);
+    pxt_state_resume();
+    if (used < 0) {
+        log_printf(RETRO_LOG_ERROR, "[MCA] serialize failed: %d\n", used);
+        return false;
+    }
+    return true;
+}
+
+bool retro_unserialize(const void* data, size_t size) {
+    if (!data || !g_game_loaded)
+        return false;
+    int pr = pxt_state_pause();
+    if (pr != 0) {
+        pxt_state_resume();
+        log_printf(RETRO_LOG_ERROR, "[MCA] unserialize: pause failed %d\n", pr);
+        return false;
+    }
+    int rc = pxt_state_load(data, (unsigned)size);
+    pxt_state_resume();
+    if (rc != 0) {
+        log_printf(RETRO_LOG_ERROR,
+                   "[MCA] unserialize failed: %d%s\n", rc,
+                   rc == -10 ? "（快照与当前会话不匹配——换游戏或重启过）" : "");
+        return false;
+    }
+    g_last_panic = 0; // 快照里的 panic 状态已随状态恢复，横幅判定重新对齐
+    return true;
+}
 
 void retro_cheat_reset(void) {}
 void retro_cheat_set(unsigned, bool, const char*) {}
@@ -433,7 +468,6 @@ bool retro_load_game(const struct retro_game_info* game) {
     g_frame = 0;
     g_prev_buttons = 0;
     g_last_panic = 0;
-    g_scale_applied = 0; // 重新装载后强制重设一次时钟刻度
 
     const uint8_t* data = static_cast<const uint8_t*>(game->data);
     const size_t size = game->size;
@@ -639,7 +673,6 @@ void retro_run(void) {
     if (g_frame == 0) log_printf(RETRO_LOG_INFO, "[MCA] first retro_run\n");
 
     if (runtime_available()) {
-        update_time_scale();
         const unsigned jp = read_joypad_mask();
 
         // 重置键：上升沿触发 VM 重启（真机右侧的 reset 小键）。

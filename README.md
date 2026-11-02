@@ -81,7 +81,7 @@ makecode_arcade/
 | M1 | PNG 卡带解码（像素解码 + blob 位流 + LZMA + 项目 JSON） | ✅ cart.c 接入完成，3 张真实卡带冒烟通过（source 字节数与 Python 解码/生产日志一致） |
 | M2 | vendor pxt C++ 运行时（screen/sprite/引擎）独立构建 | ✅ pxtapp vendored 到 runtime/pxtapp（33 TU 游戏无关，已验证 ping/jumpy/cube-land 共用同一二进制） |
 | M3 | pxt VM 字节码解释器接入，跑通第一个游戏 | ✅ **三款游戏全通**：vm_smoke（官方 ABI 直调）+ libretro 假前端路径（RGB565/按键沿/音频） |
-| M4 | 输入 / 音频合成 / 60fps 帧模型完整化 | ✅ 宿主接口全部打通：按键描述符/分键重绑、音频合成与峰值回归、拉动式帧模型、快进/慢放（虚拟时钟 v0.2.9）、panic 横幅、存档目录对接（trace/数据走 `GET_SAVE_DIRECTORY`）；仅剩 retro_serialize 快照（P1） |
+| M4 | 输入 / 音频合成 / 60fps 帧模型完整化 | ✅ 宿主接口全部打通：按键描述符/分键重绑、音频合成与峰值回归、帧驱动虚拟时钟（前端一圈一帧，快进=前端多取帧）、panic 横幅、存档目录对接（trace/数据走 `GET_SAVE_DIRECTORY`）、**retro_serialize/unserialize 快照**（v0.2.10，同会话精确恢复，S1–S4 回归全绿） |
 | M5 | 离线转换工具（PNG→bytecode）+ 游戏兼容性测试集 | ✅ tools/png2pxt64.py 全自动转换，三卡带实测通过 |
 | M6 | 交叉编译（掌机/桌面/移动）+ 性能验证 | ✅ **7 个主流目标全通并出 zip**（Windows x64/arm64、Linux x64/arm64/armhf、Android arm64/armv7）；✅ **RK3566 + ArkOS 真机验收通过**（v0.2.1，用户反馈运行正常、完全无卡顿；帧率数值待量化）；✅ **Android arm64 验收通过**（v0.2.7，功能与 Linux aarch64 一致） |
 
@@ -297,6 +297,9 @@ python tools/test_buttons.py
 # 6) 生命周期回归（三连换游戏 / 关闭游戏后 dlclose / 重置后音频恢复）
 python tools/make_probe_cartridge.py --audio        # 生成 out/pxt64/audio_probe.pxt64
 python tools/test_lifecycle.py
+
+# 7) 即时存档回归（确定性 / 收敛 / 跨卡带拒绝 / 垃圾拒绝，v0.2.10 起）
+python tools/test_savestate.py
 ```
 
 已验证：ping / jumpy / cube-land 三款游戏在**同一份预编译 core 二进制**上
@@ -328,17 +331,20 @@ functions.json 逐字节一致）。
      当前目录 / `/tmp`，实际路径会打进 RetroArch 日志的
      `[MCA] core version ... trace -> ...` 一行），卡住时看它停在哪一步。
 
-## 快进、慢放与 panic 提示
+## 快进、慢放、即时存档与 panic 提示
 
-- **快进**：按住 RetroArch 的快进键（默认可绑）即可，核心通过
-  `GET_FASTFORWARDING`（libretro 实验接口，RetroArch 已支持）感知并把 VM
-  虚拟时钟调到 4 倍速。游戏的节拍（forever 循环、`pause`）全挂在虚拟时钟上，
-  音频是拉动式所以自动加速播放，与其它核心的快进表现一致。老前端不支持该
-  接口时退化为实时速度（不会出错）。慢放无需特殊处理：前端低于 60fps 拉帧
-  时，"上一帧没被取走"的等待会自然把游戏压到消费速度。
-  量化验证（桌面，CPU 满负荷）：4x 时每帧虚拟时间步长 ≈ 墙钟 × 4.0
-  （dt=60~63ms 虚拟 / 15ms 墙钟），表现为精灵 4 倍速移动；CPU 有富余的
-  机器上则会直接表现为帧率上升。
+- **快进 / 慢放**：不需要核心做任何事。虚拟时钟是**帧驱动**的（前端每取
+  一帧，VM 才推进 1/60 秒虚拟时间），所以 RetroArch 的快进（提高 retro_run
+  频率）天然就是游戏加速，慢放（降低取帧频率）天然减速，音频是拉动式所以
+  一起变速。旧版"把时钟调成 4 倍速"的做法已废弃（会让 forever 丢 tick）。
+- **即时存档（Savestate / Rewind）**：v0.2.10 起支持
+  `retro_serialize` / `retro_unserialize`，RetroArch 的存档、回带（rewind）、
+  run-ahead 都能用。语义是**同会话精确恢复**：GC 堆里有绝对指针，跨进程
+  （重启前端后再读档）的快照会被拒绝（日志 `-10`），拒绝后游戏照常继续。
+  游戏内随机序列由卡带镜像哈希决定（同一卡带每次开局同一序列），且随机
+  状态随快照一起保存/恢复 —— 存档点继续玩，画面与不存档逐字节一致。
+  确定性回归见 `tools/test_savestate.py`（S1 确定性 / S2 收敛 / S3 跨卡带
+  拒绝 / S4 垃圾拒绝）。
 - **panic 显示化**：VM 崩溃（panic）时画面顶部会出现红底白字的
   `VM PANIC <code>` 横幅，重启成功后自动消失；详情仍同步进 RetroArch 日志
   （`[MCA-VM] panic code N`）。真机上不用翻日志就能对上故障码。

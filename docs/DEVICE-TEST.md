@@ -215,3 +215,44 @@ Android 上装第三方 core 有个绕不开的矛盾：
 - Android 上的量化数据（fps / 单核占用）还没测。
 - 32 位 armv7 产物未上真机（设备是 64 位）。
 
+
+## 2026-11-02（桌面端）：v0.2.10 确定性 + 即时存档落地
+
+### 结论
+
+- **核心完全确定**：同一卡带 + 同一输入序列，两次独立进程跑 300 帧的
+  末帧哈希逐字节一致（5/5）。快进/慢放成为前端取帧频率的天然结果。
+- **retro_serialize/unserialize 落地**：同会话恢复后画面与原时间线逐帧
+  重合（`tools/test_savestate.py` S1–S4 全绿）。
+
+### 本轮修掉的非确定性来源（按发现顺序）
+
+1. **取帧等待用 `pthread_cond_timedwait`**：zig-mingw 的 winpthreads 对它
+   直接返回 `EINVAL(22)`，300 帧里 288 次"立即超时"——前端实际没等，读到
+   的是上一帧。与 v0.2.9 的 mca_tick 是同一个坑，新增 `mca_pub_wait/signal`
+   （Windows=自动重置事件，POSIX=cond+待取票）替换。
+2. **启动异步**：`retro_load_game` 立即返回，装载期间前端白拉的黑屏帧不计
+   圈数，「前端第 N 帧 ↔ VM 第 N 圈」错开一个由墙钟决定的偏移。现在
+   `spinThread` 同步等到主循环停在取帧闸门上（`mcaMainLoopLive`）。
+3. **取帧请求条件化**：离线帧不请求 → 补圈数随墙钟漂移。改为无条件请求，
+   请求序号与发布序号严格配对（第 N 次取帧 = 第 N 圈 = 第 N 次发布）。
+4. **随机种子混入"运行次数"**：pxt settings 模块初始化时
+   `seedAddRandom(runNumber())`，runNumber 持久化在存档目录、每次 +1 →
+   两次运行第 2 帧起画面分叉（球的 x 差 2 像素）。`seedAddRandom` 改为
+   忽略熵源，随机序列唯一来源 = 卡带镜像哈希（`initRandomSeed`，并补上
+   之前从未被调用的镜像播种路径——现在在 vmStartCore 里显式调用）。
+5. **屏幕缓冲未清零**：`WDisplay` 的 screenBuf/pubBuf 是 `new uint8_t[]`，
+   头几帧画面取决于堆里残留内容。构造时清零。
+
+### 已知现象（非本 core 缺陷）
+
+- Pong 模板长按 **UP** 会触发游戏自身的 `target_panic(1980)`（精灵越界），
+  蓝屏 + 日志，属游戏层行为；left/right 对玩家桨无效（桨上下移动）。
+- pxt 的 settings（高分等）仍持久化在存档目录，但**不再影响随机序列**。
+
+### 真机待验
+
+- v0.2.10 尚未在 RK3566 / Android 上验收；改动集中在帧节拍与取帧路径，
+  理论上真机表现只会更稳（启动同步化会稍微拉长 load 时间，约几十 ms）。
+- Rewind（RetroArch 逐帧回带）依赖本快照接口，真机内存占用待测
+  （单份快照 ≈ 1.6MB，rewind 环形缓冲默认几十份）。

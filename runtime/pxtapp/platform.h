@@ -68,6 +68,7 @@ const char *pxt_vm_trace_path(void);
 int pxt_vm_online(void);
 void pxt_vm_set_online(int online);
 void pxt_screen_shutdown(void);  // screen.cpp：丢 instWDisplay / numGetPixels
+void pxt_screen_publish(unsigned long long seq); // screen.cpp：发布一帧（seq = 帧序号）
 void pxt_audio_shutdown(void);   // sound.cpp：丢 dac
 void pxt_music_shutdown(void);   // melody.cpp：丢 instWSynthesizer（见 PATCH 9）
 #ifdef __cplusplus

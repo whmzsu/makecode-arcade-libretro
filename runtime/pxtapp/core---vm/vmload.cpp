@@ -16,6 +16,10 @@ namespace pxt {
 // MCA PATCH 5：定义在 scheduler.cpp（VM 主循环与 systemReset 都在那边）
 extern volatile int mcaResetRequest;
 extern volatile int mcaVmExited;
+// MCA v0.2.10：主循环是否已停在"等前端要帧"的闸门上（定义在 scheduler.cpp）
+extern volatile int mcaMainLoopLive;
+// MCA PATCH 10：随机序列 = f(镜像哈希)（定义在 platform.cpp）
+void seedRandomFromImage();
 // MCA PATCH 6：重启路径埋点（定义在 scheduler.cpp）
 void mcaTrace(const char *fmt, ...);
 
@@ -46,6 +50,10 @@ static void vmStartCore(uint8_t *data, unsigned len) {
     // （此刻 instWDisplay 还是 NULL，拉取会得到黑屏，安全。）
     pxt_vm_set_online(1);
     mcaTrace("[vm] image loaded, gcStartup done (online)");
+
+    // MCA PATCH 10：随机序列 = f(镜像哈希)。必须在此处（游戏代码运行前）
+    // 播种：settings 模块和游戏启动代码都会用 Math.random。
+    seedRandomFromImage();
 
     globals = (TValue *)app_alloc(sizeof(TValue) * getNumGlobals());
     memset(globals, 0, sizeof(TValue) * getNumGlobals());
@@ -84,6 +92,7 @@ static void *multiStart(void *) {
     // MCA PATCH 7：线程要走了，先把输出通道关掉，免得前端在已释放的
     // 堆/单例上取帧（清理路径已经在 resetRuntimeState 里关过，这里是
     // panic 直接退出的情况兜底）。
+    mcaMainLoopLive = 0;
     pxt_vm_set_online(0);
     // MCA PATCH 6：真正的线程退出点才置位。之前是在清理中途置位，宿主可能
     // 提前 pthread_join 一个还在跑清理的线程 —— 真机上就是"卡住不动"。
@@ -123,6 +132,30 @@ static void spinThread() {
     pthread_attr_destroy(&vm_attr);
     vm_has_thread = 1;
     mcaTrace("[host] new vm thread created");
+
+    // MCA v0.2.10：等 VM 真正就绪（镜像装载完 + 主循环停在取帧闸门上）再返回，
+    // 也就是让 retro_load_game 变成同步的。
+    //
+    // 不等的话，起步阶段前端会白拉若干帧黑屏：那些帧不产生 VM 圈数，于是
+    // 「前端第 N 帧」与「VM 第 N 圈」之间留下一个**由墙钟决定**的偏移
+    // （实测 12 帧只跑了 6~8 圈，两次运行还不一样）—— 同一输入、同一卡带，
+    // 末帧画面却不同，存档/rewind/录像比对全部失效。
+    //
+    // 判据是 mcaMainLoopLive（initRuntime 里游戏启动代码已跑完、显示已建好、
+    // 主循环正准备接帧），不是单纯的 online（online 在 gcStartup 之后就置位，
+    // 那时游戏还没初始化，第一帧会退回黑屏）。
+    int waited = 0;
+    for (; waited < 20000; ++waited) {
+        if ((pxt_vm_online() && mcaMainLoopLive) || mcaVmExited || panicCode)
+            break;
+#if defined(_WIN32)
+        Sleep(1);
+#else
+        usleep(1000);
+#endif
+    }
+    mcaTrace("[host] vm ready after %dms (online=%d live=%d)", waited, (int)pxt_vm_online(),
+             (int)mcaMainLoopLive);
 }
 
 static void *startFromUserWorker(void *fn) {

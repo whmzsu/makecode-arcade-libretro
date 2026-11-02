@@ -55,6 +55,21 @@ int pxt_vm_running();     // VM 线程是否仍在运行
 // 刻度调高后同样的墙钟时间里虚拟时间流得更快。
 void pxt_set_time_scale(int percent);
 
+// —— MCA：retro_serialize 快照（v1：同会话内恢复，见 mca_state.h）——
+//
+//   pxt_state_pause()  阻塞到 VM 线程到达安全点（0=ok，<0 失败）
+//   pxt_state_resume() 解除暂停（必须与 pause 成对；失败后也要调）
+//   pxt_state_save()   把全部 VM 状态写进 buf，返回字节数（<0 失败）
+//   pxt_state_load()   从 buf 恢复，0=ok；地址不匹配（换游戏/重启过）= -10
+//
+// 核心侧按 pxt_state_max_size() 分配固定缓冲：retro_serialize_size 必须
+// 恒定，RetroArch 的 rewind 环形缓冲按它一次性分配。
+unsigned pxt_state_max_size();
+int pxt_state_pause();
+void pxt_state_resume();
+int pxt_state_save(void* buf, unsigned cap);
+int pxt_state_load(const void* buf, unsigned size);
+
 } // extern "C"
 
 namespace mca {

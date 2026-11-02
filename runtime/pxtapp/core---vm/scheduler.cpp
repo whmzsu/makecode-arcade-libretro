@@ -1,4 +1,12 @@
 #include "pxt.h"
+#include "mca_state.h"
+#include "mca_tick.h"
+
+// MCA：随机状态存取（base/core.cpp），快照要带上它
+namespace pxt {
+unsigned mcaGetRandomState();
+void mcaSetRandomState(unsigned v);
+}
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -28,7 +36,11 @@
 static uint8_t in_xmalloc_panic;
 
 void *xmalloc(size_t sz) {
-    auto r = malloc(sz);
+    // MCA v0.2.10：calloc 语义（清零）。
+    // malloc 的旧内容会让"读到未初始化字段"的结果随进程堆历史变化 ——
+    // 同一输入的两次运行就不一样，存档 / rewind 无从确定。
+    // 分配量都在 fiber / 事件 / 栈副本这个量级，清零开销可忽略。
+    auto r = calloc(1, sz);
     if (r == NULL) {
         DMESG("failed to allocate %d bytes", sz);
         if (in_xmalloc_panic) {
@@ -72,7 +84,22 @@ namespace pxt {
 //   mcaRestartDone : 清理已做完，initRuntime 跳过 systemReset()
 volatile int mcaResetRequest = 0;
 volatile int mcaVmExited = 0;
+// MCA v0.2.10：主循环是否已经在"等前端要帧"的闸门上。
+// 宿主用它判断"VM 是否已完成 initRuntime 并且随时能出一帧" ——
+// 装载同步化（vmload.cpp 的 spinThread）等到它才返回，这样前端第 1 帧
+// 就能立刻拿到第 1 圈的画面，帧号与圈号从第一帧起严格对齐。
+volatile int mcaMainLoopLive = 0;
 static volatile int mcaRestartDone = 0;
+// MCA：快照暂停协议（pxt_state_pause/resume）。宿主线程在 retro_serialize /
+// unserialize 期间要求 VM 线程停到本安全点（mainRunLoop 顶部）：
+//   - 所有 fiber 的解释器状态要么在自己的 stackCopy，要么在 vmImg->stackBase
+//     共享操作数栈里；VM 线程不在 exec_loop 中间 → 不需要抓 C 栈
+//   - 暂停期间虚拟时钟不走（帧驱动：不取帧就不前进），恢复后 wakeTime
+//     语义不变，也不存在"暂停期间游戏时间溜走"
+// 最坏等待：exec_loop 一个 tick（毫秒级）/ update 的 50ms 帧等待 /
+// target_yield 的 1ms —— 宿主侧 2 秒超时足够。
+static volatile int mcaPauseRequest = 0;
+static volatile int mcaPaused = 0;
 
 // MCA PATCH 6（本项目）：重启路径埋点。
 //
@@ -115,24 +142,33 @@ static void mcaTraceOpen() {
     dmesg("mca trace: %s", mcaTracePathBuf);
 }
 
-// trace 同时写文件与 stderr：文件好找，stderr 会进 RetroArch 自己的日志。
+// trace 只写文件（互斥），**不写 stderr**。
+//
+// 早先版本同时写 stderr 想让日志进 RetroArch 自己的输出。问题是高频 trace
+// （例如排查时每圈主循环一行）会把 stderr 管道/终端写满：管道没人读、或
+// Windows 控制台逐字符输出，都会让**调用线程阻塞在 write 上** —— VM 线程
+// 卡在 trace 里，表现出来像是"暂停请求永远读不到"。日志路径已经在启动时
+// 用 dmesg() 报过一次，用户照着找文件即可。
+static pthread_mutex_t mcaTraceMutex = PTHREAD_MUTEX_INITIALIZER;
+
 void mcaTrace(const char *fmt, ...) {
     mcaTraceOpen();
     va_list ap;
-    va_start(ap, fmt);
+    pthread_mutex_lock(&mcaTraceMutex);
     if (mcaTraceFile) {
+        va_start(ap, fmt);
         vfprintf(mcaTraceFile, fmt, ap);
         fputc('\n', mcaTraceFile);
         fflush(mcaTraceFile);
-    }
-    va_end(ap);
-    if (mcaTraceFile != stderr) {
+        va_end(ap);
+    } else {
         va_start(ap, fmt);
         vfprintf(stderr, fmt, ap);
         fputc('\n', stderr);
         fflush(stderr);
         va_end(ap);
     }
+    pthread_mutex_unlock(&mcaTraceMutex);
 }
 
 DLLEXPORT void pxt_vm_trace(const char *msg) { mcaTrace("[host] %s", msg); }
@@ -249,11 +285,17 @@ void sleep_core_us(uint64_t us) {
 #endif
 }
 
+// MCA v0.2.10：target_yield 等「下一帧被前端取走」的信号，而不是睡固定
+// 时长（Windows 上 nanosleep 粒度实际 6-15ms，墙钟外推时钟下会把游戏压到
+// 6 倍慢）。帧驱动时钟下虚拟时间只在前端取帧时前进，这里只要在两件事之
+// 一时醒来：帧到了 / 兜底超时到了。具体等待由 mca_tick.cpp 按平台实现
+// （Windows 用 WinAPI 事件 —— winpthreads 的 cond 在竞争下会丢唤醒且超时
+// 不生效，实测把 VM 线程永久挂在 target_yield）。
 void target_yield() {
 #ifdef PXT_ESP32
     vTaskDelay(1);
 #else
-    sleep_core_us(1000);
+    mca_tick_wait(2);
 #endif
 }
 
@@ -271,54 +313,59 @@ void sleep_us(uint64_t us) {
 }
 
 #ifndef PXT_ESP32
-static uint64_t currTime() {
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    return tv.tv_sec * 1000000LL + tv.tv_usec;
-}
-
-// MCA PATCH 10：可缩放的 VM 时钟（快进/慢放的基础）。
+// MCA PATCH 10：虚拟时钟（快进 / 慢放 / 存档确定性的基础）。
 //
-// 游戏的节拍全部挂在 current_time_ms() 上：forever 循环每 20ms 一个 tick、
-// pause(ms) 等 wakeTime —— 都是墙钟。快进时前端以远高于 60fps 的频率调
-// retro_run，但墙钟不变，游戏照样 1x 跑，多余的画面请求只能拿到重复帧。
-// 把"现在几点"改成虚拟时钟后，核心侧把刻度调高，同样的墙钟时间里
-// 虚拟时间流得更快，游戏随之加速；音频是拉动式（fillSamples 按请求产出），
-// 自动跟随游戏速度，快进时的音频表现与其它核心一致（加速播放）。
+// 游戏的节拍全部挂在 current_time_ms() 上：forever 每 20ms 一个 tick、
+// pause(ms) 等 wakeTime —— 都是"现在几点"。墙钟不能用作游戏时间：
+// 前端以高于 60fps 的频率调 retro_run 时，墙钟不变，游戏不会加速；
+// 而且同一帧号对应的墙钟时刻每次都不同，存档 / rewind 无从确定。
 //
-// 刻度换基（rebase）只在 VM 线程做：current_time_us 的全部调用方都在
-// VM 线程，g_timeScalePct 是唯一跨线程写入口，int 宽度天然原子。
-static volatile int g_timeScalePct = 100; // 100 = 实时；核心侧快进时写 400
-static uint64_t g_virtBaseUs = 0;         // 换基时刻的虚拟时间
-static uint64_t g_wallBaseUs = 0;         // 换基时刻的墙钟
-static int g_appliedPct = 100;            // VM 线程视角已生效的刻度
+// v0.2.10 的模型是**前端请求驱动、一圈一帧**：
+//   · 前端每请求一帧 → g_frameRequests++（并发 mca_tick_signal 唤醒 VM）
+//   · VM 主循环每圈先等一张许可，然后 g_virtTimeNum += 一帧、发布一帧
+// 于是 VM 的圈数严格等于前端帧数，同一帧号恒定对应同一虚拟时刻，
+// 同一输入序列 + 同一快照必然产出逐字节相同的画面。
+//
+// 快进 / 慢放不再需要倍率：前端多取帧游戏就快（虚拟时间按帧推进），
+// 前端少取帧游戏就慢，这是 libretro 的固有语义（RetroArch 的 fast-forward
+// 就是提高 retro_run 频率）。pxt_set_time_scale 保留为兼容接口，不再缩放
+// 时间步长 —— 缩放会让一层循环里跳过多个 20ms 周期，forever 丢 tick，
+// 正是确定性崩掉的来源。
+static volatile uint64_t g_frameRequests = 0; // 前端线程写：请求了几帧
+static uint64_t g_loops = 0;                  // VM 线程写：已推进了几圈
+static uint64_t g_virtTimeNum = 0;            // VM 线程本地推进，单位 1/3 µs
+// 已发布的帧序号（= 发出去的第几帧）。前端按序号配对，不靠 bool 标志。
+// screen.cpp 的发布函数在同一个锁内写它，保证"序号可见 ⇒ 缓冲已就绪"。
+volatile uint64_t mcaPubSeq = 0;
 
 DLLEXPORT void pxt_set_time_scale(int percent) {
-    if (percent < 1) percent = 1;
-    if (percent > 10000) percent = 10000;
-    g_timeScalePct = percent;
+    (void)percent; // 见上面的说明：快进由前端取帧频率决定
 }
 
+// 前端每请求一帧调一次（screen.cpp 的 get_pixels 开头），返回本次请求的序号。
+// 前端必须等到 pxt_vm_pub_seq() >= 该序号才取画面 —— 这样"请求 N 拿到第 N 帧"，
+// 不会因为 bool 标志被后续帧覆盖而错配（实测会积压 10+ 帧，末帧取决于
+// unload 时 VM 恰好跑到哪里，同一输入两次运行结果不同）。
+DLLEXPORT uint64_t pxt_vm_frame_request() {
+    g_frameRequests++;
+    mca_tick_signal();
+    return g_frameRequests;
+}
+
+DLLEXPORT uint64_t pxt_vm_pub_seq() {
+    return mcaPubSeq;
+}
+
+// VM 线程：还有没有未处理的帧请求
+static int mca_frame_requested() {
+    return g_frameRequests > g_loops;
+}
+
+// 一帧的虚拟时间：1/60 秒 = 16666.7 µs，单位是 1/3 µs → 50000
+#define MCA_FRAME_STEP 50000u
+
 uint64_t current_time_us() {
-    const uint64_t wall = currTime();
-    const int pct = g_timeScalePct;
-
-    if (!g_wallBaseUs) {
-        // 首次调用：虚拟时间从 0 起步（与旧 startTime 语义一致）
-        g_wallBaseUs = wall;
-        g_virtBaseUs = 0;
-        g_appliedPct = pct;
-    } else if (pct != g_appliedPct) {
-        // 刻度变了：把当前虚拟时刻冻结成新基准，之后按新刻度外推。
-        // 必须用**旧**刻度把最后一段墙钟折算完，否则换基瞬间时间会跳。
-        g_virtBaseUs += (uint64_t)((double)(wall - g_wallBaseUs)
-                                   * (double)g_appliedPct / 100.0);
-        g_wallBaseUs = wall;
-        g_appliedPct = pct;
-    }
-
-    return g_virtBaseUs +
-           (uint64_t)((double)(wall - g_wallBaseUs) * (double)g_appliedPct / 100.0);
+    return g_virtTimeNum / 3;
 }
 #endif
 
@@ -527,16 +574,48 @@ static void hostRestartCleanup();
 
 static void mainRunLoop() {
     FiberContext *f = NULL;
+    mcaMainLoopLive = 1;
     for (;;) {
         // MCA PATCH 5：宿主请求重启 → 退出主循环，交给 initRuntime 末尾的
         // systemReset()（释放 fiber/GC 后 pthread_exit），宿主随后重新 start。
         if (mcaResetRequest) {
             mcaResetRequest = 0;
             mcaTrace("[vm] reset request seen");
+            // 时钟对账：loops 应等于前端已请求帧数，virtMs = loops/60 秒。
+            // 对不上就是帧闸门/序号配对出了问题（确定性回归的第一线索）。
+            mcaTrace("[vm] clock: loops=%llu requests=%llu virtMs=%llu",
+                     (unsigned long long)g_loops, (unsigned long long)g_frameRequests,
+                     (unsigned long long)(g_virtTimeNum / 3000));
             hostRestartCleanup();
             mcaTrace("[vm] cleanup returned, leaving main loop");
+            mcaMainLoopLive = 0;
             return;   // initRuntime 看到 mcaRestartDone 就不再 systemReset()
         }
+        // MCA：快照暂停。宿主拿到 mcaPaused 后搬状态（save/load 都可能发生），
+        // 恢复时 fiber 链整个被替换 —— 本地 f 必须作废，否则下一次 while(f)
+        // 会踩已释放的旧 fiber
+        if (mcaPauseRequest) {
+            mcaPaused = 1;
+            // 暂停期间低占用地等宿主搬完状态（sleep_core_us 的亚毫秒在
+            // Windows 上退化成 Sleep(0)，会把一个核空转满）
+            while (mcaPauseRequest)
+                mca_tick_wait(5);
+            mcaPaused = 0;
+            f = NULL;
+            continue;
+        }
+        // 一圈一帧：等前端请求下一帧再推进。
+        // 没有这个同步，VM 的圈数会随调度在「前端帧数」附近漂移，虚拟时间
+        // 跟着漂，同一输入的两次运行画面就分岔（存档确定性的前提）。
+        if (!mca_frame_requested()) {
+            mca_tick_wait(5);
+            continue;
+        }
+        g_loops++;
+        g_virtTimeNum += MCA_FRAME_STEP;
+        // 发布一帧给前端（内容 = 上一圈逻辑执行完后的画面缓冲）。
+        // 放在圈顶而不是圈尾：圈内有多处 continue，放圈尾会漏帧，帧数就对不上了。
+        pxt_screen_publish(g_loops); // 拷缓冲 + 置序号 + 广播（同一把锁）
         if (panicCode)
             return;
         wakeFibers();
@@ -605,9 +684,12 @@ static void mainRunLoop() {
     }
 }
 
+// MCA：通知 ID 从函数内 static 提到文件级 —— 快照要把它一起搬走，
+// 否则恢复后新分配的通知 ID 可能与恢复回来的 promise 等待值撞号
+static volatile int mcaNotifyId;
+
 int allocateNotifyEvent() {
-    static volatile int notifyId;
-    return ++notifyId;
+    return ++mcaNotifyId;
 }
 
 void raiseEvent(int id, int event) {
@@ -646,6 +728,8 @@ void target_startup();
 
 void initRuntime() {
     current_time_ms();
+    mca_tick_init(); // 帧节拍原语（幂等；重启路径上重复调用无害）
+    mca_pub_init();  // 画面发布事件（前端等帧用，同样幂等）
     target_startup();
 
     setupThread((TValue)vmImg->entryPoint);
@@ -683,6 +767,11 @@ void *gcAllocBlock(size_t sz) {
 #if defined(PXT64) || defined(__MINGW32__)
     if (!gcBase) {
         gcBase = (uint8_t *)xmalloc(1 << PXT_VM_HEAP_ALLOC_BITS);
+        // MCA v0.2.10：堆清零。malloc 的旧内容会让"读到未初始化字段"的
+        // 行为随进程堆历史变化 —— 同一输入的两次运行结果就不同，存档/rewind
+        // 的确定性无从谈起（实测清掉之前 20 帧就跑岔）。1MB 一次 memset 的开销
+        // 只在开局付一次。
+        memset(gcBase, 0, (size_t)1 << PXT_VM_HEAP_ALLOC_BITS);
         currPtr = gcBase;
     }
     void *r = currPtr;
@@ -862,6 +951,339 @@ void systemReset() {
 
     pthread_exit(NULL);
 #endif
+}
+
+
+// ===== MCA：retro_serialize 快照（v1：同会话内恢复）=====
+//
+// 设计与约束见 mca_state.h。协调器在本文件（fiber/event/时钟/通知 ID 这些
+// 调度器静态都在这里）；GC 静态经 mcaGcGetState/SetState（gc.cpp），
+// 单例指针经各文件生成的 mca_snap_* 访问器（SINGLETON 宏 + sound.cpp 的 dac）。
+//
+// 缓冲布局（同进程原生字节序，不做可移植编码——v1 只承诺同会话恢复）：
+//   [McaSnapHeader]
+//   [GC 堆 heapUsed 字节]
+//   [vmImg->stackBase 共享操作数栈]
+//   fiber 记录 ×N：{McaSnapFiber}[FiberContext][stackCopy 内容]
+//   event 记录 ×N：{McaSnapEvent}[Event]
+//   [McaSchedState]（调度器/时钟/单例静态的值）
+//   [gcRoots 内容][workQueue 内容]（LLSegment 缓冲，一般长度 0）
+
+#define MCA_SNAP_MAGIC    0x3141434Du  // "MCA1"
+#define MCA_SNAP_VERSION  1u
+#define MCA_SNAP_MAX_FIBERS 64
+#define MCA_SNAP_MAX_EVENTS 512
+
+struct McaSnapHeader {
+    uint32_t magic;
+    uint32_t version;
+    uint32_t heapUsed;
+    uint32_t numFibers;
+    uint32_t numEvents;
+    uint32_t stackBaseBytes;
+    uint32_t totalSize;
+    uint32_t reserved;
+    uintptr_t gcBase;   // 恢复校验：非同一会话直接拒绝
+    uintptr_t vmImg;
+    McaGcState gc;
+};
+
+struct McaSnapFiber {
+    FiberContext *ctxAddr;
+    uint32_t ctxBytes;
+    uint32_t copyBytes;
+    TValue *copyAddr;
+};
+
+struct McaSnapEvent {
+    Event *addr;
+    uint32_t bytes;
+    uint32_t reserved;
+};
+
+struct McaSchedState {
+    FiberContext *allFibers, *currentFiber;
+    Event *eventHead_, *eventTail_;
+    Event lastEvent_;
+    int panicCode_;
+    int notifyId_;
+    uint64_t virtTimeNum_;  // 按帧推进的虚拟时钟（1/3 µs 单位）
+    uint64_t loops_;        // 已推进的圈数（前端请求计数要对齐它）
+    unsigned randomState_;  // LFSR 随机状态（不存的话恢复后随机序列会漂）
+    void *instWDisplay_, *instWSynthesizer_, *dac_;
+};
+
+extern "C" {
+void *mca_snap_WDisplay();
+void mca_unsnap_WDisplay(void *p);
+void *mca_snap_WSynthesizer();
+void mca_unsnap_WSynthesizer(void *p);
+void *mcaSnapDac();
+void mcaUnsnapDac(void *p);
+}
+
+namespace {
+
+struct McaSnapWriter {
+    uint8_t *p, *end;
+    bool put(const void *src, size_t n) {
+        if ((size_t)(end - p) < n)
+            return false;
+        if (src)
+            memcpy(p, src, n);
+        else
+            memset(p, 0, n);
+        p += n;
+        return true;
+    }
+};
+
+struct McaSnapReader {
+    const uint8_t *p, *end;
+    bool get(void *dst, size_t n) {
+        if ((size_t)(end - p) < n)
+            return false;
+        memcpy(dst, p, n);
+        p += n;
+        return true;
+    }
+};
+
+} // anonymous namespace
+
+DLLEXPORT int pxt_state_pause() {
+    if (!pxtVmLive || mcaResetRequest)
+        return -1; // VM 未运行 / 正在重启，没有安全点可等
+    mcaPauseRequest = 1;
+
+    // 超时用**墙钟差**判定，不要用「循环次数 × 睡眠时长」：
+    // sleep_core_us(500) 在 Windows 上把亚毫秒截断成 Sleep(0)，4000 次循环
+    // 实际只跑几毫秒 —— 按次数算的话暂停窗口约等于 0，VM 还没来得及回到
+    // 循环顶就被判超时（实测 tick enter=9/ret=8，VM 正睡在 target_yield 里）。
+    // 这里改成 2 秒真实预算，VM 最坏 15ms 一醒（Sleep 粒度），足够。
+    struct timeval t0;
+    gettimeofday(&t0, NULL);
+    for (;;) {
+        if (mcaPaused)
+            break;
+        struct timeval t1;
+        gettimeofday(&t1, NULL);
+        long elapsedMs = (t1.tv_sec - t0.tv_sec) * 1000L + (t1.tv_usec - t0.tv_usec) / 1000L;
+        if (elapsedMs >= 2000) {
+            mcaPauseRequest = 0;
+            return -2; // 超时：VM 卡在意外位置，放弃快照而不是挂死前端
+        }
+        sleep_core_us(1000);
+    }
+    return 0;
+}
+
+DLLEXPORT void pxt_state_resume() {
+    mcaPauseRequest = 0;
+}
+
+// retro_serialize_size 必须恒定（RetroArch 按它一次性分配/校验），所以给
+// 最坏情况上界：满 1MB 堆 + 64 fiber × 满栈副本 + 512 event + 静态区。
+// 实际快照远小于此（一般 ~几十 KB + 已用堆）。
+DLLEXPORT unsigned pxt_state_max_size() {
+    size_t n = 0;
+    n += sizeof(McaSnapHeader);
+    n += (size_t)1 << PXT_VM_HEAP_ALLOC_BITS;                    // GC 堆
+    n += VM_STACK_SIZE * sizeof(TValue);                         // 共享操作数栈
+    n += MCA_SNAP_MAX_FIBERS *
+         (sizeof(McaSnapFiber) + sizeof(FiberContext) +
+          VM_STACK_SIZE * sizeof(TValue));                       // fiber+栈副本上界
+    n += MCA_SNAP_MAX_EVENTS * (sizeof(McaSnapEvent) + sizeof(Event));
+    n += sizeof(McaSchedState) + 4096;                           // 静态区+零头
+    return (unsigned)n;
+}
+
+DLLEXPORT int pxt_state_save(void *buf, unsigned cap) {
+    if (!mcaPaused)
+        return -20; // 必须先 pxt_state_pause()
+
+    McaGcState gc;
+    mcaGcGetState(&gc);
+    gc.gcAllocPtr = gcAllocPtr; // 切块游标本体在本文件
+    if (!gc.gcBase || !vmImg)
+        return -1;  // VM 未启动
+    if (gc.inGC || gc.pendingArrays)
+        return -2;  // 不在安全点（到不了，防御）
+    size_t heapUsed = (uint8_t *)gc.gcAllocPtr - (uint8_t *)gc.gcBase;
+    if (heapUsed > (size_t)1 << PXT_VM_HEAP_ALLOC_BITS)
+        return -3;
+
+    int numFibers = 0;
+    for (auto f = allFibers; f; f = f->next)
+        if (++numFibers > MCA_SNAP_MAX_FIBERS)
+            return -4;
+    int numEvents = 0;
+    for (auto e = eventHead; e; e = e->next)
+        if (++numEvents > MCA_SNAP_MAX_EVENTS)
+            return -5;
+
+    McaSnapWriter w{(uint8_t *)buf, (uint8_t *)buf + cap};
+    McaSnapHeader h;
+    memset(&h, 0, sizeof(h));
+    h.magic = MCA_SNAP_MAGIC;
+    h.version = MCA_SNAP_VERSION;
+    h.heapUsed = (uint32_t)heapUsed;
+    h.numFibers = (uint32_t)numFibers;
+    h.numEvents = (uint32_t)numEvents;
+    h.stackBaseBytes = (uint32_t)(VM_STACK_SIZE * sizeof(TValue));
+    h.gcBase = (uintptr_t)gc.gcBase;
+    h.vmImg = (uintptr_t)vmImg;
+    h.gc = gc;
+    if (!w.put(&h, sizeof(h)))
+        return -6;
+    if (!w.put(gc.gcBase, heapUsed))
+        return -6;
+    if (!w.put(vmImg->stackBase, h.stackBaseBytes))
+        return -6;
+    for (auto f = allFibers; f; f = f->next) {
+        McaSnapFiber r;
+        r.ctxAddr = f;
+        r.ctxBytes = (uint32_t)sizeof(FiberContext);
+        r.copyAddr = f->stackCopy;
+        r.copyBytes = f->stackCopy ? (uint32_t)(f->stackCopySize * (int)sizeof(TValue)) : 0;
+        if (!w.put(&r, sizeof(r)) || !w.put(f, sizeof(FiberContext)))
+            return -6;
+        if (r.copyBytes && !w.put(f->stackCopy, r.copyBytes))
+            return -6;
+    }
+    for (auto e = eventHead; e; e = e->next) {
+        McaSnapEvent r;
+        r.addr = e;
+        r.bytes = (uint32_t)sizeof(Event);
+        if (!w.put(&r, sizeof(r)) || !w.put(e, sizeof(Event)))
+            return -6;
+    }
+    McaSchedState st;
+    memset(&st, 0, sizeof(st));
+    st.allFibers = allFibers;
+    st.currentFiber = currentFiber;
+    st.eventHead_ = eventHead;
+    st.eventTail_ = eventTail;
+    st.lastEvent_ = lastEvent;
+    st.panicCode_ = panicCode;
+    st.notifyId_ = mcaNotifyId;
+    st.virtTimeNum_ = g_virtTimeNum;
+    st.loops_ = g_loops;
+    st.randomState_ = mcaGetRandomState();
+    st.instWDisplay_ = mca_snap_WDisplay();
+    st.instWSynthesizer_ = mca_snap_WSynthesizer();
+    st.dac_ = mcaSnapDac();
+    if (!w.put(&st, sizeof(st)))
+        return -6;
+    if (gc.gcRootsLen &&
+        !w.put(gc.gcRootsData, gc.gcRootsLen * sizeof(TValue)))
+        return -6;
+    if (gc.workQueueLen &&
+        !w.put(gc.workQueueData, gc.workQueueLen * sizeof(TValue)))
+        return -6;
+
+    size_t used = (size_t)(w.p - (uint8_t *)buf);
+    ((McaSnapHeader *)buf)->totalSize = (uint32_t)used;
+    mcaTrace("[snap] saved %zu bytes (heap %zu, fibers %d, events %d)",
+             used, heapUsed, numFibers, numEvents);
+    return (int)used;
+}
+
+DLLEXPORT int pxt_state_load(const void *buf, unsigned size) {
+    if (!mcaPaused)
+        return -20;
+
+    McaSnapReader r{(const uint8_t *)buf, (const uint8_t *)buf + size};
+    McaSnapHeader h;
+    if (!r.get(&h, sizeof(h)) || h.magic != MCA_SNAP_MAGIC || h.version != MCA_SNAP_VERSION)
+        return -1;
+    McaGcState cur;
+    mcaGcGetState(&cur);
+    // v1 只支持同会话恢复：堆与镜像必须还在快照时的地址
+    if (!cur.gcBase || !vmImg)
+        return -1;
+    if (h.gcBase != (uintptr_t)cur.gcBase || h.vmImg != (uintptr_t)vmImg)
+        return -10;
+    if (h.heapUsed > (size_t)1 << PXT_VM_HEAP_ALLOC_BITS)
+        return -3;
+    if (h.gc.gcAllocPtr != (uint8_t *)h.gc.gcBase + h.heapUsed)
+        return -3;
+    if (h.stackBaseBytes != VM_STACK_SIZE * sizeof(TValue))
+        return -11;
+
+    // 先释放当前 fiber/event：恢复会整体替换链。快照块地址可能已被快照后
+    // 新分配的对象复用，覆写它是安全的 —— 所有引用根（GC 堆 / 调度器静态 /
+    // fiber / event）都会被恢复成快照时的值，没有任何东西再指向新对象
+    for (auto f = allFibers; f;) {
+        auto n = f->next;
+        xfree(f->stackCopy);
+        xfree(f);
+        f = n;
+    }
+    allFibers = NULL;
+    currentFiber = NULL;
+    for (auto e = eventHead; e;) {
+        auto n = e->next;
+        xfree(e);
+        e = n;
+    }
+    eventHead = eventTail = NULL;
+
+    if (!r.get(cur.gcBase, h.heapUsed))          // GC 堆内容
+        return -12;
+    if (!r.get(vmImg->stackBase, h.stackBaseBytes))
+        return -12;
+    for (uint32_t i = 0; i < h.numFibers; ++i) {
+        McaSnapFiber rec;
+        if (!r.get(&rec, sizeof(rec)) || rec.ctxBytes != sizeof(FiberContext))
+            return -12;
+        if (!r.get(rec.ctxAddr, rec.ctxBytes))
+            return -12;
+        if (rec.copyBytes && !r.get(rec.copyAddr, rec.copyBytes))
+            return -12;
+    }
+    for (uint32_t i = 0; i < h.numEvents; ++i) {
+        McaSnapEvent rec;
+        if (!r.get(&rec, sizeof(rec)) || rec.bytes != sizeof(Event))
+            return -12;
+        if (!r.get(rec.addr, rec.bytes))
+            return -12;
+    }
+    McaSchedState st;
+    if (!r.get(&st, sizeof(st)))
+        return -12;
+
+    // GC 静态结构先行（gcBase/gcAllocPtr/firstBlock/globals...），堆内容上面已写
+    mcaGcSetState(&h.gc);
+    gcAllocPtr = (uint8_t *)h.gc.gcAllocPtr;
+
+    allFibers = st.allFibers;
+    currentFiber = st.currentFiber;
+    eventHead = st.eventHead_;
+    eventTail = st.eventTail_;
+    lastEvent = st.lastEvent_;
+    panicCode = st.panicCode_;
+    mcaNotifyId = st.notifyId_;
+    g_virtTimeNum = st.virtTimeNum_;
+    // 恢复后把圈数对齐到前端已请求的帧数：快照这一帧的许可已经被消费掉了，
+    // 若沿用旧计数，主循环会以为还有一帧待跑（或反过来多跑一圈）。
+    g_loops = g_frameRequests;
+    mcaSetRandomState(st.randomState_);
+    mca_unsnap_WDisplay(st.instWDisplay_);
+    mca_unsnap_WSynthesizer(st.instWSynthesizer_);
+    mcaUnsnapDac(st.dac_);
+
+    // LLSegment 缓冲内容（结构里的 data 指针已恢复）
+    if (h.gc.gcRootsLen &&
+        !r.get(h.gc.gcRootsData, h.gc.gcRootsLen * sizeof(TValue)))
+        return -12;
+    if (h.gc.workQueueLen &&
+        !r.get(h.gc.workQueueData, h.gc.workQueueLen * sizeof(TValue)))
+        return -12;
+
+    mcaTrace("[snap] loaded (heap %u, fibers %u, events %u)",
+             h.heapUsed, h.numFibers, h.numEvents);
+    return 0;
 }
 
 } // namespace pxt

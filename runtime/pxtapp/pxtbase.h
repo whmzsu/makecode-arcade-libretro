@@ -602,7 +602,15 @@ class LLSegment {
 
     TValue get(unsigned i) { return i < length ? data[i] : NULL; }
     unsigned getLength() { return length; };
+    unsigned getCapacity() { return size; }
     TValue *getData() { return data; }
+
+    // MCA：快照恢复（同会话，data 指针原样写回；配合内容搬运使用）
+    void mcaRestore(void *d, unsigned len, unsigned cap) {
+        data = (TValue *)d;
+        length = len;
+        size = cap;
+    }
 };
 
 // A ref-counted collection of either primitive or ref-counted objects (String, Image,
@@ -1250,13 +1258,21 @@ bool removeElement(RefCollection *c, TValue x);
 
 #define JOIN(a, b) a##b
 /// Defines getClassName() function to fetch the singleton
+// MCA：单例的快照访问器（SINGLETON 展开时自动生成）。instX 指向 GC 堆，
+// 堆回绕恢复后必须一起写回，否则是野指针（见 mca_state.h）。
+// PXTEXT "C"：生成 C 链接符号，调度器的快照协调器按名声明即可调用
+#define MCA_SNAP_ACCESSOR(ClassName)                                                               \
+    PXTEXT "C" void *JOIN(mca_snap_, ClassName)() { return (void *)JOIN(inst, ClassName); }        \
+    PXTEXT "C" void JOIN(mca_unsnap_, ClassName)(void *p) { JOIN(inst, ClassName) = (ClassName *)p; }
+
 #define SINGLETON(ClassName)                                                                       \
     static ClassName *JOIN(inst, ClassName);                                                       \
     ClassName *JOIN(get, ClassName)() {                                                            \
         if (!JOIN(inst, ClassName))                                                                \
             JOIN(inst, ClassName) = new ClassName();                                               \
         return JOIN(inst, ClassName);                                                              \
-    }
+    }                                                                                              \
+    MCA_SNAP_ACCESSOR(ClassName)
 
 /// Defines getClassName() function to fetch the singleton if PIN present
 #define SINGLETON_IF_PIN(ClassName, pin)                                                           \

@@ -353,7 +353,10 @@ def parse_args(argv):
     pos = []
     cfg = {"bmp": None, "press": None, "press_at": 4, "release": None, "dry": False,
            "seq": None, "switch": None, "dlclose": False, "data_dir": None,
-           "turbo": False}
+           "turbo": False,
+           "save_state_at": {},   # {帧号: 路径}
+           "load_state_at": {},   # {帧号: 路径}
+           "hash_every": 0}       # >0：每 N 帧输出一次画面哈希
     for a in argv:
         if a.startswith("--bmp="):
             cfg["bmp"] = a.split("=", 1)[1]
@@ -378,6 +381,14 @@ def parse_args(argv):
             FASTFORWARD = True                     # 对核心回答"正在快进"
         elif a == "--turbo":
             cfg["turbo"] = True                    # 帧循环不 sleep（测快进用）
+        elif a.startswith("--save-state-at="):
+            frm, path = a.split("=", 1)[1].split(":", 1)
+            cfg["save_state_at"][int(frm)] = path
+        elif a.startswith("--load-state-at="):
+            frm, path = a.split("=", 1)[1].split(":", 1)
+            cfg["load_state_at"][int(frm)] = path
+        elif a.startswith("--hash-every="):
+            cfg["hash_every"] = max(1, int(a.split("=", 1)[1]))
         elif a.startswith("--switch="):
             cfg["switch"] = a.split("=", 1)[1]     # 换游戏：第二张卡带路径
         elif a == "--dlclose":
@@ -465,6 +476,13 @@ def main():
     lib.retro_load_game.restype = ctypes.c_bool
     lib.retro_api_version.restype = ctypes.c_uint
     lib.retro_set_controller_port_device.argtypes = [ctypes.c_uint, ctypes.c_uint]
+    # MCA：存档快照三件套（有就绑，老核心没有也不报错）
+    if hasattr(lib, "retro_serialize_size"):
+        lib.retro_serialize_size.restype = ctypes.c_size_t
+        lib.retro_serialize.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
+        lib.retro_serialize.restype = ctypes.c_bool
+        lib.retro_unserialize.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
+        lib.retro_unserialize.restype = ctypes.c_bool
 
     say("== 3. 前端回调注入")
     cbs = [ENV_CB(env_cb), VIDEO_CB(video_cb), AUDIO_CB(audio_cb),
@@ -572,11 +590,37 @@ def main():
                 HELD.discard(press_id)
                 say(f"   [host] frame {i}: 松开 {cfg['press']}")
             lib.retro_run()
+            # MCA：帧号精确触发的快照存/取（确定性验证用）
+            if hasattr(lib, "retro_serialize_size"):
+                if i in cfg["save_state_at"]:
+                    sz = lib.retro_serialize_size()
+                    buf = (ctypes.c_char * sz)()
+                    ok = lib.retro_serialize(buf, sz)
+                    if ok:
+                        with open(cfg["save_state_at"][i], "wb") as fh:
+                            fh.write(bytes(buf))
+                        say(f"   [host] frame {i}: 快照已存 -> "
+                            f"{cfg['save_state_at'][i]}（{sz} 字节容量）")
+                    else:
+                        say(f"   [host] frame {i}: [FAIL] retro_serialize 失败")
+                if i in cfg["load_state_at"]:
+                    with open(cfg["load_state_at"][i], "rb") as fh:
+                        data = fh.read()
+                    sz = lib.retro_serialize_size()
+                    buf = (ctypes.c_char * sz)()
+                    ctypes.memmove(buf, data[:sz], min(len(data), sz))
+                    ok = lib.retro_unserialize(buf, sz)
+                    say(f"   [host] frame {i}: 恢复快照 "
+                        f"{cfg['load_state_at'][i]} -> {'OK' if ok else '[FAIL]'}")
             if (i + 1) % 30 == 0:
                 say(f"   [{tag}] frame {i + 1}: video={stats['video_frames']} "
                     f"audio_frames={stats['audio_frames']} "
                     f"audio_peak(近30帧)={stats['audio_peak_win']}")
                 stats["audio_peak_win"] = 0
+            # --hash-every=N：逐帧哈希，用于定位"两次运行从第几帧分叉"
+            if cfg.get("hash_every") and (i + 1) % cfg["hash_every"] == 0 and stats["last_frame"]:
+                import hashlib
+                say(f"FRAME-HASH {i + 1} {hashlib.md5(stats['last_frame'][0]).hexdigest()[:16]}")
             if not cfg["turbo"]:
                 time.sleep(0.016)
         return time.time() - t_start
@@ -595,6 +639,11 @@ def main():
         f"{frames / dt:.1f} fps 实际节拍")
     if cfg["bmp"] and stats["last_frame"]:
         write_bmp565(cfg["bmp"], stats["last_frame"])
+    if stats["last_frame"]:
+        import hashlib
+        h = hashlib.md5(stats["last_frame"][0]).hexdigest()
+        say(f"FINAL-FRAME-HASH {h}  ({stats['last_frame'][1]}x{stats['last_frame'][2]}, "
+            f"独立帧 {stats['distinct']})")
 
     # ---- 12. 换游戏：unload -> load 下一张卡带（前端「加载内容」走的正是这条路）----
     # --switch=a,b,c 可以连着换多张（真机上玩家会反复切游戏，每次都是一次

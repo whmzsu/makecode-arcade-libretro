@@ -1,4 +1,5 @@
 #include "pxtbase.h"
+#include "mca_state.h"
 
 #ifndef GC_BLOCK_SIZE
 #define GC_BLOCK_SIZE (1024 * 16)
@@ -231,6 +232,42 @@ LLSegment workQueue; // (ab)used by consString making
 static GCBlock *firstBlock;
 static RefBlock *firstFree;
 static uint8_t *midPtr;
+
+// ===== MCA：retro_serialize 快照钩子（见 mca_state.h）=====
+// 只搬静态变量的值；LLSegment 的缓冲内容由调用方（scheduler.cpp）按
+// len * sizeof(TValue) 单独搬运。安全点约束见结构注释。
+void mcaGcGetState(McaGcState *s) {
+    memset(s, 0, sizeof(*s));
+    s->gcBase = gcBase;
+    // gcAllocPtr 的本体在 scheduler.cpp（切块游标），由协调器自己填
+    s->firstBlock = firstBlock;
+    s->firstFree = firstFree;
+    s->midPtr = midPtr;
+    s->inGC = inGC;
+    s->globals = globals;
+    s->pendingArrays = pendingArrays;
+    s->gcRootsData = gcRoots.getData();
+    s->gcRootsLen = gcRoots.getLength();
+    s->gcRootsSize = 0; // size 私有；恢复用不到（长度即所需）
+    s->workQueueData = workQueue.getData();
+    s->workQueueLen = workQueue.getLength();
+    s->workQueueSize = 0;
+    memcpy(s->stats, &gcStats, sizeof(s->stats));
+}
+
+void mcaGcSetState(const McaGcState *s) {
+    gcBase = (uint8_t *)s->gcBase;
+    // gcAllocPtr 由协调器写回（本文件不可见）
+    firstBlock = (GCBlock *)s->firstBlock;
+    firstFree = (RefBlock *)s->firstFree;
+    midPtr = (uint8_t *)s->midPtr;
+    inGC = s->inGC;
+    globals = (TValue *)s->globals;
+    pendingArrays = (PendingArray *)s->pendingArrays;
+    gcRoots.mcaRestore(s->gcRootsData, s->gcRootsLen, s->gcRootsSize);
+    workQueue.mcaRestore(s->workQueueData, s->workQueueLen, s->workQueueSize);
+    memcpy(&gcStats, s->stats, sizeof(s->stats));
+}
 
 static bool inGCArea(void *ptr) {
     for (auto block = firstBlock; block; block = block->next) {
