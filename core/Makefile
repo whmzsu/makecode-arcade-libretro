@@ -77,6 +77,12 @@ ifneq (,$(findstring win,$(platform)))
    # Windows PE 不需要 -fPIC；MinGW 对 -fPIC 只会多一层间接
    CXXFLAGS := $(filter-out -fPIC,$(CXXFLAGS))
    CFLAGS   := $(filter-out -fPIC,$(CFLAGS))
+   # _WIN32_WINNT：mingw-gcc 默认按 XP（0x0502）裁 windows.h，而
+   # runtime/pxtapp/core---vm/platform.cpp 用了 GetTickCount64（Vista+），
+   # 不抬到 Win7 就是 "‘GetTickCount64’ was not declared in this scope"。
+   # zig 的 mingw 头默认已经够高，所以本地 zig 构建看不出这个问题。
+   CXXFLAGS += -D_WIN32_WINNT=0x0601
+   CFLAGS   += -D_WIN32_WINNT=0x0601
 else ifneq (,$(findstring osx,$(platform)))
    TARGET  := $(CORE_DIR)/$(TARGET_NAME).dylib
    LDFLAGS += -dynamiclib -undefined dynamic_lookup

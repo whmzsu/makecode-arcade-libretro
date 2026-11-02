@@ -80,7 +80,11 @@ fi
 
 # 目标形态
 case "$TAG" in
-  *windows*) EXT="dll"; LINK_EXTRA=(-shared -Wl,--export-all-symbols) ;;
+  *windows*) EXT="dll"; LINK_EXTRA=(-shared -Wl,--export-all-symbols)
+             # mingw-gcc 默认按 XP（0x0502）裁 windows.h，platform.cpp 用了
+             # GetTickCount64（Vista+），不抬到 Win7 编不过（zig 的头默认够高，
+             # 所以只有换 gcc 时才暴露）
+             TARGET_FLAGS=("${TARGET_FLAGS[@]}" -D_WIN32_WINNT=0x0601) ;;
   *macos*)   EXT="dylib"; LINK_EXTRA=(-dynamiclib) ;;
   *android*) # -static-libstdc++：把 libc++ 静态链进去，产物只依赖 libc/libm/libdl，
              # RetroArch 加载插件时无需 libc++_shared.so（不同 App 的 STL 版本差异会炸）
