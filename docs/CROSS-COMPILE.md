@@ -89,6 +89,31 @@ aarch64-linux-android21        ELF    64-bit  AArch64      bionic API21     9555
   aarch64-linux-android21        libm.so libdl.so libc.so
 ```
 
+## Windows：zig 与 gcc（官方 buildbot / GitHub Actions）
+
+zig 编 `x86_64-windows-gnu` 时默认把 `_WIN32_WINNT` 定在 `0x0a00`（Win10）；
+**mingw-gcc 不定**，走 `_mingw.h` 里的 XP 默认（`0x0502`）。这个差别在
+`runtime/pxtapp/core---vm/platform.cpp` 上会直接炸：
+
+```
+platform.cpp:21:18: error: 'GetTickCount64' was not declared in this scope
+```
+
+`GetTickCount64` 是 Vista+ 的 API。本地一直用 zig 编，这个坑看不到；官方
+buildbot 的 `windows-x64-mingw` 模板和 GitHub Actions 的 windows job 都是
+mingw-gcc，一上就红。
+
+处理方式：`core/src/win32_baseline.h` + 编译时 `-include`（`core/Makefile` 与
+`tools/build_target.sh` 的 Windows 分支都加了）。头里用 `#ifndef` 兜底：
+
+| 编译器 | `_WIN32_WINNT` | 结果 |
+|---|---|---|
+| mingw-gcc | 未定义 → 垫片给 `0x0601`（Win7） | 编得过 |
+| zig | 已给 `0x0a00` → 垫片不生效 | 保持 Win10 基线，零告警 |
+
+不要改成命令行 `-D_WIN32_WINNT=0x0601`：在 zig 下每个编译单元会报
+`-Wmacro-redefined`，而且把 zig 的基线从 Win10 降下来。
+
 ## Android：为什么走 NDK clang 而不是 zig
 
 zig 能解析 `-target aarch64-linux-android`，也接受 `--sysroot` 指向 NDK，但会撞上

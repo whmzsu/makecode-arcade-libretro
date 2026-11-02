@@ -1,5 +1,7 @@
 # MakeCode Arcade libretro Core（路线 B）
 
+[![build](https://github.com/whmzsu/makecode-arcade-libretro/actions/workflows/build.yml/badge.svg)](https://github.com/whmzsu/makecode-arcade-libretro/actions/workflows/build.yml)
+
 把 MakeCode Arcade 游戏作为"卡带"在 RetroArch 中运行，主线技术路线为
 **pxt VM 字节码 + C++ 运行时**（路线 B），目标平台包括 PC 与低端 ARM 掌机
 （RK3326 / RK3566 等）。
