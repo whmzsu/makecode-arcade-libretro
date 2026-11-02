@@ -10,6 +10,7 @@ dlopen 加载 .dll/.so 再逐符号调用"这条真实路径 —— 而真机上
 
 选项：
   --bmp=路径            把最后一帧存成 BMP
+  --data-dir=路径       存档 / mca_trace.log 的落盘目录（默认 out/libretro_host_saves）
   --opt=k=v             预设核心选项（本核心目前没有选项，保留给通用调试）
   --press=A             从第 5 帧起按住该物理键（A/B/X/Y/L/R/SELECT/START/UP/…）
   --press-at=N          改用第 N 帧按下（测 reset 用：--press=SELECT --press-at=60）
@@ -30,9 +31,19 @@ dlopen 加载 .dll/.so 再逐符号调用"这条真实路径 —— 而真机上
 """
 
 import ctypes
+import os
 import struct
 import sys
 import time
+
+# ── 存档 / trace 目录 ────────────────────────────────────────────────────
+# core 会用 GET_SAVE_DIRECTORY 返回的目录写 settings、高分记录和 mca_trace.log。
+# 默认落在 <项目>/out/ 下，**不要在项目根目录生成文件**；需要隔离时用
+# --data-dir=PATH 覆盖（多个用例并行跑时各给一个目录）。
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA_DIR = os.path.join(PROJECT_ROOT, "out", "libretro_host_saves")
+# env 回调交出去的是裸指针，必须持有 bytes 引用，否则会被 GC 回收
+DATA_DIR_B = DATA_DIR.encode("utf-8")
 
 # ── libretro 常量 ────────────────────────────────────────────────────────
 ENV_GET_SYSTEM_DIRECTORY = 9
@@ -244,10 +255,10 @@ def env_cb(cmd, data):
     if cmd == ENV_SET_SUPPORT_NO_GAME:
         return True
     if cmd == ENV_GET_SAVE_DIRECTORY:
-        ctypes.cast(data, ctypes.POINTER(ctypes.c_char_p))[0] = b"./libretro_host_saves"
+        ctypes.cast(data, ctypes.POINTER(ctypes.c_char_p))[0] = DATA_DIR_B
         return True
     if cmd == ENV_GET_SYSTEM_DIRECTORY:
-        ctypes.cast(data, ctypes.POINTER(ctypes.c_char_p))[0] = b"./libretro_host_saves"
+        ctypes.cast(data, ctypes.POINTER(ctypes.c_char_p))[0] = DATA_DIR_B
         return True
     return False
 
@@ -330,10 +341,12 @@ def parse_args(argv):
     global BITMASK
     pos = []
     cfg = {"bmp": None, "press": None, "press_at": 4, "release": None, "dry": False,
-           "seq": None, "switch": None, "dlclose": False}
+           "seq": None, "switch": None, "dlclose": False, "data_dir": None}
     for a in argv:
         if a.startswith("--bmp="):
             cfg["bmp"] = a.split("=", 1)[1]
+        elif a.startswith("--data-dir="):
+            cfg["data_dir"] = a.split("=", 1)[1]   # 存档/trace 目录（默认 out/libretro_host_saves）
         elif a.startswith("--opt=") or a.startswith("--opt"):
             kv = a.split("=", 1)[1] if "=" in a else ""
             if "=" in kv:
@@ -367,6 +380,14 @@ def main():
         return 2
     core_path, content_path = pos[0], pos[1]
     frames = int(pos[2]) if len(pos) > 2 else 180
+
+    # 存档/trace 目录：默认 out/libretro_host_saves，避免污染项目根目录
+    global DATA_DIR, DATA_DIR_B
+    if cfg["data_dir"]:
+        DATA_DIR = os.path.abspath(cfg["data_dir"])
+        DATA_DIR_B = DATA_DIR.encode("utf-8")
+    os.makedirs(DATA_DIR, exist_ok=True)
+    say(f"== 存档/trace 目录：{DATA_DIR}")
 
     # --seq=KEY@frame,...：多键时序脚本，用于"重置后游戏是否还能响应输入"
     seq_events = {}
@@ -606,7 +627,6 @@ def main():
             _ctypes.FreeLibrary(lib._handle)
         say("   [host] dlclose OK（随后立即退出，避免解释器重复释放）")
         sys.stdout.flush()
-        import os
         os._exit(0)
     return 0
 

@@ -5,6 +5,7 @@
 // 用法: core_test <cart.png> <out.bmp> [frames] [--press=UP|DOWN|LEFT|RIGHT|A|B|START]
 //   --press=KEY   从第 5 帧起按住该键（验证游戏内手感）
 //   --every=N     每 N 帧另存一张 <out>_fNNN.bmp（看动画推进）
+//   --data-dir=DIR 存档 / mca_trace.log 的落盘目录（默认 out/core_test_data）
 #include <cstdio>
 #include <cstdarg>
 #include <chrono>
@@ -14,6 +15,12 @@
 #include <string>
 #include <thread>
 #include <vector>
+
+#if defined(_WIN32)
+#include <direct.h>
+#else
+#include <sys/stat.h>
+#endif
 
 #include "../libretro.h"
 #include "../src/platform.h"
@@ -44,6 +51,9 @@ static int g_hold_from = 5;
 static int g_every = 0;
 static int g_delay_ms = 16;   // 每帧等待：模拟前端节拍；--delay=0 复现零延迟连续调用
 static const char* g_out_base = "out";
+// 存档 / mca_trace.log 的落盘目录。默认放 out/ 下——这个程序常在项目根目录
+// 被调用，用 "." 会在根目录生成 makecode_arcade/settings-v0 等垃圾。--data-dir= 可覆盖。
+static char g_data_dir[512] = "out/core_test_data";
 
 static void log_stderr(enum retro_log_level, const char* fmt, ...) {
     va_list ap;
@@ -67,7 +77,7 @@ static bool env_cb(unsigned cmd, void* data) {
     }
     case RETRO_ENVIRONMENT_GET_SAVE_DIRECTORY:
     case RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY:
-        *(const char**)data = ".";
+        *(const char**)data = g_data_dir;
         return true;
     default:
         return false;
@@ -132,9 +142,23 @@ static void write_bmp(const char* path, unsigned w, unsigned h,
     fprintf(stderr, "wrote %s (%ux%u)\n", path, w, h);
 }
 
+// 递归创建目录（逐级建，已存在就忽略错误）
+static void ensure_dir(const char* path) {
+    std::string p(path);
+    for (size_t i = 1; i <= p.size(); i++) {
+        if (i < p.size() && p[i] != '/' && p[i] != '\\') continue;
+        std::string sub = p.substr(0, i);
+#if defined(_WIN32)
+        _mkdir(sub.c_str());
+#else
+        mkdir(sub.c_str(), 0777);
+#endif
+    }
+}
+
 int main(int argc, char** argv) {
     if (argc < 3) {
-        fprintf(stderr, "usage: %s <cart.png> <out.bmp> [frames] [--press=K] [--every=N] [--delay=ms]\n", argv[0]);
+        fprintf(stderr, "usage: %s <cart.png> <out.bmp> [frames] [--press=K] [--every=N] [--delay=ms] [--data-dir=DIR]\n", argv[0]);
         return 2;
     }
     int frames = argc > 3 ? atoi(argv[3]) : 30;
@@ -147,9 +171,12 @@ int main(int argc, char** argv) {
             g_every = atoi(argv[i] + 8);
         } else if (!strncmp(argv[i], "--delay=", 8)) {
             g_delay_ms = atoi(argv[i] + 8);
+        } else if (!strncmp(argv[i], "--data-dir=", 11)) {
+            snprintf(g_data_dir, sizeof(g_data_dir), "%s", argv[i] + 11);
         }
     }
     g_out_base = argv[2];
+    ensure_dir(g_data_dir);
 
     FILE* f = fopen(argv[1], "rb");
     if (!f) { fprintf(stderr, "cannot open %s\n", argv[1]); return 2; }

@@ -34,6 +34,8 @@ DEFAULT_CORE = {
 }
 
 TRACE_CANDIDATES = [
+    # libretro_host.py 默认把 saves/trace 落到 out/ 下（不再污染项目根目录）
+    os.path.join(ROOT, "out", "libretro_host_saves", "makecode_arcade", "mca_trace.log"),
     os.path.join(ROOT, "libretro_host_saves", "makecode_arcade", "mca_trace.log"),
     os.path.join(ROOT, "mca_trace.log"),
     "/tmp/mca_trace.log",

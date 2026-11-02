@@ -187,6 +187,8 @@ tools/build_core.sh
 python tools/png2pxt64.py png_examples/arcade-ping.png out/ping.pxt64
 
 # 2) 假前端走完整 libretro 路径跑 .pxt64（60fps 节拍，出 BMP）
+#    存档与 mca_trace.log 默认落在 out/core_test_data/（--data-dir=DIR 可改），
+#    不会在项目根目录生成文件
 core/core_test.exe out/ping.pxt64 out/ping.bmp 120 --press=LEFT --every=40
 
 # 3) PNG 卡带 + 旁载 .pxt64（同目录同名文件；仅测试程序可走此路径，
