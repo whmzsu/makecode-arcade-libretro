@@ -1,0 +1,41 @@
+# ---- core 构建产物 ----
+core/*.o
+core/*.d
+core/*.so
+core/*.dll
+core/*.dylib
+core/*.lib
+core/*.pdb
+core/*.exe
+core/makecode_arcade_libretro.*
+core/build/
+core/dist/*
+!core/dist/MATRIX.md
+!core/dist/makecode_arcade_libretro.info
+!core/dist/release/
+core/tests/*.exe
+
+# ---- 测试 / 生成输出 ----
+out/
+*.ts
+!refs/*.ts
+tools/fakebin/
+tools/cartconv/fakebin/
+tools/cartconv/.cache/
+
+# ---- 发布物（二进制走 Releases，不进源码仓库）----
+dist/
+
+# ---- 第三方依赖（构建前按 runtime/VENDORING.md 获取）----
+vendor/
+node_modules/
+tools/vm-build/node_modules/
+tools/vm-build/node_modules/pxt-arcade/proj_*/
+tools/vm-build/node_modules/pxt-arcade/testproj/pxt_modules/
+tools/vm-build/node_modules/pxt-arcade/testproj/built/
+
+# ---- 临时目录 ----
+.tmp_*/
+
+# ---- 本地工作数据（不发布）----
+.workbuddy/

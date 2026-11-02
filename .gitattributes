@@ -1,0 +1,11 @@
+# 统一 LF：Linux/Android 构建脚本与 C 源码必须 LF
+* text=auto eol=lf
+*.png binary
+*.zip binary
+*.tar.gz binary
+*.dll binary
+*.so binary
+*.exe binary
+*.pdb binary
+*.bmp binary
+*.pxt64 binary
