@@ -321,6 +321,9 @@ jobs:
       - name: 安装 zig 0.17.0（与本地发版矩阵同版本）
         run: |
           set -euo pipefail
+          # set -e 的静默死法排查过两轮，加 ERR trap 兜底：任何未守护的失败
+          # 都会带行号转成注解（job 日志要鉴权，注解可匿名读）
+          trap 'echo "::error::zig 安装失败于第 $LINENO 行（exit=$?）"' ERR
           # mlugg/setup-zig 的版本索引对 0.17.0 返回 404，直接下载。
           # 0.14.1 起 tarball 命名是 arch 在前（zig-x86_64-linux-…）
           # 主源 ziglang.org（Cloudflare），回退 machengine 包镜像
@@ -339,14 +342,18 @@ jobs:
             fi
           done
           [ "$ok" = 1 ] || { echo "::error::所有源都取不到 zig 0.17.0"; exit 1; }
-          # 内层目录名不猜，从 tarball 解析
-          zigdir="$(tar -tf zig.tar.xz | head -1 | cut -d/ -f1)"
+          # 内层目录名不猜，从 tarball 解析。注意不能写 `tar -tf | head -1`：
+          # head 读一行就关管道，tar 写列表时吃 SIGPIPE 以 write error（2）退出，
+          # 在 pipefail 下表现为静默 exit 2
+          listing="$(tar -tf zig.tar.xz)"
+          zigdir="${listing%%/*}"
           tar -xJf zig.tar.xz
           echo "$RUNNER_TEMP/$zigdir" >> "$GITHUB_PATH"
           # 断言拿到的就是发版用的版本，防止 URL 改版后静默装错。
           # 注意 $GITHUB_PATH 只对后续步骤生效，当前步骤要用显式路径
           v="$("$RUNNER_TEMP/$zigdir/zig" version)"
           [ "$v" = "0.17.0" ] || { echo "::error::zig 版本异常：实际 $v"; exit 1; }
+          echo "zig $v -> $RUNNER_TEMP/$zigdir"
 
       - name: 安装 binutils（检查 PE 导入/导出表）
         if: matrix.apt != ''
