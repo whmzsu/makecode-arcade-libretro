@@ -187,7 +187,8 @@ python tools/png2pxt64.py png_examples/arcade-ping.png out/ping.pxt64
 # 2) 假前端走完整 libretro 路径跑 .pxt64（60fps 节拍，出 BMP）
 core/core_test.exe out/ping.pxt64 out/ping.bmp 120 --press=LEFT --every=40
 
-# 3) PNG 卡带 + 旁载 .pxt64（同目录同名文件，模拟真实使用）
+# 3) PNG 卡带 + 旁载 .pxt64（同目录同名文件；仅测试程序可走此路径，
+#    RetroArch 侧核心只接受 .pxt64）
 core/core_test.exe png_examples/arcade-ping.png out/ping2.bmp 60   # 无旁载时显示测试画面
 
 # 4) 回归
@@ -208,15 +209,13 @@ functions.json 逐字节一致）。
 
 ## RetroArch 使用
 
-> **核心只运行 `.pxt64` 字节码。** `.png` 卡带里只有**源码**（meta + source），
-> 不是可直接运行的游戏——**必须先用 cartconv 转换成 `.pxt64`**（见上文
-> 「卡带转换」）。直接加载 `.png` 只有在同目录存在**同名 `.pxt64`** 时才会
-> 自动旁载成功，否则只会显示内置测试画面。
+> **核心只运行 `.pxt64` 字节码，文件浏览器也只列出 `.pxt64`。** `.png` 卡带里
+> 只有**源码**（meta + source），不是可直接运行的游戏——**必须先用 cartconv
+> 转换成 `.pxt64`**（见上文「卡带转换」）。核心不接受 `.png` 作为加载内容。
 
 1. 取 `core/dist/release/makecode_arcade_<platform>.zip`，把其中的 core 二进制
    与 `makecode_arcade_libretro.info` 一起放进 RetroArch 的 cores 目录；
-2. 加载转换好的 `.pxt64` 文件（推荐）；或把 `.pxt64` 放在 `.png` 同目录同名，
-   然后选择 `.png` 加载（自动旁载，`.png` 必须与转换产物成对出现）；
+2. 加载内容 → 选转换好的 `.pxt64` 文件；
 3. 像素格式 RGB565，160x120@60fps，音频 44.1kHz 单声道。
    重置 / 重启 / 换游戏：
    - 重置键（默认 SELECT，可在 Controls 改绑）或前端「重启游戏」= 重开当前游戏，

@@ -5,6 +5,8 @@
 // 载入格式：
 //   * .pxt64     字节码镜像（tools/png2pxt64.py 离线转换产物）→ 直接启动 VM
 //   * .png 卡带  若同目录存在 <同名>.pxt64 则自动旁载；否则提示转换并显示测试画面
+//                （v0.2.8 起 valid_extensions 只报 pxt64，前端文件浏览器不再
+//                 列出 .png；旁载仅供测试程序/高级用法直接调 API 时使用）
 #include "../libretro.h"
 
 #include "platform.h"
@@ -55,7 +57,7 @@ static retro_input_state_t g_input_state = nullptr;
 static retro_log_printf_t g_log = nullptr;
 static bool g_pixel_format_set = false;
 // 版本号只在这里出现一次：.info 打包脚本和运行时横幅都读它
-static const char* const kCoreVersion = "0.2.7";
+static const char* const kCoreVersion = "0.2.8";
 
 static unsigned g_frame = 0;
 static bool g_game_loaded = false;
@@ -235,7 +237,7 @@ void retro_get_system_info(struct retro_system_info* info) {
     info->library_version = kCoreVersion;
     info->need_fullpath = false;
     info->block_extract = false;
-    info->valid_extensions = "pxt64|png";
+    info->valid_extensions = "pxt64";
 }
 
 void retro_get_system_av_info(struct retro_system_av_info* info) {

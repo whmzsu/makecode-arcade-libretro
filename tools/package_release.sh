@@ -74,7 +74,7 @@ VERSION="$(sed -n 's/.*kCoreVersion = "\([^"]*\)".*/\1/p' \
 
 INFO_META="display_name = \"MakeCode Arcade\"
 authors = \"mca project\"
-supported_extensions = \"pxt64|png\"
+supported_extensions = \"pxt64\"
 corename = \"MakeCode Arcade\"
 manufacturer = \"Microsoft\"
 categories = \"Game engine\"
@@ -84,7 +84,7 @@ license = \"MIT\"
 permissions = \"\"
 display_version = \"$VERSION\"
 supports_no_game = \"false\"
-notes = \"Plays ONLY .pxt64 bytecode images. MakeCode Arcade .png cartridges contain source code only, NOT a playable game - convert them FIRST with cartconv (see Releases) or tools/png2pxt64.py. Selecting a .png works only when a same-named .pxt64 sits next to it (auto-sideload); otherwise the built-in test screen shows. Buttons are remappable under Quick Menu > Controls (Start = in-game menu, Select = reset); the core exposes no options.\""
+notes = \"Plays ONLY .pxt64 bytecode images - the file browser lists .pxt64 files only. MakeCode Arcade .png cartridges contain source code only, NOT a playable game: convert them FIRST with cartconv (see Releases) or tools/png2pxt64.py. Buttons are remappable under Quick Menu > Controls (Start = in-game menu, Select = reset); the core exposes no options.\""
 
 ok=0; skipped=0
 for t in "${TARGETS[@]}"; do
@@ -130,11 +130,10 @@ MakeCode Arcade — libretro core ($plat)
         老旧 32 位设备用 android-armv7。装错会表现为"核心加载失败"。
 
 内容格式：
-  .pxt64  转换后的 VM 字节码镜像，核心只认这个（直接可玩）
+  .pxt64  转换后的 VM 字节码镜像，核心只认这个格式（加载内容里也只列出它）
   .png    MakeCode Arcade 保存的卡带，里面只有源码、不是游戏本身，
-          必须先转换成 .pxt64（用 cartconv 便携包，见 Releases；或
-          tools/png2pxt64.py）。选择 .png 仅当同目录存在同名 .pxt64
-          时才会自动旁载，否则只显示内置测试画面。
+          核心不接受这个格式——必须先用 cartconv 转换成 .pxt64
+          （cartconv 便携包见 Releases；或 tools/png2pxt64.py）
 
 排查：
   加载游戏后 RetroArch 日志里会打印
@@ -159,11 +158,10 @@ MakeCode Arcade — libretro core ($plat)
   3) 加载核心 → 选择 .pxt64 文件
 
 内容格式：
-  .pxt64  转换后的 VM 字节码镜像，核心只认这个（直接可玩）
+  .pxt64  转换后的 VM 字节码镜像，核心只认这个格式（加载内容里也只列出它）
   .png    MakeCode Arcade 保存的卡带，里面只有源码、不是游戏本身，
-          必须先转换成 .pxt64（用 cartconv 便携包，见 Releases；或
-          tools/png2pxt64.py）。选择 .png 仅当同目录存在同名 .pxt64
-          时才会自动旁载，否则只显示内置测试画面。
+          核心不接受这个格式——必须先用 cartconv 转换成 .pxt64
+          （cartconv 便携包见 Releases；或 tools/png2pxt64.py）
 
 排查：
   加载游戏后 RetroArch 日志里会打印
