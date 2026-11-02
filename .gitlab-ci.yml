@@ -1,0 +1,65 @@
+# libretro buildbot CI（不是给 GitLab 托管用的；官方会把这个仓库镜像到自己的
+# GitLab，构建产物自动出现在 RetroArch 的 Core Downloader）
+#
+# 模板来源：libretro-infrastructure/ci-templates
+# 约定：
+#   CORENAME      —— 产物名 <CORENAME>_libretro.<ext>，须与 .info 的 systemid 对应
+#   MAKEFILE_PATH —— 仓库内 Makefile 所在目录（本仓库的 Makefile 在 core/）
+#   JNI_PATH      —— 含 jni/ 的目录（android-jni 模板用）
+#
+# 收录原则：只列本地验证过能编过的平台。macOS / iOS / 主机平台暂不列，
+# 等对应工具链上验证过再加，避免 CI 出现长期红灯。
+
+.core-defs:
+  variables:
+    CORENAME: makecode_arcade
+    MAKEFILE_PATH: core
+    JNI_PATH: core
+
+include:
+  # Windows x64（MinGW 交叉编译，产物 .dll）
+  - project: 'libretro-infrastructure/ci-templates'
+    file: '/windows-x64-mingw.yml'
+
+  # Linux x86_64 / aarch64（产物 .so）
+  - project: 'libretro-infrastructure/ci-templates'
+    file: '/linux-x64.yml'
+  - project: 'libretro-infrastructure/ci-templates'
+    file: '/linux-aarch64.yml'
+
+  # Android（ndk-build，走 core/jni/Android.mk + Application.mk）
+  - project: 'libretro-infrastructure/ci-templates'
+    file: '/android-jni.yml'
+
+stages:
+  - build-prepare
+  - build-shared
+  - build-static
+
+# ---------------------------------------------------------------- Windows
+libretro-build-windows-x64:
+  extends:
+    - .libretro-windows-x64-mingw-make-default
+    - .core-defs
+
+# ---------------------------------------------------------------- Linux
+libretro-build-linux-x64:
+  extends:
+    - .libretro-linux-x64-make-default
+    - .core-defs
+
+libretro-build-linux-aarch64:
+  extends:
+    - .libretro-linux-aarch64-make-default
+    - .core-defs
+
+# ---------------------------------------------------------------- Android
+android-arm64-v8a:
+  extends:
+    - .libretro-android-jni-arm64-v8a
+    - .core-defs
+
+android-armeabi-v7a:
+  extends:
+    - .libretro-android-jni-armeabi-v7a
+    - .core-defs

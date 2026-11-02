@@ -34,7 +34,8 @@ makecode_arcade/
 │   └── INPUT.md            按键与选项（映射、描述符、验证方法）
 ├── core/                   libretro core（C/C++）
 │   ├── libretro.h          官方头文件（来自 libretro-common，MIT）
-│   ├── Makefile            构建（支持 aarch64 交叉编译）
+│   ├── Makefile            标准 libretro 构建（platform=unix/win/win64/osx/android）
+│   ├── jni/                Android.mk + Application.mk（官方 CI 的 ndk-build 路径）
 │   ├── src/
 │   │   ├── libretro_core.cpp   libretro 入口 + 帧循环 + 视频/音频/输入接线
 │   │   ├── vm_host.cpp         pxt VM 宿主封装（镜像装载/按键沿/拉帧拉音频）
@@ -83,6 +84,7 @@ makecode_arcade/
 | 工具 | 什么时候需要 | 说明 |
 |---|---|---|
 | bash | 跑所有 .sh 脚本 | Windows 用 Git Bash 即可 |
+| GNU make | 用 `core/Makefile` 构建（或官方 CI） | Windows 的 Git Bash 不带 make；可用 NDK 自带的 `prebuilt/windows-x86_64/bin/make.exe`，或直接用 `tools/build_core.sh`（不依赖 make） |
 | zig ≥ 0.17 | 编译 core（唯一编译依赖） | `zig cc`/`zig c++` 当编译驱动。默认找 `<项目父目录>/common tools/zig/`，也可用环境变量 `ZIG` 指定可执行文件路径 |
 | Python 3 | 测试与打包脚本 | 只用标准库，无需 pip 装包 |
 | node + npm | 转换卡带（png2pxt64 / cartconv） | 首次使用先 `cd tools/vm-build && npm install`（锁文件锁定 pxt-arcade@4.2.1 + pxt-core@13.2.1；node_modules 不入库） |
@@ -94,12 +96,40 @@ makecode_arcade/
 
 ## 构建工具链
 
-编译统一用 **zig**（`zig cc`/`zig c++` 即 C/C++ 编译驱动，与姊妹 core
-一致）；Android 目标用 **NDK 自带 clang**（zig 的 libc++ 与 bionic 头
-不兼容）。
+`core/Makefile` 是**标准 libretro 形态**（支持 `platform=`，官方 buildbot 就用它
+构建，仓库根的 `.gitlab-ci.yml` 列出已支持的 CI 目标）。本地交叉编译矩阵用
+`tools/build_target.sh`（zig 驱动，代码集合与 Makefile 完全一致）。
 
 ```bash
-tools/build_core.sh   # 本机：DLL + core_test + vm_smoke + cart_smoke
+# 本机构建（自动探测 unix / win64 / osx）
+make -C core
+
+# 交叉编译：把 zig 当编译器驱动传进去
+make -C core platform=unix  CC="zig cc -target x86_64-linux-gnu.2.17" \
+                            CXX="zig c++ -target x86_64-linux-gnu.2.17"
+make -C core platform=win64 CC="zig cc -target x86_64-windows-gnu" \
+                            CXX="zig c++ -target x86_64-windows-gnu"
+```
+
+> zig 的路径若带空格，`make CC=...` 会被 shell 拆开，写个两行包装脚本
+> （`#!/bin/sh` + `exec ".../zig.exe" cc $@`）再把 `CC` 指向它即可。
+
+Android 走 NDK 的 `ndk-build`（官方 CI 同一条路径）：
+
+```bash
+"$ANDROID_NDK_HOME/ndk-build" NDK_PROJECT_PATH=. \
+    APP_BUILD_SCRIPT=core/jni/Android.mk \
+    NDK_APPLICATION_MK=core/jni/Application.mk \
+    APP_ABI=arm64-v8a NDK_OUT=out/ndk/obj NDK_LIBS_OUT=out/ndk/libs
+```
+
+`platform` 取值：`unix`（含 `unix-*`）/ `win` / `win64` / `osx` / `android`。
+对象文件落在 `core/build/make/<platform>/`，不会污染源码目录。
+
+一键本机构建 + 三个测试程序：
+
+```bash
+tools/build_core.sh   # DLL + core_test + vm_smoke + cart_smoke
 ```
 
 ### 卡带转换（给玩家用）

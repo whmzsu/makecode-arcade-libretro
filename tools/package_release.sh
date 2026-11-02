@@ -72,8 +72,8 @@ VERSION="$(sed -n 's/.*kCoreVersion = "\([^"]*\)".*/\1/p' \
            "$PROJ/core/src/libretro_core.cpp" | head -1)"
 [ -z "$VERSION" ] && VERSION="0.0.0"
 
-INFO_META="display_name = \"MakeCode Arcade\"
-authors = \"mca project\"
+INFO_META="display_name = \"MakeCode Arcade (unofficial)\"
+authors = \"whmzsu and contributors\"
 supported_extensions = \"pxt64\"
 corename = \"MakeCode Arcade\"
 manufacturer = \"Microsoft\"
@@ -84,7 +84,7 @@ license = \"MIT\"
 permissions = \"\"
 display_version = \"$VERSION\"
 supports_no_game = \"false\"
-notes = \"Plays ONLY .pxt64 bytecode images - the file browser lists .pxt64 files only. MakeCode Arcade .png cartridges contain source code only, NOT a playable game: convert them FIRST with cartconv (see Releases) or tools/png2pxt64.py. Buttons are remappable under Quick Menu > Controls (Start = in-game menu, Select = reset); the core exposes no options.\""
+notes = \"Unofficial core: not affiliated with or endorsed by Microsoft. Plays ONLY .pxt64 bytecode images - the file browser lists .pxt64 files only. MakeCode Arcade .png cartridges contain source code only, NOT a playable game: convert them FIRST with cartconv (see Releases) or tools/png2pxt64.py. Buttons are remappable under Quick Menu > Controls (Start = in-game menu, Select = reset); the core exposes no options.\""
 
 ok=0; skipped=0
 for t in "${TARGETS[@]}"; do
