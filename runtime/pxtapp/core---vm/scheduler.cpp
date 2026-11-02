@@ -1082,13 +1082,34 @@ DLLEXPORT void pxt_state_resume() {
     mcaPauseRequest = 0;
 }
 
+// MCA：快照用的堆区间抽象。
+//   64 位/MinGW：gcBase 起 1MB malloc 缓冲（PXT_VM_HEAP_ALLOC_BITS=20）
+//   32 位      ：GC_BASE 起按页 mmap 的固定地址区，块线性分配，所以
+//               [GC_BASE, gcAllocPtr) 全部已映射 —— 按同样的"基址+已用"
+//               方式搬即可；没有固定的容量上界，serialize_size 取 16MB
+//               （超限的活快照返回 -3 拒绝，不会写坏缓冲）。
+static void *mcaSnapHeapBase() {
+#if defined(PXT64) || defined(__MINGW32__)
+    return gcBase;
+#else
+    return (uint8_t *)GC_BASE;
+#endif
+}
+static size_t mcaSnapHeapCap() {
+#if defined(PXT64) || defined(__MINGW32__)
+    return (size_t)1 << PXT_VM_HEAP_ALLOC_BITS;
+#else
+    return (size_t)16 << 20;
+#endif
+}
+
 // retro_serialize_size 必须恒定（RetroArch 按它一次性分配/校验），所以给
-// 最坏情况上界：满 1MB 堆 + 64 fiber × 满栈副本 + 512 event + 静态区。
+// 最坏情况上界：满堆 + 64 fiber × 满栈副本 + 512 event + 静态区。
 // 实际快照远小于此（一般 ~几十 KB + 已用堆）。
 DLLEXPORT unsigned pxt_state_max_size() {
     size_t n = 0;
     n += sizeof(McaSnapHeader);
-    n += (size_t)1 << PXT_VM_HEAP_ALLOC_BITS;                    // GC 堆
+    n += mcaSnapHeapCap();                                       // GC 堆
     n += VM_STACK_SIZE * sizeof(TValue);                         // 共享操作数栈
     n += MCA_SNAP_MAX_FIBERS *
          (sizeof(McaSnapFiber) + sizeof(FiberContext) +
@@ -1105,12 +1126,12 @@ DLLEXPORT int pxt_state_save(void *buf, unsigned cap) {
     McaGcState gc;
     mcaGcGetState(&gc);
     gc.gcAllocPtr = gcAllocPtr; // 切块游标本体在本文件
-    if (!gc.gcBase || !vmImg)
+    if (!mcaSnapHeapBase() || !vmImg)
         return -1;  // VM 未启动
     if (gc.inGC || gc.pendingArrays)
         return -2;  // 不在安全点（到不了，防御）
-    size_t heapUsed = (uint8_t *)gc.gcAllocPtr - (uint8_t *)gc.gcBase;
-    if (heapUsed > (size_t)1 << PXT_VM_HEAP_ALLOC_BITS)
+    size_t heapUsed = (uint8_t *)gc.gcAllocPtr - (uint8_t *)mcaSnapHeapBase();
+    if (heapUsed > mcaSnapHeapCap())
         return -3;
 
     int numFibers = 0;
@@ -1204,7 +1225,7 @@ DLLEXPORT int pxt_state_load(const void *buf, unsigned size) {
         return -1;
     if (h.gcBase != (uintptr_t)cur.gcBase || h.vmImg != (uintptr_t)vmImg)
         return -10;
-    if (h.heapUsed > (size_t)1 << PXT_VM_HEAP_ALLOC_BITS)
+    if (h.heapUsed > mcaSnapHeapCap())
         return -3;
     if (h.gc.gcAllocPtr != (uint8_t *)h.gc.gcBase + h.heapUsed)
         return -3;

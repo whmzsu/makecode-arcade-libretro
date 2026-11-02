@@ -236,9 +236,24 @@ static uint8_t *midPtr;
 // ===== MCA：retro_serialize 快照钩子（见 mca_state.h）=====
 // 只搬静态变量的值；LLSegment 的缓冲内容由调用方（scheduler.cpp）按
 // len * sizeof(TValue) 单独搬运。安全点约束见结构注释。
+//
+// 堆基址按分支取值：
+//   64 位/MinGW：gcBase（malloc 的 1MB 缓冲；platform.h 的 64 位分支已声明，
+//               注意它在 extern "C" 块里，符号不带 mangle —— 这里不要再声明
+//               一遍 C++ 版的，否则链接出 undefined symbol）
+//   32 位      ：GC_BASE 固定地址（堆是按页 mmap 的连续区，没有 gcBase
+//               变量，platform.h 的 32 位分支也不声明它）
+// 两个分支统一从 gcBase/GC_BASE 抽象出"堆基址"，snapshot 按
+// [基址, 基址+heapUsed) 搬运堆内容。
+#if defined(PXT64) || defined(__MINGW32__)
+#define MCA_GC_HEAP_BASE() (gcBase)
+#else
+#define MCA_GC_HEAP_BASE() ((void *)GC_BASE)
+#endif
+
 void mcaGcGetState(McaGcState *s) {
     memset(s, 0, sizeof(*s));
-    s->gcBase = gcBase;
+    s->gcBase = MCA_GC_HEAP_BASE();
     // gcAllocPtr 的本体在 scheduler.cpp（切块游标），由协调器自己填
     s->firstBlock = firstBlock;
     s->firstFree = firstFree;
@@ -256,7 +271,9 @@ void mcaGcGetState(McaGcState *s) {
 }
 
 void mcaGcSetState(const McaGcState *s) {
+#if defined(PXT64) || defined(__MINGW32__)
     gcBase = (uint8_t *)s->gcBase;
+#endif
     // gcAllocPtr 由协调器写回（本文件不可见）
     firstBlock = (GCBlock *)s->firstBlock;
     firstFree = (RefBlock *)s->firstFree;
