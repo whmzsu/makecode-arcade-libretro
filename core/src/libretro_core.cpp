@@ -57,7 +57,7 @@ static retro_input_state_t g_input_state = nullptr;
 static retro_log_printf_t g_log = nullptr;
 static bool g_pixel_format_set = false;
 // 版本号只在这里出现一次：.info 打包脚本和运行时横幅都读它
-static const char* const kCoreVersion = "0.2.10";
+static const char* const kCoreVersion = "0.2.11";
 
 static unsigned g_frame = 0;
 static bool g_game_loaded = false;
@@ -340,11 +340,17 @@ void retro_set_controller_port_device(unsigned port, unsigned device) {
 
 // ---- 存档快照（retro_serialize / rewind / runahead）------------------------
 //
-// v1 只支持**同会话内**恢复：pxt VM 的堆内指针是绝对地址，换游戏 / 重启 /
-// 重新加载核心之后 gcBase 会变，恢复请求会被 VM 侧拒绝（-10）。覆盖
-// RetroArch 的 rewind、runahead 和会话内存档；跨会话磁盘存档等 v2 的
-// 固定地址堆。失败一律返回 false，前端只表现为"这个核心不支持存档"，
-// 不会影响正常运行。
+// v0.2.11 起支持**跨会话**恢复：存一档 → 退出 RetroArch（或崩溃）→ 重开同
+// 一个游戏 → 加载 → 从存档那一刻继续玩，画面与原时间线逐帧一致。
+//
+// 做法是让"地址可复现"：GC 堆钉在 GC_BASE、卡带镜像钉在 GC_BASE+1MB、VM 单例
+// 走固定 bump 区（见 runtime/pxtapp/mca_fixed.h），剩下的三类不可复现指针
+// （fiber / event / 指向 core 自身代码的回调）在恢复时逐个重定位。快照还带
+// 卡带字节数 + FNV 指纹，"拿别的游戏的档恢复"会被拒绝（否则堆会被当成另一
+// 套布局解释，恢复后几帧内必崩）。
+//
+// 拒绝恢复一律返回 false 并记一行日志 —— 前端只表现为"这次读档没生效"，
+// 游戏照常继续，绝不会把前端带崩。
 
 size_t retro_serialize_size(void) { return pxt_state_max_size(); }
 
@@ -381,9 +387,12 @@ bool retro_unserialize(const void* data, size_t size) {
     int rc = pxt_state_load(data, (unsigned)size);
     pxt_state_resume();
     if (rc != 0) {
-        log_printf(RETRO_LOG_ERROR,
-                   "[MCA] unserialize failed: %d%s\n", rc,
-                   rc == -10 ? "（快照与当前会话不匹配——换游戏或重启过）" : "");
+        const char* why = "";
+        if (rc == -10)
+            why = "（快照不属于当前卡带——换了游戏或换了核心版本）";
+        else if (rc == -13)
+            why = "（本平台不支持跨会话读档，只能在同一次运行内用）";
+        log_printf(RETRO_LOG_ERROR, "[MCA] unserialize failed: %d%s\n", rc, why);
         return false;
     }
     g_last_panic = 0; // 快照里的 panic 状态已随状态恢复，横幅判定重新对齐

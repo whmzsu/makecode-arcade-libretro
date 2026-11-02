@@ -9,6 +9,9 @@
 #undef min
 #undef max
 
+#include <new>          // placement new（单例落在固定区）
+#include "mca_fixed.h"  // mcaFixedBump：单例的固定地址分配
+
 #define NOLOG(...)                                                                                 \
     do {                                                                                           \
     } while (0)
@@ -605,11 +608,26 @@ class LLSegment {
     unsigned getCapacity() { return size; }
     TValue *getData() { return data; }
 
-    // MCA：快照恢复（同会话，data 指针原样写回；配合内容搬运使用）
+    // MCA：快照恢复。
+    //   d != NULL：同会话恢复，data 指针原样写回（内容随后搬运）
+    //   d == NULL：跨会话恢复 —— 原地址在新进程里已不属于我们，按容量
+    //              重新分配，内容由调用方按 len 填入
     void mcaRestore(void *d, unsigned len, unsigned cap) {
-        data = (TValue *)d;
+        if (d) {
+            data = (TValue *)d;
+        } else {
+            // 容量字段不总是可靠（实测 gcRoots 会出现 size=0 / length=74：
+            // LLSegment 的 size 只在扩容路径更新），按两者的较大值分配，
+            // 否则 data 是空指针、紧接着按 len 拷内容就直接段错误。
+            unsigned n = cap > len ? cap : len;
+            if (data)
+                xfree(data);
+            data = n ? (TValue *)xmalloc(n * sizeof(TValue)) : nullptr;
+            size = n;
+        }
         length = len;
-        size = cap;
+        if (d)
+            size = cap;
     }
 };
 
@@ -1258,18 +1276,29 @@ bool removeElement(RefCollection *c, TValue x);
 
 #define JOIN(a, b) a##b
 /// Defines getClassName() function to fetch the singleton
-// MCA：单例的快照访问器（SINGLETON 展开时自动生成）。instX 指向 GC 堆，
-// 堆回绕恢复后必须一起写回，否则是野指针（见 mca_state.h）。
+// MCA：单例构造。优先落在固定区（见 mca_fixed.h），拿不到就普通 new。
+template <typename T> T *mcaNewSingleton() {
+    void *p = mcaFixedBump(sizeof(T));
+    return p ? new (p) T() : new T();
+}
+
+// MCA：单例的快照访问器（SINGLETON 展开时自动生成）。
+//
+// v0.2.11 起单例落在固定区（mcaFixedBump），不再是 new 出来的普通堆对象：
+// 快照里存着这些指针，堆内对象也引用它们，跨会话恢复时地址必须可复现。
+// 拿不到固定区时退回普通 new —— 游戏照跑，只是跨会话存档会退化。
 // PXTEXT "C"：生成 C 链接符号，调度器的快照协调器按名声明即可调用
 #define MCA_SNAP_ACCESSOR(ClassName)                                                               \
     PXTEXT "C" void *JOIN(mca_snap_, ClassName)() { return (void *)JOIN(inst, ClassName); }        \
     PXTEXT "C" void JOIN(mca_unsnap_, ClassName)(void *p) { JOIN(inst, ClassName) = (ClassName *)p; }
 
+#define MCA_SINGLETON_NEW(ClassName) mcaNewSingleton<ClassName>()
+
 #define SINGLETON(ClassName)                                                                       \
     static ClassName *JOIN(inst, ClassName);                                                       \
     ClassName *JOIN(get, ClassName)() {                                                            \
         if (!JOIN(inst, ClassName))                                                                \
-            JOIN(inst, ClassName) = new ClassName();                                               \
+            JOIN(inst, ClassName) = MCA_SINGLETON_NEW(ClassName);                                  \
         return JOIN(inst, ClassName);                                                              \
     }                                                                                              \
     MCA_SNAP_ACCESSOR(ClassName)

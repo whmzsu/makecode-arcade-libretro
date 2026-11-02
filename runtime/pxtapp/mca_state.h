@@ -36,6 +36,10 @@ struct McaGcState {
 // gc.cpp 实现：把 GC 静态状态搬进/搬出结构（LLSegment 缓冲内容另搬）
 void mcaGcGetState(McaGcState *s);
 void mcaGcSetState(const McaGcState *s);
+// LLSegment 是 gc.cpp 的文件内静态：恢复时调度器要按这两个指针把内容读回去
+// （跨会话下缓冲已由 mcaGcSetState 重新分配，快照里的旧地址不可用）
+void *mcaGcRootsData();
+void *mcaGcWorkQueueData();
 
 // SINGLETON 宏生成的快照访问器（instX 静态指针指向 GC 堆，堆回绕后必须
 // 一起恢复，否则是野指针）。宏定义本体在 pxtbase.h（SINGLETON 之前），

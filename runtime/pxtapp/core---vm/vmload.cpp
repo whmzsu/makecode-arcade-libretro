@@ -1,4 +1,5 @@
 #include "pxt.h"
+#include "mca_fixed.h"
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -25,7 +26,39 @@ void mcaTrace(const char *fmt, ...);
 
 VMImage *vmImg;
 
+// MCA v0.2.11：卡带镜像也钉在固定地址。
+//
+// img->dataStart 直接指向这块缓冲，而 GC 堆里的字符串字面量、函数引用、
+// VTable 指针全是指向它的绝对地址 —— 镜像换地址就等于所有对象内容失效。
+// 和 GC 堆同理：拿不到固定地址就退回普通分配（游戏照跑，跨会话存档退化）。
+static uint8_t *g_imgBuf = NULL;
+
+static uint8_t *mcaImageBuffer(unsigned len) {
+    if (!g_imgBuf) {
+        g_imgBuf = (uint8_t *)mcaFixedMap((unsigned long long)(uintptr_t)GC_BASE + MCA_IMG_OFFSET,
+                                         MCA_IMG_MAX_BYTES);
+        if (g_imgBuf)
+            mcaTrace("[img] 镜像缓冲固定在 %p（%u 字节上限）", (void *)g_imgBuf,
+                     (unsigned)MCA_IMG_MAX_BYTES);
+        else
+            mcaTrace("[img] 取不到固定镜像地址（GC_BASE+1MB），跨会话快照将不可用");
+    }
+    if (g_imgBuf && len <= MCA_IMG_MAX_BYTES)
+        return g_imgBuf;
+    return NULL;
+}
+
 static void vmStartCore(uint8_t *data, unsigned len) {
+    // 先拷进固定缓冲再解析：loadVMImage 会把 data 指针直接存进 img->dataStart，
+    // 之后所有代码都按这个地址引用镜像内容。
+    if (data != g_imgBuf) {
+        uint8_t *fixed = mcaImageBuffer(len);
+        if (fixed) {
+            memcpy(fixed, data, len);
+            data = fixed;
+        }
+    }
+
     mcaTrace("[vm] start: unload image");
     unloadVMImage(vmImg);
     vmImg = NULL;
@@ -73,7 +106,10 @@ static void vmStartFile(const char *fn) {
     fseek(f, 0, SEEK_END);
     auto len = (unsigned)ftell(f);
     fseek(f, 0, SEEK_SET);
-    auto data = (uint8_t *)malloc(len + 16);
+    // 优先直接读进固定缓冲（省一次拷贝，且地址从一开始就钉住）
+    auto data = mcaImageBuffer(len);
+    if (!data)
+        data = (uint8_t *)malloc(len + 16);
     fread(data, len, 1, f);
     fclose(f);
 

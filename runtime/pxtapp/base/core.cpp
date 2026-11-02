@@ -15,6 +15,16 @@ PXT_DEF_STRING(emptyString, "")
 
 static HandlerBinding *handlerBindings;
 
+// MCA v0.2.11：快照恢复时，绑定上的待处理事件指针指向旧 Event 地址。
+// Event 每次运行都是 new 出来的（地址不可复现），必须逐个改到新地址，
+// 否则下一个事件派发就会解引用已释放内存。
+void mcaFixupHandlerPending(void *(*mapFn)(void *)) {
+    for (auto p = handlerBindings; p; p = p->next) {
+        if (p->pending)
+            p->pending = (struct Event *)mapFn((void *)p->pending);
+    }
+}
+
 HandlerBinding *nextBinding(HandlerBinding *curr, int source, int value) {
     for (auto p = curr; p; p = p->next) {
         // DEVICE_ID_ANY == DEVICE_EXT_ANY == 0

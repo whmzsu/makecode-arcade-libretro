@@ -14,6 +14,7 @@ class WDisplay {
     bool newPalette;
     uint8_t *screenBuf; // VM 正在写的工作缓冲
     uint8_t *pubBuf;    // 已发布给前端的快照（双缓冲，见 pxt_screen_publish）
+    unsigned screenBufSize; // 单块缓冲字节数（0 = 尚未分配）
 
     int width, height;
 
@@ -32,6 +33,7 @@ WDisplay::WDisplay() {
     // 必须清零：这两块缓冲是"第一帧画面"的来源，new 出来的内容是上次
     // 堆里剩下的垃圾。不清零的话，开机头几帧的像素取决于分配器复用到了
     // 什么 —— 同一输入两次运行的画面从第 1 帧起就不同（存档确定性失效）。
+    screenBufSize = (unsigned)n;
     screenBuf = new uint8_t[n];
     pubBuf = new uint8_t[n];
     memset(screenBuf, 0, n);
@@ -163,10 +165,67 @@ DLLEXPORT void pxt_screen_get_pixels(int width, int height, uint32_t *screen) {
 
 // MCA PATCH 7：重置时丢掉屏幕的静态状态。必须在 gcReset() 之前调用 ——
 // instWDisplay / screenBuf 都活在 VM 堆上，清理完就是野指针。
+// MCA v0.2.11：快照恢复后重绑缓冲。
+//
+// WDisplay 本身在 GC 堆里（地址固定，快照恢复后有效），但它的 screenBuf /
+// pubBuf 是 new 出来的明细缓冲 —— 跨会话地址必然不同，恢复后第一帧发布
+// 就往野指针里 memcpy，真机上就是这个崩溃。这里重新分配（内容无所谓：
+// screenBuf 下一帧被游戏重绘，pubBuf 是发布用的中转）。
+// 只在第一次恢复时做（同会话 rewind 每帧都会 unserialize，不能次次泄漏）。
+static int g_screenRebound = 0;
+
+DLLEXPORT void pxt_screen_rebind() {
+    if (g_screenRebound)
+        return;
+    pthread_mutex_lock(&screenMutex);
+    auto d = instWDisplay;
+    if (d) {
+        const size_t n = (size_t)d->width * d->height / 2 + 20;
+        d->screenBuf = new uint8_t[n];
+        d->pubBuf = new uint8_t[n];
+        memset(d->screenBuf, 0, n);
+        memset(d->pubBuf, 0, n);
+        g_screenRebound = 1;
+        mcaTrace("[snap] display buffers rebound (%zu bytes each)", n);
+    }
+    pthread_mutex_unlock(&screenMutex);
+}
+
+// MCA v0.2.11：画面缓冲也进快照。
+//
+// 恢复后 WDisplay 的 screenBuf/pubBuf 必须换新（跨会话地址失效），但内容
+// 不能丢 —— 否则加载存档后头两三帧是空的（实测 B 41~43 与原时间线不符，
+// 第 44 帧起才对齐）。这里把两块缓冲原样搬进/搬出快照。
+DLLEXPORT unsigned pxt_screen_buf_size() {
+    auto d = instWDisplay;
+    if (!d || d->screenBufSize == 0)
+        return 0;
+    return d->screenBufSize;
+}
+
+DLLEXPORT int pxt_screen_dump(void *work, void *pub) {
+    auto d = instWDisplay;
+    if (!d || !d->screenBufSize)
+        return -1;
+    memcpy(work, d->screenBuf, d->screenBufSize);
+    memcpy(pub, d->pubBuf, d->screenBufSize);
+    return 0;
+}
+
+DLLEXPORT int pxt_screen_restore(const void *work, const void *pub) {
+    auto d = instWDisplay;
+    if (!d || !d->screenBufSize)
+        return -1;
+    memcpy(d->screenBuf, work, d->screenBufSize);
+    memcpy(d->pubBuf, pub, d->screenBufSize);
+    return 0;
+}
+
 DLLEXPORT void pxt_screen_shutdown() {
     pthread_mutex_lock(&screenMutex);
     instWDisplay = NULL;
     numGetPixels = 0;
+    g_screenRebound = 0; // 换游戏后是新的 WDisplay，下次恢复要重新绑定
     pthread_mutex_unlock(&screenMutex);
     mca_pub_signal(); // 叫醒可能正在等取帧的前端线程（它会看到"离线"退回黑屏）
 }

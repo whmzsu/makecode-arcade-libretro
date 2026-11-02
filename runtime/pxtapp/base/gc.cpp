@@ -281,10 +281,24 @@ void mcaGcSetState(const McaGcState *s) {
     inGC = s->inGC;
     globals = (TValue *)s->globals;
     pendingArrays = (PendingArray *)s->pendingArrays;
-    gcRoots.mcaRestore(s->gcRootsData, s->gcRootsLen, s->gcRootsSize);
-    workQueue.mcaRestore(s->workQueueData, s->workQueueLen, s->workQueueSize);
+    // LLSegment 的缓冲是 system malloc 出来的，跨会话地址不可复现：
+    // 指针相同（同会话）就原地复用；不同（新进程）就按容量重建，
+    // 内容随后由调度器按 len 填入。之前无条件写回旧指针，跨会话恢复
+    // 就是往别人的内存里写 —— 真机上表现为加载存档时崩掉 RetroArch。
+    if ((void *)gcRoots.getData() == s->gcRootsData)
+        gcRoots.mcaRestore(s->gcRootsData, s->gcRootsLen, s->gcRootsSize);
+    else
+        gcRoots.mcaRestore(nullptr, s->gcRootsLen, s->gcRootsSize);
+    if ((void *)workQueue.getData() == s->workQueueData)
+        workQueue.mcaRestore(s->workQueueData, s->workQueueLen, s->workQueueSize);
+    else
+        workQueue.mcaRestore(nullptr, s->workQueueLen, s->workQueueSize);
     memcpy(&gcStats, s->stats, sizeof(s->stats));
 }
+
+// 快照恢复时调度器要把缓冲内容读回来，但 LLSegment 是文件内静态
+void *mcaGcRootsData() { return gcRoots.getData(); }
+void *mcaGcWorkQueueData() { return workQueue.getData(); }
 
 static bool inGCArea(void *ptr) {
     for (auto block = firstBlock; block; block = block->next) {

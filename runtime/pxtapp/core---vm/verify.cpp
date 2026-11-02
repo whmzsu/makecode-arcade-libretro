@@ -1,4 +1,5 @@
 #include "pxt.h"
+#include "mca_fixed.h"
 
 namespace pxt {
 
@@ -496,7 +497,10 @@ void unloadVMImage(VMImage *img) {
     free(img->numberLiterals);
     free(img->ifaceMemberNames);
 
-    free(img->dataStart);
+    // MCA v0.2.11：镜像可能落在固定映射区（mcaImageBuffer），那块内存由
+    // 固定地址持有、不能 free（而且下次装载还要原地复用）。
+    if (!mcaIsFixedPtr(img->dataStart))
+        free(img->dataStart);
     // MCA PATCH 6：VM 的运算栈是 setupThread() 里 xmalloc 的，原来没释放 ——
     // 每次重启漏 8KB，反复重开就一路涨。
     free(img->stackBase);
