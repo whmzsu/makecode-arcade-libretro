@@ -321,11 +321,24 @@ jobs:
       - name: 安装 zig 0.17.0（与本地发版矩阵同版本）
         run: |
           set -euo pipefail
-          # mlugg/setup-zig 的版本索引对 0.17.0 返回 404，直接从官方下载。
+          # mlugg/setup-zig 的版本索引对 0.17.0 返回 404，直接下载。
           # 0.14.1 起 tarball 命名是 arch 在前（zig-x86_64-linux-…）
+          # 主源 ziglang.org（Cloudflare），回退 machengine 包镜像
           cd "$RUNNER_TEMP"
-          curl -fsSLo zig.tar.xz \
-            "https://ziglang.org/download/0.17.0/zig-x86_64-linux-0.17.0.tar.xz"
+          ok=0
+          for base in "https://ziglang.org/download/0.17.0" \
+                      "https://pkg.machengine.org/zig"; do
+            if curl -fsSLo zig.tar.xz "$base/zig-x86_64-linux-0.17.0.tar.xz" 2>curl.err; then
+              if tar -tf zig.tar.xz >/dev/null 2>tar.err; then ok=1; break; fi
+              # 拿到的不是 tar.xz（多半是拦截页），把内容特征转成注解排查
+              echo "::error::$base 返回的不是合法 tar.xz：$(file -b zig.tar.xz | cut -c1-80)"
+              head -c 120 zig.tar.xz | tr -c '[:print:]\n' '.' | sed 's/^/::error::  /'
+            else
+              echo "::error::$base 下载失败："
+              tail -3 curl.err | sed 's/^/::error::  /'
+            fi
+          done
+          [ "$ok" = 1 ] || { echo "::error::所有源都取不到 zig 0.17.0"; exit 1; }
           # 内层目录名不猜，从 tarball 解析
           zigdir="$(tar -tf zig.tar.xz | head -1 | cut -d/ -f1)"
           tar -xJf zig.tar.xz
