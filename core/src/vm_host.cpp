@@ -44,6 +44,15 @@ bool g_vm_up = false;
 bool g_reset_pending = false;
 unsigned g_reset_frames = 0; // 等待 VM 线程退出的帧数（超时兜底）
 
+// v0.2.14：VM 线程"猝死"的自愈。
+//   g_vm_was_running：上一帧 VM 是否还活着。只在 true→false 的**跳变**上触发
+//     自动重启 —— 用电平判定的话，启动就失败的坏卡带会让 retro_run 每帧都
+//     重启一次，变成更糟的死循环。
+//   g_auto_restarts：一次游戏装载内的自动重启次数上限。连续死 3 次说明是
+//     卡带/环境问题，重启没有意义，留黑屏 + panic 横幅让人看得见。
+bool g_vm_was_running = false;
+int g_auto_restarts = 0;
+
 bool mkdir_p(const std::string& path) {
     if (path.empty()) return false;
     std::string cur;
@@ -93,6 +102,10 @@ bool vm_start_from_image(const uint8_t* data, size_t size, const char* save_dir)
     if (!start_vm_from_orig()) return false;
     g_vm_up = true;
     g_reset_pending = false;
+    // 换游戏/重新装载 = 新一轮，自动重启配额重新计
+    g_vm_was_running = false;
+    g_auto_restarts = 0;
+    g_reset_frames = 0;
     return true;
 }
 
@@ -107,6 +120,28 @@ void vm_request_reset() {
 }
 
 bool vm_poll_restart() {
+    // MCA v0.2.14：两种"要重启"都接住。
+    //
+    // 以前只认玩家显式按重置（g_reset_pending）。可 VM 线程自己 panic 掉时是
+    // 走 systemReset() → pthread_exit 的，g_reset_pending 仍是 false —— 前端
+    // 于是继续照常拉帧（拿黑屏），永不重启：真机上就是"画面冻住、进程不崩也
+    // 不退出"。这里补一句"线程没了就自动重启"，把崩溃降级成"游戏重新开始"。
+    const bool running = pxt_vm_running();
+    if (!g_reset_pending && g_vm_up && g_vm_was_running && !running) {
+        if (g_auto_restarts < 3) {
+            g_auto_restarts++;
+            g_reset_pending = true;
+            g_reset_frames = 0;
+            char msg[96];
+            std::snprintf(msg, sizeof(msg), "vm thread gone unexpectedly -> auto restart (%d/3)",
+                          g_auto_restarts);
+            pxt_vm_trace(msg);
+        } else {
+            pxt_vm_trace("vm keeps dying, auto restart limit reached -> giving up");
+        }
+    }
+    g_vm_was_running = running;
+
     if (!g_reset_pending) return false;
     if (!pxt_vm_poll_exit()) {
         // VM 线程还没退出；正常几毫秒内就完事，给 2 秒兜底
@@ -118,7 +153,9 @@ bool vm_poll_restart() {
     g_reset_pending = false;
     g_reset_frames = 0;
     pxt_vm_trace("vm thread gone, starting fresh vm");
-    return start_vm_from_orig();
+    const bool ok = start_vm_from_orig();
+    if (ok) g_vm_was_running = pxt_vm_running();
+    return ok;
 }
 
 bool reset_pending() { return g_reset_pending; }

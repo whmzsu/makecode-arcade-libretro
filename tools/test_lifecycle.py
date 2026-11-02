@@ -133,7 +133,39 @@ def main():
         fails.append("重置后音频")
         print(out[-1500:])
 
-    # ---- 4. 描述符/选项自检（顺带）----
+    # ---- 4. panic 自愈：VM 线程 panic 后前端必须把游戏重新拉起来 ----
+    #
+    # 真机上的"加载存档卡死"就是这条链断掉：panic → systemReset → pthread_exit
+    # 绕过 multiStart 的收尾，mcaVmExited 永不置位 → 前端以为 VM 还活着 →
+    # 画面冻在最后一帧，进程不崩也不退。桌面（Mingw）上则是直接 0xC0000005。
+    #
+    # 判据：
+    #   * 进程退出码 0（不崩）；
+    #   * trace 里出现 "after exec_loop -> cleanup and exit"（panic 走主循环收尾，
+    #     不是 pthread_exit）；
+    #   * 出现 "auto restart (1/3)" + "starting fresh vm"（前端确实重启了）；
+    #   * 出现 "auto restart limit reached"（连续崩溃有上限，不会无限重启）。
+    panic_cart = os.path.join(ROOT, "out", "pxt64", "panic.pxt64")
+    if os.path.isfile(panic_cart):
+        reset_trace()
+        code, out = run(core, [panic_cart, "400", "--turbo"])
+        trace = read_trace()
+        ok = (code == 0
+              and "after exec_loop -> cleanup and exit" in trace
+              and "auto restart (1/3)" in trace
+              and "starting fresh vm" in trace
+              and "auto restart limit reached" in trace)
+        print(f"[{'ok' if ok else 'FAIL'}] panic 自愈：退出码 {code}，"
+              f"自动重启 {trace.count('starting fresh vm')} 次")
+        if not ok:
+            fails.append("panic 自愈")
+            print(out[-1500:])
+            print(trace[-2000:])
+    else:
+        print("[skip] panic 自愈（缺 out/pxt64/panic.pxt64，"
+              "先跑 tools/make_probe_cartridge.py --panic）")
+
+    # ---- 5. 描述符/选项自检（顺带）----
     code, out = run(core, [ping, "--dry"])
     ok = code == 0 and "8 条描述符 / 0 个选项" in out
     print(f"[{'ok' if ok else 'FAIL'}] 输入配置自检：退出码 {code}")

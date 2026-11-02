@@ -126,6 +126,18 @@ static volatile int mcaPaused = 0;
 //   0 = 主循环顶   1 = 等前端取帧   2 = 跑 fiber   3 = 暂停中
 static volatile int mcaVmSpot = 0;
 
+// v0.2.14：读档后确认"VM 真的重新跑起来了"。pxt_state_load 成功时置 1，
+// VM 线程从暂停里醒来时打一行 trace 并清掉 —— 这行缺失就说明恢复后 VM
+// 再没回到主循环（真机上表现为"读档后画面停在原处"）。
+static volatile int mcaSnapLoaded = 0;
+
+// 单调毫秒（墙钟差，用于量暂停时长）。只在诊断路径上用，不进热路径。
+static uint64_t mcaNowMs() {
+    struct timeval t;
+    gettimeofday(&t, NULL);
+    return (uint64_t)t.tv_sec * 1000ull + (uint64_t)(t.tv_usec / 1000);
+}
+
 int mca_pause_pending() {
     const unsigned w = mcaPauseWant;
     return w != 0 && w != mcaPauseDone;
@@ -263,6 +275,13 @@ static void panic_core(int error_code) {
 
     drawPanic(error_code);
 
+    // MCA v0.2.14：panic 必须进 trace 并带上线程身份。
+    // 此前 panic 只走 dmesg（进前端日志），mca_trace.log 里是空白 —— 于是
+    // "加载存档后卡死、日志停在 cleanup 2/6" 这类问题无法判断到底是哪条
+    // 线程、哪个 panic 码。DMESG 那两行保持原样（前端日志里还要看）。
+    mcaTrace("[vm] PANIC %d on %s thread (errno=%d %s)", error_code,
+             pxt_vm_is_vm_thread() ? "vm" : "frontend", prevErr, strerror(prevErr));
+
     DMESG("PANIC %d", error_code % 1000);
     DMESG("errno=%d %s", prevErr, strerror(prevErr));
 
@@ -276,7 +295,37 @@ extern "C" void target_panic(int error_code) {
     // sleep_core_us(5 * 1000 * 1000);
     abort();
 #elif defined(PXT_VM)
-    systemReset();
+    // MCA v0.2.14：panic 之后走哪条路，取决于"当前在谁身上、跑到哪一步"。
+    //
+    // (1) 前端线程（retro_run / 拉音频）：**绝不能跑清理**。
+    //     systemReset() 末端是 pthread_exit()，在前端线程上等于把 RetroArch 的
+    //     render 线程注销掉（UI 永久卡住）；而且此刻它可能正握着 irqMutex /
+    //     screenMutex，清理再进去抢就是自死锁 —— 真机日志精确停在
+    //     "[vm] cleanup 2/6 reset callbacks"，那里调的 stopPlaying() 第一件事
+    //     就是 target_disable_irq()。
+    //     做法：只登记 panic 码，重启交给 VM 线程。
+    //
+    // (2) VM 线程、主循环已在跑：**也不当场 systemReset**。
+    //     panic 基本都发生在 fiber 里，从那儿 pthread_exit 有两个坑：
+    //       * Mingw 上直接崩（0xC0000005，PATCH 5 踩过这个坑）；
+    //       * 它绕过 multiStart() 的收尾，mcaVmExited 永远不置位 → 前端以为
+    //         VM 还活着、永不重启 → 真机表现"画面冻在最后一帧，进程不崩不退"。
+    //     做法：panicCode 已经置位，exec_loop 里的 `if (panicCode) break;`
+    //     会立刻结束当前 fiber，控制权回到主循环顶；那里看到 panicCode 就走
+    //     hostRestartCleanup() + return，线程从 multiStart 正常收尾退出。
+    //
+    // (3) VM 线程、主循环还没起来（initRuntime 阶段就失败）：没有更干净的
+    //     返回点，只能当场清理退出。
+    if (!pxt_vm_is_vm_thread()) {
+        mcaTrace("[vm] panic on frontend thread -> defer reset to vm thread");
+        if (pxt_vm_running())
+            pxt_vm_request_reset();
+        // 不 pthread_exit、不 while(1)：调用方拿到控制权后自行返回。
+    } else if (mcaMainLoopLive) {
+        mcaTrace("[vm] panic in vm thread -> unwind to main loop (no pthread_exit)");
+    } else {
+        systemReset();
+    }
 #else
     while (1)
         sleep_core_us(10000);
@@ -300,7 +349,16 @@ void soft_panic(int errorCode) {
     sleep_core_us(4000000);
     abort();
 #else
-    systemReset();
+    // 与 target_panic 同一条规矩（见那里 (1)(2)(3) 的说明）。
+    if (!pxt_vm_is_vm_thread()) {
+        mcaTrace("[vm] soft_panic on frontend thread -> defer reset to vm thread");
+        if (pxt_vm_running())
+            pxt_vm_request_reset();
+    } else if (mcaMainLoopLive) {
+        mcaTrace("[vm] soft_panic in vm thread -> unwind to main loop (no pthread_exit)");
+    } else {
+        systemReset();
+    }
 #endif
 }
 
@@ -609,6 +667,19 @@ static void mainRunLoop() {
     FiberContext *f = NULL;
     mcaMainLoopLive = 1;
     for (;;) {
+        // MCA v0.2.14：panic 后从这里收尾退出。
+        //
+        // panic 发生在 fiber 里时，target_panic / soft_panic 只置标志就返回
+        //（见那里的 (2)），exec_loop 的 `if (panicCode) break;` 会把控制权送回
+        // 这里。走 hostRestartCleanup() 之后**正常 return**，线程从 multiStart
+        // 收尾退出（mcaVmExited=1），前端据此自动重启 —— 而不是 pthread_exit
+        //（Mingw 上崩、Linux 上会让前端以为 VM 还活着）。
+        if (panicCode) {
+            mcaTrace("[vm] panic %d seen at main loop -> cleanup and exit", panicCode);
+            hostRestartCleanup();
+            mcaMainLoopLive = 0;
+            return;
+        }
         // MCA PATCH 5：宿主请求重启 → 退出主循环，交给 initRuntime 末尾的
         // systemReset()（释放 fiber/GC 后 pthread_exit），宿主随后重新 start。
         if (mcaResetRequest) {
@@ -636,12 +707,29 @@ static void mainRunLoop() {
                 // 宿主 resume（want=0）或者换了新请求（want != want）都要醒。
                 // 用"等于本次序号"而不是布尔量：两次 pause 紧挨着时，中间那个
                 // resume 可能压根观察不到，但序号一定会变。
+                //
+                // v0.2.14：把"睡了多久"记下来。真机上出现过"读档后画面不动"，
+                // 到底是没 resume（这里一直睡下去）还是 resume 了但 VM 跑飞，
+                // 靠这一行区分：停了 >2s 说明宿主漏了 resume 或自己卡住了。
+                const uint64_t pauseT0 = mcaNowMs();
                 while (mcaPauseWant == want)
                     mca_tick_wait(5);
+                const uint64_t pausedMs = mcaNowMs() - pauseT0;
+                if (pausedMs > 2000)
+                    mcaTrace("[snap] vm was paused %llu ms (host side slow?)",
+                             (unsigned long long)pausedMs);
                 mcaPaused = 0;
                 mcaPauseDone = 0;
                 mcaVmSpot = 0;
                 f = NULL;
+                // v0.2.14：读档后 VM 到底有没有重新跑起来，就看这一行有没有
+                // 出现（以及紧随其后的 "first frame after load"）。
+                if (mcaSnapLoaded) {
+                    mcaSnapLoaded = 0;
+                    mcaTrace("[snap] vm resumed after load (loops=%llu req=%llu panic=%d)",
+                             (unsigned long long)g_loops, (unsigned long long)g_frameRequests,
+                             panicCode);
+                }
                 continue;
             }
         }        // 一圈一帧：等前端请求下一帧再推进。
@@ -659,8 +747,12 @@ static void mainRunLoop() {
         // 发布一帧给前端（内容 = 上一圈逻辑执行完后的画面缓冲）。
         // 放在圈顶而不是圈尾：圈内有多处 continue，放圈尾会漏帧，帧数就对不上了。
         pxt_screen_publish(g_loops); // 拷缓冲 + 置序号 + 广播（同一把锁）
+        // MCA v0.2.14：panic 之后不能在这里 return。
+        // 直接 return 会回到 initRuntime 末尾的 systemReset()（pthread_exit），
+        // 那条路在 Mingw 上崩、在 Linux 上绕过 multiStart 的收尾。改成 continue，
+        // 让循环顶那个 panic 分支统一做 hostRestartCleanup() + 正常返回。
         if (panicCode)
-            return;
+            continue;
         wakeFibers();
         auto now = current_time_ms();
         auto fromBeg = false;
@@ -691,8 +783,18 @@ static void mainRunLoop() {
                     continue; // we got suspended again
             }
             exec_loop(f);
-            if (panicCode)
+            // panic 后不能在这里 `return`（会落到 initRuntime 末尾的
+            // systemReset() → pthread_exit），也不能单纯 `break`（那会跳出
+            // 外层 for，同样从 mainRunLoop 返回）。就在这里把收尾做掉，
+            // 然后 return 到 initRuntime —— 它看到 mcaRestartDone 就不再
+            // systemReset()，线程从 multiStart 正常退出（mcaVmExited=1）。
+            if (panicCode) {
+                mcaTrace("[vm] panic %d after exec_loop -> cleanup and exit", panicCode);
+                f = NULL;
+                hostRestartCleanup();
+                mcaMainLoopLive = 0;
                 return;
+            }
             auto n = f->next;
             if (f->resumePC == NULL) {
                 if (f->foreverPC) {
@@ -897,6 +999,12 @@ void registerResetFunction(reset_fn_t fn) {
 //（Windows/mingw 下从 VM 线程 pthread_exit 会在 fiber 栈已错位时崩，
 // 实测 0xC0000005；改成让线程正常 return 即可安全 join），所以抽出来共用。
 static void resetRuntimeState() {
+    // MCA v0.2.14：先报"谁在清理"。清理只该发生在 VM 线程上；如果这行写成
+    // frontend，说明有人从前端线程走了 systemReset（那会 pthread_exit 掉前端
+    // 线程，并可能自死锁在 irqMutex 上）。
+    mcaTrace("[vm] cleanup begin on %s thread (panic=%d)",
+             pxt_vm_is_vm_thread() ? "vm" : "frontend", panicCode);
+
     // MCA PATCH 7：**第一步**就让前端侧的输出通道失效。
     // 从这里到新一局 gcStartup 之间，前端线程仍然每帧来拉画面/音频；它一旦
     // 碰到已经被释放的 instWDisplay / dac / WSynthesizer 就是 use-after-free，
@@ -909,12 +1017,21 @@ static void resetRuntimeState() {
     mcaTrace("[vm] cleanup 1/6 gcFreeze");
     gcFreeze();
 
+    // MCA v0.2.14：每个回调单独留痕。
+    //
+    // 真机上出现过"日志停在这一步不动"（cleanup 2/6 之后什么都没有）。
+    // 这一步跑的是各模块注册的 reset 回调（v0.2.13 只有 melody 的
+    // stopPlaying），出问题的话必须能看出是哪个回调、卡在它前面还是后面。
     mcaTrace("[vm] cleanup 2/6 reset callbacks");
     for (int i = 0; i < MAX_RESET_FN; ++i) {
         auto fn = resetFunctions[i];
-        if (fn)
-            fn();
+        if (!fn)
+            continue;
+        mcaTrace("[vm]   reset fn #%d %p enter", i, (void *)fn);
+        fn();
+        mcaTrace("[vm]   reset fn #%d %p done", i, (void *)fn);
     }
+    mcaTrace("[vm] cleanup 2/6 done");
 
     // PATCH 9：单例的 static 指针活过 GC 重置，必须丢 —— 否则重启后
     // getWSynthesizer() 返回上一局的野指针（不重新构造 → dac 永远 NULL →
@@ -990,6 +1107,21 @@ static void hostRestartCleanup() {
     mcaRestartDone = 1;
 }
 
+// MCA v0.2.14：VM 线程自己退出的统一出口。
+//
+// 为什么不能只写 pthread_exit()：pthread_exit **不走** multiStart() 的 return
+// 路径，那些收尾语句（mcaMainLoopLive=0 / offline / mcaVmExited=1）一行都不会
+// 执行。于是宿主永远认为 VM 还活着（pxt_vm_running() == true），前端也就永远
+// 不会走重启分支 —— 真机上的表现正是"清理日志停在中途，画面冻在最后一帧，
+// 进程不崩也不退出"。凡是线程要自己死掉，都必须先把"我死了"写清楚。
+static void vmThreadExitNow(const char *why) {
+    mcaTrace("[vm] %s -> thread exit (marked)", why);
+    mcaMainLoopLive = 0;
+    pxt_vm_set_online(0);
+    mcaVmExited = 1; // 宿主（vm_poll_restart）据此 join 并用原始镜像重新启动
+    pthread_exit(NULL);
+}
+
 void systemReset() {
 #ifdef PXT_ESP32
     esp_restart();
@@ -1001,17 +1133,15 @@ void systemReset() {
 
     if (mcaResetting) {
         // 清理中途又 panic：直接让线程退出，避免递归清理打死循环
-        mcaTrace("[vm] systemReset re-entry during cleanup -> pthread_exit");
-        pxt_vm_set_online(0);
-        pthread_exit(NULL);
+        vmThreadExitNow("systemReset re-entry during cleanup");
     }
 
     mcaResetting = 1;
     resetRuntimeState();
     mcaResetting = 0;
-    mcaTrace("[vm] systemReset cleanup done -> pthread_exit");
+    mcaTrace("[vm] systemReset cleanup done");
 
-    pthread_exit(NULL);
+    vmThreadExitNow("after cleanup");
 #endif
 }
 
@@ -1667,6 +1797,11 @@ DLLEXPORT int pxt_state_load(const void *buf, unsigned size) {
     // 单例已恢复，但它们的明细缓冲（画面双缓冲等）是 malloc 的、跨会话地址
     // 已失效 —— 第一帧发布就会往野指针 memcpy。这里换新的。
     pxt_screen_rebind(); // 没带画面的快照也要重绑，避免往野指针写
+
+    // v0.2.14：等 VM 线程真正从暂停里醒过来时，trace 里会补一行
+    // "vm resumed after load"。没有这一行 = 恢复流程把 VM 弄丢了
+    //（不是"画面没重画"，是根本没回到主循环），这是真机排查的关键分界。
+    mcaSnapLoaded = 1;
     return 0;
 }
 

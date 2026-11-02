@@ -60,12 +60,26 @@ void mcaFixedBumpReset();
 //
 // 快照记录保存时的模块区间（base + size），恢复时对这些固定区内容做一次
 // "命中区间就整体平移"的扫描。区间之外的字节一律不动。
-unsigned long long mcaModuleBase(); // 0 = 取不到（此时不重定位）
-unsigned long long mcaModuleSize();
+// 自测/诊断接口的导出：Windows 的 PE 导出表并没有被 --export-all-symbols
+// 兜住（实测这个 DLL 里只有 retro_* 在表里），tools/test_modrange.py 要
+// ctypes 直接调就必须显式 dllexport；ELF 默认导出全部全局符号，空宏即可。
+// 声明和定义必须带同一个属性，否则 mingw 会报 dllimport/dllexport 不一致。
+#if defined(_WIN32)
+#define MCA_TEST_EXPORT __declspec(dllexport)
+#else
+#define MCA_TEST_EXPORT
+#endif
+
+MCA_TEST_EXPORT unsigned long long mcaModuleBase(void); // 0 = 取不到（此时不重定位）
+MCA_TEST_EXPORT unsigned long long mcaModuleSize(void);
 // 把 [p, p+bytes) 里落在 [oldBase, oldBase+oldSize) 的指针值平移 (当前基址-旧基址)。
 // 返回改写的槽数（诊断用）。
 int mcaRelocateModulePtrs(void *p, size_t bytes, unsigned long long oldBase,
                           unsigned long long oldSize);
+
+// maps 文本解析自测（v0.2.14）：内嵌样本，不依赖平台，返回 1 = 通过。
+// tools/test_modrange.py 用 ctypes 调用；它同时断言 mcaModuleBase() 非 0。
+MCA_TEST_EXPORT int mcaModuleMapSelfTest(void);
 
 #ifdef __cplusplus
 }

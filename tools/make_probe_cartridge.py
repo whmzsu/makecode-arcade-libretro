@@ -109,12 +109,43 @@ BUSY_JSON = """{
 }
 """
 
+# panic 探针：跑 0.5 秒后主动 panic，模拟"游戏内部崩了"。
+#
+# 用途：验证 VM 线程猝死后的自愈链路 ——
+#   control.panic → soft_panic → systemReset → 清理 → pthread_exit
+# 这条路径**不走** multiStart() 的 return，所以 mcaVmExited 必须自己置位，
+# 否则宿主永远以为 VM 还活着、前端永不重启：真机表现就是"画面冻在最后一帧，
+# 进程不崩也不退"（v0.2.14 修的就是它）。
+PANIC_TS = """// panic 探针：启动 0.5 秒后主动 panic，然后由宿主自动重启。
+scene.setBackgroundColor(6)   // 青 = 启动成功
+forever(function () {
+    pause(500)
+    control.panic(7)
+})
+"""
+
+PANIC_JSON = """{
+    "name": "panic",
+    "description": "makecode_arcade panic probe",
+    "dependencies": {
+        "device": "*"
+    },
+    "files": [
+        "main.ts"
+    ],
+    "target": { "name": "panic" }
+}
+"""
+
 
 def main():
     argv = [a for a in sys.argv[1:] if not a.startswith("--")]
     audio = "--audio" in sys.argv
     busy = "--busy" in sys.argv
-    if busy:
+    panic = "--panic" in sys.argv
+    if panic:
+        kind, ts, js, default = "panic", PANIC_TS, PANIC_JSON, "panic.pxt64"
+    elif busy:
         kind, ts, js, default = "busy", BUSY_TS, BUSY_JSON, "busy.pxt64"
     elif audio:
         kind, ts, js, default = "audio", AUDIO_TS, PXT_JSON, "audio_probe.pxt64"
@@ -141,7 +172,8 @@ def main():
         f.write(ts)
     with open(os.path.join(proj, "pxt.json"), "w", encoding="utf8", newline="\n") as f:
         f.write(js)
-    print("[2/3] 写入%s main.ts" % {"busy": "忙等探针", "audio": "声音探针"}.get(kind, "按键探针"))
+    print("[2/3] 写入%s main.ts" %
+          {"busy": "忙等探针", "audio": "声音探针", "panic": "panic 探针"}.get(kind, "按键探针"))
 
     proc = P.run_pxt(["build", "--hwvariant", "vm"], proj)
     image = os.path.join(proj, "built", "binary.pxt64")

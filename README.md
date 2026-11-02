@@ -81,7 +81,7 @@ makecode_arcade/
 | M1 | PNG 卡带解码（像素解码 + blob 位流 + LZMA + 项目 JSON） | ✅ cart.c 接入完成，3 张真实卡带冒烟通过（source 字节数与 Python 解码/生产日志一致） |
 | M2 | vendor pxt C++ 运行时（screen/sprite/引擎）独立构建 | ✅ pxtapp vendored 到 runtime/pxtapp（33 TU 游戏无关，已验证 ping/jumpy/cube-land 共用同一二进制） |
 | M3 | pxt VM 字节码解释器接入，跑通第一个游戏 | ✅ **三款游戏全通**：vm_smoke（官方 ABI 直调）+ libretro 假前端路径（RGB565/按键沿/音频） |
-| M4 | 输入 / 音频合成 / 60fps 帧模型完整化 | ✅ 宿主接口全部打通：按键描述符/分键重绑、音频合成与峰值回归、帧驱动虚拟时钟（前端一圈一帧，快进=前端多取帧）、panic 横幅、存档目录对接（trace/数据走 `GET_SAVE_DIRECTORY`）、**retro_serialize/unserialize 快照**（v0.2.13，同会话 + 跨会话精确恢复，S1–S10 回归全绿） |
+| M4 | 输入 / 音频合成 / 60fps 帧模型完整化 | ✅ 宿主接口全部打通：按键描述符/分键重绑、音频合成与峰值回归、帧驱动虚拟时钟（前端一圈一帧，快进=前端多取帧）、panic 横幅、存档目录对接（trace/数据走 `GET_SAVE_DIRECTORY`）、**retro_serialize/unserialize 快照**（v0.2.14，同会话 + 跨会话精确恢复，S1–S10 回归全绿；panic 自愈见 `test_lifecycle`） |
 | M5 | 离线转换工具（PNG→bytecode）+ 游戏兼容性测试集 | ✅ tools/png2pxt64.py 全自动转换，三卡带实测通过 |
 | M6 | 交叉编译（掌机/桌面/移动）+ 性能验证 | ✅ **7 个主流目标全通并出 zip**（Windows x64/arm64、Linux x64/arm64/armhf、Android arm64/armv7）；✅ **RK3566 + ArkOS 真机验收通过**（v0.2.1，用户反馈运行正常、完全无卡顿；帧率数值待量化）；✅ **Android arm64 验收通过**（v0.2.7，功能与 Linux aarch64 一致） |
 
@@ -382,6 +382,16 @@ functions.json 逐字节一致）。
   和内核函数指针写回镜像，占机 `-fPIC` 的 .so 走 ASLR，换个进程指纹就变 ——
   自存的档重开后被当成"换了卡带"拒绝。现在指纹取装载时的原始字节（启动横幅
   里的 `cart fingerprint` 就是它）。
+  **v0.2.14 修掉"加载存档后卡死"与"取不到模块区间"**：前者是三件事叠加 ——
+  panic 后的 `pthread_exit` 绕过线程收尾（`mcaVmExited` 不置位，前端以为 VM
+  还活着、永不重启），前端只认"玩家按了重置"（线程自己崩了没人管），以及前端
+  线程上的 panic 会去跑清理序列（手里握着 `irqMutex` → `stopPlaying()` 自死锁，
+  真机日志精确停在 `cleanup 2/6`）。现在 panic 只置标志、由主循环正常收尾退出，
+  前端检测到线程猝死会自动重启（单次装载最多 3 次），`irqMutex` 改成递归锁。
+  后者是 `/proc/self/maps` 解析器**就地**改写缓冲区，只能遍历一次，而算模块区间
+  要两遍 —— 第二遍读到报废缓冲区，`g_modBase` 恒 0，跨会话恢复被拒（`-13`）、
+  重定位永远 `hits=0+0`。改成只读解析，并加了一条不依赖平台的自测
+  （`tools/test_modrange.py`，关键断言是"同一份文本解析两遍结果一致"）。
 - **panic 显示化**：VM 崩溃（panic）时画面顶部会出现红底白字的
   `VM PANIC <code>` 横幅，重启成功后自动消失；详情仍同步进 RetroArch 日志
   （`[MCA-VM] panic code N`）。真机上不用翻日志就能对上故障码。

@@ -445,3 +445,78 @@ patch 会把 vtable / 内核函数指针（指向 core 自身模块）**就地�
 3. 菜单里连按几次 Load State（撤销点 + 读档连续发生，正是 S9 的场景）
 4. 若仍失败，看日志里的 `cart fingerprint` 两次是否相同、trace 里
    `pause timeout` 那行的 `spot`/`want`/`done`
+
+---
+
+## 2026-11-02（真机反馈 → 修复）：v0.2.14 加载存档卡死 / 取不到模块区间
+
+### 真机给的两组日志
+
+```
+[snap] loaded (heap 65536, fibers 3, events 0)
+[vm] cleanup 0/7 output offline
+[vm] cleanup 1/6 gcFreeze
+[vm] cleanup 2/6 reset callbacks        ← 之后什么都没有：画面冻住，进程不崩不退
+```
+
+```
+[snap] 拒绝恢复：本平台取不到模块区间，跨会话恢复不安全
+[snap] module relocate: old=0 size=0 cur=0 hits=0+0
+```
+
+### 根因 1：panic 之后 `pthread_exit` 绕过线程收尾
+
+`systemReset()` 末端是 `pthread_exit()`。它**不走** `multiStart()` 的 return 路径，
+于是 `mcaVmExited` 永远不置位 —— 宿主用 `pxt_vm_running()` 判断"VM 还活着"，
+前端永不重启：画面停在最后一帧，进程不崩也不退。（桌面 Mingw 上则是从 fiber 里
+`pthread_exit` 直接 0xC0000005，`test_lifecycle` 里那个 panic 探针一跑就崩。）
+
+**修法**：panic 只置 `panicCode`（横幅照常画）。解释器 `if (panicCode) break;`
+结束当前 fiber，控制权回主循环，走 `hostRestartCleanup()` 后**正常 return**，
+线程从 `multiStart` 收尾退出（`mcaVmExited=1`）。宿主侧新增"线程猝死 → 自动重启"
+（跳变触发，单次装载最多 3 次，防止坏卡带变成每帧重启）。
+
+### 根因 2：前端线程上的 panic 会跑清理序列
+
+`retro_run` 里拉音频会 `target_disable_irq()`；若那里 panic，`systemReset()`
+在**前端线程**上跑清理，`stopPlaying()` 又去锁同一把 `irqMutex` → 自死锁；
+就算不死锁，`pthread_exit` 也会把 RetroArch 的 render 线程注销掉。
+
+**修法**：前端线程上的 panic 只登记码值 + `pxt_vm_request_reset()`；`irqMutex`
+改成显式初始化的递归锁（同线程重入不再自锁）。
+
+### 根因 3：maps 解析器"就地改写"，只能遍历一次
+
+算模块区间天生要两遍：先找出"本 core 的路径"，再按路径把所有映射段聚合成 `[lo,hi)`。
+旧实现把每行 `\n` 就地改成 0 来切行 —— 第一遍走完缓冲区只剩第一行，第二遍读到的是
+报废数据，`g_modBase` 恒 0 → 快照 `modBase/modSize` 全 0 → 跨会话恢复被拒（`-13`），
+重定位永远 `hits=0+0`。桌面走 Windows 的 `VirtualQuery` 分支，这段代码从没被执行过。
+
+**修法**：只读解析（逐行指针推进，路径拷进调用方缓冲）。新增
+`mcaModuleMapSelfTest()` 内嵌样本自测，关键断言"同一份文本连续解析两遍结果一致"
+（就地改写型实现必挂）；`tools/test_modrange.py` 用 ctypes 调它，并断言真实分支
+取到非零区间 —— 在 Linux CI 上就等价于覆盖了真机那条路径。
+
+### 诊断增强（trace）
+
+`[mod] module range base=… (ok/UNAVAILABLE)`、`[vm] PANIC n on vm/frontend thread`、
+`[vm] cleanup begin on … thread`、逐个 reset 回调 `enter/done`、
+`[snap] vm was paused N ms`、`[snap] vm resumed after load`、
+`[host] vm thread gone unexpectedly -> auto restart (n/3)`。
+
+### 验证
+
+- 新增 `make_probe_cartridge.py --panic`（`control.panic(7)`）与 `test_lifecycle`
+  第 4 段：退出码 0、panic 走主循环收尾、自动重启 3 次后达上限停止。修复前该项在
+  桌面上直接 0xC0000005。
+- 新增 `test_modrange.py`（maps 解析自测 + 真实区间非零）。
+- `test_savestate` S1–S10 全绿；`test_buttons` 16/16；`test_lifecycle` 5/5。
+- 矩阵 7/7，7 个 zip 的 `.info` 均为 0.2.14。
+
+### 真机待验（v0.2.14）
+
+1. **先重新存一次档**（≤v0.2.13 的跨会话档 `modBase=0`，必被 `-13` 拒）
+2. 存档 → 退出 RetroArch → 重开 → 加载，确认能接着玩
+3. 故意让游戏崩一下（或按 Reset），确认画面能自己回来，而不是冻住
+4. 日志自查：启动横幅 `core version 0.2.14`、trace 里
+   `[mod] module range base=… (ok)`、读档后 `[snap] vm resumed after load`

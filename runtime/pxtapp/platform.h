@@ -75,6 +75,10 @@ int pxt_screen_dump(void *work, void *pub);        // 拷出两块画面缓冲
 int pxt_screen_restore(const void *work, const void *pub); // 写回两块画面缓冲
 void pxt_audio_shutdown(void);   // sound.cpp：丢 dac
 void pxt_music_shutdown(void);   // melody.cpp：丢 instWSynthesizer（见 PATCH 9）
+// vmload.cpp：当前线程是不是 VM 线程（panic 要不要当场清理的判断，见 PATCH 11）
+int pxt_vm_is_vm_thread(void);
+int pxt_vm_running(void);        // VM 线程是否还活着（vmload.cpp，DLLEXPORT）
+void pxt_vm_request_reset(void); // 置重启标志，VM 线程在主循环顶收尾（vmload.cpp）
 #ifdef __cplusplus
 }
 #endif

@@ -278,6 +278,19 @@ DLLEXPORT int pxt_vm_running() {
     return vm_has_thread && !mcaVmExited;
 }
 
+// MCA v0.2.14：当前线程是不是 VM 线程。
+//
+// 用途只有一个：决定 target_panic 该不该当场跑清理序列。清理（systemReset）
+// 末端是 pthread_exit()，在**前端线程**上执行等于把 RetroArch 的 retro_run
+// 线程注销掉（UI 永久卡住）；而且前端线程此刻可能正握着 irqMutex / 屏幕锁，
+// 清理再去抢就是自死锁。前端线程上的 panic 一律改成"置重启标志，让 VM 线程
+// 自己收尾"。见 scheduler.cpp 的 target_panic。
+DLLEXPORT int pxt_vm_is_vm_thread() {
+    if (!vm_has_thread)
+        return 0;
+    return pthread_equal(pthread_self(), vm_thread) ? 1 : 0;
+}
+
 // MCA PATCH 8（本项目）：彻底停掉 VM 线程。
 //
 // 前端（RetroArch）换游戏 / 关闭核心的顺序是：
