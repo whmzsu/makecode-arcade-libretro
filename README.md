@@ -50,6 +50,7 @@ makecode_arcade/
 │   └── VENDORING.md
 ├── tools/
 │   ├── build_core.sh       一键构建：DLL + 三个测试程序
+│   ├── make_local.sh       用 zig 驱动 core/Makefile（本地无目标工具链时）
 │   ├── build_target.sh     单目标交叉编译（zig；Android 走 NDK clang）
 │   ├── build_matrix.sh     发版矩阵（7 主流目标）/ --all 全架构
 │   ├── package_release.sh  打包发行 zip（core + .info + 说明）
@@ -111,8 +112,15 @@ make -C core platform=win64 CC="zig cc -target x86_64-windows-gnu" \
                             CXX="zig c++ -target x86_64-windows-gnu"
 ```
 
-> zig 的路径若带空格，`make CC=...` 会被 shell 拆开，写个两行包装脚本
-> （`#!/bin/sh` + `exec ".../zig.exe" cc $@`）再把 `CC` 指向它即可。
+> zig 的路径若带空格，`make CC=...` 会被 shell 拆开。`tools/make_local.sh`
+> 已经封装好这件事（生成包装脚本再传给 make）：
+>
+> ```bash
+> tools/make_local.sh            # 本机平台
+> tools/make_local.sh win64      # Windows x64
+> tools/make_local.sh linux-x64  # Linux x86_64（glibc 2.17 基线）
+> tools/make_local.sh clean win64
+> ```
 
 Android 走 NDK 的 `ndk-build`（官方 CI 同一条路径）：
 
