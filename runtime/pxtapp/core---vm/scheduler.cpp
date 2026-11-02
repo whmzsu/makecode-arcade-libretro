@@ -105,18 +105,31 @@ static volatile int mcaRestartDone = 0;
 // 一直跑到它自然让出为止 —— 桌面上几十毫秒，真机 ARM 慢一个数量级，实测
 // 超过 2 秒，于是加载存档失败 `pause failed -2`。现在 exec_loop 自己每 2048
 // 条指令查一次 mca_pause_pending() 并让出，见 vm.cpp。
-static volatile int mcaPauseRequest = 0;
+//
+// 协议是 want/done 两个序号（v0.2.13 重写；v0.2.12 的"停稳次数 +1"有竞态）：
+//   宿主 pause ：my = ++mcaPauseSeq; mcaPauseWant = my; 等 mcaPauseDone == my
+//   宿主 resume：mcaPauseWant = 0
+//   VM         ：want != 0 且 want != done → done = want（= 已停稳）→ 睡到 want 变
+//
+// 为什么不能用"停稳次数 +1"：RetroArch 读档前会先 retro_serialize 存一个撤销点，
+// 两次 pause 紧挨着。上一次的 resume（request=0）VM 还没观察到就又被置成 1，
+// 于是 VM 待在暂停循环里不出来、也不再产生第二个 ack，宿主等的序号永远不到。
+// 真机 trace 就是这个样子：`pause timeout 5s: spot=3 loops=742 req=742`
+// —— VM 明明停在安全点上（spot=3 = 暂停中），宿主却在干等。
+// 序号比较没有"必须被观察到"的要求：换个序号，VM 必然先退出内层循环再停一次。
+static volatile unsigned mcaPauseWant = 0; // 宿主写的请求序号（0 = 无请求）
+static volatile unsigned mcaPauseDone = 0; // VM 写的"已为哪个序号停稳"
+static volatile unsigned mcaPauseSeq = 0;  // 宿主自增（只有宿主写）
 static volatile int mcaPaused = 0;
-// 暂停握手序号：VM 每**真正**在循环顶停稳一次就 +1。宿主不能只看 mcaPaused —
-// 上一次暂停的 mcaPaused 可能还没被 VM 清掉，宿主会立刻拿到"已暂停"然后
-// 在 VM 还在跑的时候拍快照（拍出半截状态，恢复后几十帧后走岔，甚至崩）。
-static volatile unsigned mcaPauseAck = 0;
 // VM 线程当前在干什么（只在暂停超时时打到 trace 里，用来区分"卡在解释器"
 // 和"卡在等帧/清理"）：
 //   0 = 主循环顶   1 = 等前端取帧   2 = 跑 fiber   3 = 暂停中
 static volatile int mcaVmSpot = 0;
 
-int mca_pause_pending() { return mcaPauseRequest; }
+int mca_pause_pending() {
+    const unsigned w = mcaPauseWant;
+    return w != 0 && w != mcaPauseDone;
+}
 
 // MCA PATCH 6（本项目）：重启路径埋点。
 //
@@ -169,9 +182,12 @@ static void mcaTraceOpen() {
 static pthread_mutex_t mcaTraceMutex = PTHREAD_MUTEX_INITIALIZER;
 
 void mcaTrace(const char *fmt, ...) {
-    mcaTraceOpen();
     va_list ap;
+    // 开文件必须在锁内：mcaTraceTried 不是原子的，VM 线程和前端线程同时第一次
+    // 写 trace 时两边都会 fopen(...,"w")，后开的把先写的内容截掉（实测桌面
+    // 上 "[vm] ..." 那几行经常整个消失）。开文件只发生一次，开销无所谓。
     pthread_mutex_lock(&mcaTraceMutex);
+    mcaTraceOpen();
     if (mcaTraceFile) {
         va_start(ap, fmt);
         vfprintf(mcaTraceFile, fmt, ap);
@@ -608,23 +624,27 @@ static void mainRunLoop() {
             mcaMainLoopLive = 0;
             return;   // initRuntime 看到 mcaRestartDone 就不再 systemReset()
         }
-        // MCA：快照暂停。宿主拿到 mcaPaused 后搬状态（save/load 都可能发生），
-        // 恢复时 fiber 链整个被替换 —— 本地 f 必须作废，否则下一次 while(f)
-        // 会踩已释放的旧 fiber
-        if (mcaPauseRequest) {
-            mcaPaused = 1;
-            mcaPauseAck++; // 只有走到这里才算"停稳了"，见 pxt_state_pause
-            mcaVmSpot = 3;
-            // 暂停期间低占用地等宿主搬完状态（sleep_core_us 的亚毫秒在
-            // Windows 上退化成 Sleep(0)，会把一个核空转满）
-            while (mcaPauseRequest)
-                mca_tick_wait(5);
-            mcaPaused = 0;
-            mcaVmSpot = 0;
-            f = NULL;
-            continue;
-        }
-        // 一圈一帧：等前端请求下一帧再推进。
+        // MCA：快照暂停（协议见文件顶部 mcaPauseWant 的说明）。宿主拿到停稳
+        // 回执后搬状态（save/load 都可能发生），恢复时 fiber 链整个被替换 ——
+        // 本地 f 必须作废，否则下一次 while(f) 会踩已释放的旧 fiber。
+        {
+            const unsigned want = mcaPauseWant;
+            if (want && want != mcaPauseDone) {
+                mcaPauseDone = want; // 已经在本安全点：先回执，再睡
+                mcaPaused = 1;
+                mcaVmSpot = 3;
+                // 宿主 resume（want=0）或者换了新请求（want != want）都要醒。
+                // 用"等于本次序号"而不是布尔量：两次 pause 紧挨着时，中间那个
+                // resume 可能压根观察不到，但序号一定会变。
+                while (mcaPauseWant == want)
+                    mca_tick_wait(5);
+                mcaPaused = 0;
+                mcaPauseDone = 0;
+                mcaVmSpot = 0;
+                f = NULL;
+                continue;
+            }
+        }        // 一圈一帧：等前端请求下一帧再推进。
         // 没有这个同步，VM 的圈数会随调度在「前端帧数」附近漂移，虚拟时间
         // 跟着漂，同一输入的两次运行画面就分岔（存档确定性的前提）。
         if (!mca_frame_requested()) {
@@ -1028,15 +1048,8 @@ void systemReset() {
 #define MCA_SNAP_SP_COPY   1u
 #define MCA_SNAP_SP_SHARED 2u
 
-// 镜像指纹：FNV-1a 32。卡带字节数已经能挡住绝大多数误用，加指纹是为了
-// 挡住"同长度不同游戏"（以及被打过补丁的镜像）。
-static uint32_t mcaImgHash(const void *p, size_t n) {
-    const uint8_t *b = (const uint8_t *)p;
-    uint32_t h = 2166136261u;
-    for (size_t i = 0; i < n; ++i)
-        h = (h ^ b[i]) * 16777619u;
-    return h;
-}
+// 镜像指纹的算法在 vmload.cpp（mcaFnv1a），因为必须在打补丁**之前**算：
+// patch 会把 vtable/内核函数指针写进镜像，跨进程（ASLR）就变。
 
 struct McaSnapHeader {
     uint32_t magic;
@@ -1183,37 +1196,38 @@ void *mcaMapEventAddr(void *p) {
 DLLEXPORT int pxt_state_pause() {
     if (!pxtVmLive || mcaResetRequest)
         return -1; // VM 未运行 / 正在重启，没有安全点可等
-    // 先记下"停稳次数"，再发请求：等价于"等一个**新**的停稳事件"。
-    // 只看 mcaPaused 会和上一次暂停抢跑（连续 save/load 时偶发），
-    // 那样搬到的就是 VM 正在改的状态。
-    const unsigned wantAck = mcaPauseAck + 1;
-    mcaPauseRequest = 1;
+    // 换一个**新的**序号（协议见文件顶部）。绝不能写成"等停稳次数 +1"：
+    // 连续两次 pause 时，中间那次 resume 可能压根没被 VM 观察到。
+    unsigned my = ++mcaPauseSeq;
+    if (!my)
+        my = ++mcaPauseSeq; // 0 保留给"无请求"
+    mcaPauseWant = my;
 
     // 超时用**墙钟差**判定，不要用「循环次数 × 睡眠时长」：
     // sleep_core_us(500) 在 Windows 上把亚毫秒截断成 Sleep(0)，4000 次循环
     // 实际只跑几毫秒 —— 按次数算的话暂停窗口约等于 0，VM 还没来得及回到
     // 循环顶就被判超时（实测 tick enter=9/ret=8，VM 正睡在 target_yield 里）。
-    // 这里改成 2 秒真实预算，VM 最坏 15ms 一醒（Sleep 粒度），足够。
+    // 这里用真实预算，VM 最坏 15ms 一醒（Sleep 粒度），足够。
     struct timeval t0;
     gettimeofday(&t0, NULL);
     for (;;) {
-        if (mcaPaused && mcaPauseAck >= wantAck)
-            break;
+        if (mcaPauseDone == my)
+            break; // VM 已经停在这个序号对应的安全点上
         struct timeval t1;
         gettimeofday(&t1, NULL);
         long elapsedMs = (t1.tv_sec - t0.tv_sec) * 1000L + (t1.tv_usec - t0.tv_usec) / 1000L;
         if (elapsedMs >= 5000) {
-            mcaPauseRequest = 0;
+            mcaPauseWant = 0;
             // 卡住时把 VM 线程的位置打出来：spot 1=等帧 2=跑 fiber（正常几毫秒
             // 就该回来）3=卡在暂停里 0=主循环顶但没看到请求（内存可见性）
             int nf = 0;
             for (auto f = allFibers; f; f = f->next)
                 nf++;
-            mcaTrace("[snap] pause timeout 5s: spot=%d loops=%llu req=%llu "
-                     "fibers=%d live=%d online=%d panic=%d reset=%d",
-                     mcaVmSpot, (unsigned long long)g_loops,
-                     (unsigned long long)g_frameRequests, nf, (int)mcaMainLoopLive,
-                     pxtVmLive, panicCode, mcaResetRequest);
+            mcaTrace("[snap] pause timeout 5s: spot=%d want=%u done=%u "
+                     "loops=%llu req=%llu fibers=%d live=%d online=%d panic=%d reset=%d",
+                     mcaVmSpot, my, (unsigned)mcaPauseDone,
+                     (unsigned long long)g_loops, (unsigned long long)g_frameRequests,
+                     nf, (int)mcaMainLoopLive, pxtVmLive, panicCode, mcaResetRequest);
             return -2; // 超时：VM 卡在意外位置，放弃快照而不是挂死前端
         }
         sleep_core_us(1000);
@@ -1222,7 +1236,7 @@ DLLEXPORT int pxt_state_pause() {
 }
 
 DLLEXPORT void pxt_state_resume() {
-    mcaPauseRequest = 0;
+    mcaPauseWant = 0;
 }
 
 // MCA：快照用的堆区间抽象。
@@ -1300,8 +1314,11 @@ DLLEXPORT int pxt_state_save(void *buf, unsigned cap) {
     h.dataStart = (uintptr_t)vmImg->dataStart;
     h.modBase = mcaModuleBase();
     h.modSize = mcaModuleSize();
-    h.imgBytes = (uint32_t)((uint8_t *)vmImg->dataEnd - (uint8_t *)vmImg->dataStart);
-    h.imgHash = mcaImgHash(vmImg->dataStart, h.imgBytes);
+    // 卡带身份：取装载时算好的**原始**镜像指纹（vmload.cpp 在 vm_patch_image
+    // 之前算）。不能在这里对着 dataStart..dataEnd 现算 —— 那块已经被 patch
+    // 写进了 vtable/内核函数指针，跨进程（ASLR）就变。
+    h.imgBytes = mca_image_bytes();
+    h.imgHash = mca_image_hash();
     h.screenBytes = pxt_screen_buf_size();
     h.gc = gc;
     if (!w.put(&h, sizeof(h)))
@@ -1415,12 +1432,12 @@ DLLEXPORT int pxt_state_load(const void *buf, unsigned size) {
     {
         // 卡带身份：堆/镜像都钉在固定地址之后，"地址不符"不再能说明换了游戏，
         // 必须比字节数和指纹（否则 ping 的堆会被当成 jumpy 的布局解释）。
-        const uint32_t curBytes =
-            (uint32_t)((uint8_t *)vmImg->dataEnd - (uint8_t *)vmImg->dataStart);
-        if (h.imgBytes != curBytes || h.imgHash != mcaImgHash(vmImg->dataStart, curBytes)) {
+        // 指纹来自装载时的原始镜像（见 mca_image_hash）。
+        const uint32_t curBytes = mca_image_bytes();
+        const uint32_t curHash = mca_image_hash();
+        if (h.imgBytes != curBytes || h.imgHash != curHash) {
             mcaTrace("[snap] 拒绝恢复：卡带不同（快照 %u 字节/%08x，当前 %u 字节/%08x）",
-                     h.imgBytes, h.imgHash, curBytes,
-                     mcaImgHash(vmImg->dataStart, curBytes));
+                     h.imgBytes, h.imgHash, curBytes, curHash);
             return -10;
         }
     }

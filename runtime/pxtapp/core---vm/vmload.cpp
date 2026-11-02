@@ -33,6 +33,27 @@ VMImage *vmImg;
 // 和 GC 堆同理：拿不到固定地址就退回普通分配（游戏照跑，跨会话存档退化）。
 static uint8_t *g_imgBuf = NULL;
 
+// MCA v0.2.13：卡带指纹必须算在**未打补丁**的原始镜像字节上。
+//
+// vm_patch_image() 会把 vtable 指针和内核函数指针（都指向 core 自己的模块）
+// 就地写回镜像。Linux/Android 的 .so 走 ASLR，换个进程这些地址就变 —— 之前
+// 指纹是拿 patch 之后的 dataStart..dataEnd 现算的，于是"同一个卡带、换个
+// 进程"得到不同指纹，跨会话读档被当成"换了卡带"直接拒绝（-10）。Windows 的
+// DLL 基址固定，所以桌面回归一直没暴露这条。真机日志：
+//   [snap] 拒绝恢复：卡带不同（快照 181608 字节/1064f705，当前 181608 字节/e2483410）
+static uint32_t g_imgHash;
+static uint32_t g_imgBytes;
+
+static uint32_t mcaFnv1a(const uint8_t *b, uint32_t n) {
+    uint32_t h = 2166136261u;
+    for (uint32_t i = 0; i < n; ++i)
+        h = (h ^ b[i]) * 16777619u;
+    return h;
+}
+
+uint32_t mca_image_hash() { return g_imgHash; }
+uint32_t mca_image_bytes() { return g_imgBytes; }
+
 static uint8_t *mcaImageBuffer(unsigned len) {
     if (!g_imgBuf) {
         g_imgBuf = (uint8_t *)mcaFixedMap((unsigned long long)(uintptr_t)GC_BASE + MCA_IMG_OFFSET,
@@ -59,6 +80,11 @@ static void vmStartCore(uint8_t *data, unsigned len) {
         }
     }
 
+    // 指纹取 patch 之前的原始字节（理由见 g_imgHash 的说明）。放在这里而不是
+    // 装载完之后：vm_patch_image 下面就会改写 data。
+    g_imgBytes = len;
+    g_imgHash = mcaFnv1a(data, len);
+
     mcaTrace("[vm] start: unload image");
     unloadVMImage(vmImg);
     vmImg = NULL;
@@ -82,7 +108,8 @@ static void vmStartCore(uint8_t *data, unsigned len) {
     // MCA PATCH 7：镜像装载完成，前端可以重新拉画面/音频了。
     // （此刻 instWDisplay 还是 NULL，拉取会得到黑屏，安全。）
     pxt_vm_set_online(1);
-    mcaTrace("[vm] image loaded, gcStartup done (online)");
+    mcaTrace("[vm] image loaded, gcStartup done (online), img %u bytes/%08x",
+             g_imgBytes, g_imgHash);
 
     // MCA PATCH 10：随机序列 = f(镜像哈希)。必须在此处（游戏代码运行前）
     // 播种：settings 模块和游戏启动代码都会用 Math.random。

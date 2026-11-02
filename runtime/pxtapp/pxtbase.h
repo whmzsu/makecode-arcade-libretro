@@ -139,6 +139,10 @@ int current_time_ms();
 // MCA v0.2.12：宿主是否在请求快照暂停。解释器每 2048 条指令查一次就够
 // （fiber 里若有长循环不调 pause，光靠主循环顶的检查点会等不到）。
 int mca_pause_pending();
+// MCA v0.2.13：卡带身份（装载时的原始镜像字节数 + FNV-1a 指纹，patch 之前算）。
+// 定义在 vmload.cpp，快照存档/校验用。
+uint32_t mca_image_bytes();
+uint32_t mca_image_hash();
 void initRuntime();
 void initSystemTimer();
 void sendSerial(const char *data, int len);

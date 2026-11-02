@@ -375,3 +375,73 @@ req / fibers / live / online / panic / reset）。
 3. 长按 Rewind 是否稳定
 4. 若仍失败，取 `mca_trace.log` 里 `[snap] pause timeout` 那行 —— 里面的
    `spot` 直接指出 VM 卡在哪（1=等帧 2=跑 fiber 3=卡在暂停里 0=主循环顶）
+
+
+## 2026-11-02（真机反馈 → 修复）：v0.2.13 读档仍有 `-2` 与"卡带不同"
+
+### 真机现象（v0.2.12）
+
+保存正常，加载交替出现两种失败：
+
+```
+[libretro ERROR] [MCA] unserialize: pause failed -2
+[ERROR] [State]: 加载状态失败于 ".../cubeland.state5"
+[snap] 拒绝恢复：卡带不同（快照 181608 字节/1064f705，当前 181608 字节/e2483410）
+```
+
+### 关键证据：`spot=3`
+
+用户贴的 `mca_trace.log`：
+
+```
+[snap] saved 96704 bytes (heap 65536, fibers 4, events 0)
+[snap] pause timeout 5s: spot=3 loops=742 req=742 fibers=4 live=1 online=1 panic=0 reset=0
+```
+
+`spot=3` = **VM 已经停在安全点上**。所以不是 v0.2.12 修的那个"VM 跑不停"，
+而是宿主在干等一个永远不会到来的回执 —— 握手协议本身有竞态。
+
+### 根因 1：暂停握手（"停稳次数 +1"）
+
+RetroArch 读档前会先 `retro_serialize` 存一个撤销点，两次 `pause` 紧挨着。
+旧协议的 resume 只是个电平标志（request=0）：VM 还没观察到它，请求又变回 1，
+VM 就一直在内层暂停循环里，不再产生第二个回执，宿主等的序号永远不到 → 5 秒放弃。
+
+桌面复现（`--save-state-at=N` 与 `--load-state-at=N` 同一帧，三次）：
+v0.2.12 的代码 **3 次里 2 次** 报 `-2`，trace 同样是 `spot=3`。
+
+**修法**：want/done 双序号。宿主每次 pause 换新序号写 `mcaPauseWant`，VM 停稳后把
+该序号写 `mcaPauseDone`；VM 内层循环条件是"want 仍等于我这次的序号"，换序号必然
+退出 —— 不再要求"中间那次 resume 必须被观察到"。回归 **S9**。
+
+### 根因 2：卡带指纹算在 `vm_patch_image()` 之后
+
+patch 会把 vtable / 内核函数指针（指向 core 自身模块）**就地写回镜像**。指纹原本
+拿 patch 之后的 `dataStart..dataEnd` 现算 —— Linux/Android 的 `.so` 走 ASLR，换进程
+就变，于是**自存的档**重开后被判成"换了卡带"。Windows DLL 基址固定，桌面没暴露。
+
+**修法**：装载时、patch **之前**对原始字节算一次（`vmload.cpp` 的 `mca_image_hash()`），
+存档与校验都用它；启动横幅打印 `cart fingerprint`。回归 **S10**（两次进程一致
+且等于 Python 现算的原始镜像 FNV-1a；把计算挪回 patch 之后即变红）。
+
+> 旧档（≤v0.2.12）在 ARM 上过不了校验，需用 v0.2.13 重新存。
+
+### 顺带
+
+`mcaTrace` 开文件移进互斥区：两个线程同时首次写 trace 会各自 `fopen(...,"w")`，
+后开的截掉先写的 —— 桌面 `[vm] ...` 那几行经常整个消失，真机排障也可能丢关键行。
+
+### 验证
+
+- `test_savestate` **S1–S10 全绿**，发行包 DLL 亦全绿；S9/S10 都用对照构建验过会红
+- `test_buttons` 16/16、`test_lifecycle` 全过；发版矩阵 7/7，7 个 zip 的 `.info`
+  均为 0.2.13
+- cubeland 桌面跨进程读档 `-> OK`；模拟菜单空转 1.5 秒 + 撤销点 + 读档也 OK
+
+### 真机待验（重点）
+
+1. **先用 v0.2.13 重新存一次档**（旧档指纹是补丁后的镜像，必被拒）
+2. 存完退出 RetroArch → 重开 → 加载
+3. 菜单里连按几次 Load State（撤销点 + 读档连续发生，正是 S9 的场景）
+4. 若仍失败，看日志里的 `cart fingerprint` 两次是否相同、trace 里
+   `pause timeout` 那行的 `spot`/`want`/`done`

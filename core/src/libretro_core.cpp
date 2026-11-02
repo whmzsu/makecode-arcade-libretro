@@ -57,7 +57,7 @@ static retro_input_state_t g_input_state = nullptr;
 static retro_log_printf_t g_log = nullptr;
 static bool g_pixel_format_set = false;
 // 版本号只在这里出现一次：.info 打包脚本和运行时横幅都读它
-static const char* const kCoreVersion = "0.2.12";
+static const char* const kCoreVersion = "0.2.13";
 
 static unsigned g_frame = 0;
 static bool g_game_loaded = false;
@@ -504,12 +504,16 @@ bool retro_load_game(const struct retro_game_info* game) {
     }
 
     if (load_pxt64(data, size)) {
-        log_printf(RETRO_LOG_INFO, "[MCA] VM started (%llu-byte image)\n",
-                   (unsigned long long)size);
+        // 镜像字节数取 VM 实际拿到的长度（.pxt64 尾部还有源码映射段，比文件小）
+        log_printf(RETRO_LOG_INFO, "[MCA] VM started (image %u bytes, cart %llu bytes)\n",
+                   pxt::mca_image_bytes(), (unsigned long long)size);
         // 版本横幅 + trace 路径：真机上报障时先看这两行，就知道装的是哪一版、
         // 日志到底写在哪（mca_trace.log 找不到时这里会显示实际退回的位置）。
-        log_printf(RETRO_LOG_INFO, "[MCA] core version %s, trace -> %s\n",
-                   kCoreVersion, pxt_vm_trace_path());
+        // 指纹也放这儿：它只取决于卡带字节（打补丁之前算），真机上报"卡带不同"
+        // 时两个值一对比就知道是不是换了卡带。
+        log_printf(RETRO_LOG_INFO,
+                   "[MCA] core version %s, cart fingerprint %08x, trace -> %s\n",
+                   kCoreVersion, pxt::mca_image_hash(), pxt_vm_trace_path());
         pxt_vm_trace("=== core started ===");
         g_game_loaded = true;
         return true;

@@ -81,7 +81,7 @@ makecode_arcade/
 | M1 | PNG 卡带解码（像素解码 + blob 位流 + LZMA + 项目 JSON） | ✅ cart.c 接入完成，3 张真实卡带冒烟通过（source 字节数与 Python 解码/生产日志一致） |
 | M2 | vendor pxt C++ 运行时（screen/sprite/引擎）独立构建 | ✅ pxtapp vendored 到 runtime/pxtapp（33 TU 游戏无关，已验证 ping/jumpy/cube-land 共用同一二进制） |
 | M3 | pxt VM 字节码解释器接入，跑通第一个游戏 | ✅ **三款游戏全通**：vm_smoke（官方 ABI 直调）+ libretro 假前端路径（RGB565/按键沿/音频） |
-| M4 | 输入 / 音频合成 / 60fps 帧模型完整化 | ✅ 宿主接口全部打通：按键描述符/分键重绑、音频合成与峰值回归、帧驱动虚拟时钟（前端一圈一帧，快进=前端多取帧）、panic 横幅、存档目录对接（trace/数据走 `GET_SAVE_DIRECTORY`）、**retro_serialize/unserialize 快照**（v0.2.12，同会话 + 跨会话精确恢复，S1–S8 回归全绿） |
+| M4 | 输入 / 音频合成 / 60fps 帧模型完整化 | ✅ 宿主接口全部打通：按键描述符/分键重绑、音频合成与峰值回归、帧驱动虚拟时钟（前端一圈一帧，快进=前端多取帧）、panic 横幅、存档目录对接（trace/数据走 `GET_SAVE_DIRECTORY`）、**retro_serialize/unserialize 快照**（v0.2.13，同会话 + 跨会话精确恢复，S1–S10 回归全绿） |
 | M5 | 离线转换工具（PNG→bytecode）+ 游戏兼容性测试集 | ✅ tools/png2pxt64.py 全自动转换，三卡带实测通过 |
 | M6 | 交叉编译（掌机/桌面/移动）+ 性能验证 | ✅ **7 个主流目标全通并出 zip**（Windows x64/arm64、Linux x64/arm64/armhf、Android arm64/armv7）；✅ **RK3566 + ArkOS 真机验收通过**（v0.2.1，用户反馈运行正常、完全无卡顿；帧率数值待量化）；✅ **Android arm64 验收通过**（v0.2.7，功能与 Linux aarch64 一致） |
 
@@ -311,7 +311,7 @@ python tools/make_probe_cartridge.py --audio        # 生成 out/pxt64/audio_pro
 python tools/test_lifecycle.py
 
 # 7) 即时存档回归（确定性 / 收敛 / 跨卡带与垃圾拒绝 / 跨进程 / 跨基址 /
-#    rewind / 忙等中断）
+#    rewind / 忙等中断 / 连续存读 / 卡带指纹）
 python tools/test_savestate.py
 #    S8 需要"忙等探针"卡带，缺失时会自动生成：
 python tools/make_probe_cartridge.py --busy           # -> out/pxt64/busy.pxt64
@@ -367,12 +367,21 @@ functions.json 逐字节一致）。
   也随快照保存/恢复。
   确定性回归见 `tools/test_savestate.py`（S1 确定性 / S2 同会话收敛 /
   S3 跨卡带拒绝 / S4 垃圾拒绝 / S5 跨进程 / S6 跨模块基址 /
-  S7 rewind 热路径 / S8 忙等中断）。
+  S7 rewind 热路径 / S8 忙等中断 / S9 连续存读 / S10 卡带指纹）。
   **v0.2.12 修掉真机上的 `pause failed -2`**：读档前核心要先把 VM 停到安全点，
   而 VM 只在主循环顶检查这个请求 —— 游戏里只要有一段不调 `pause` 的长循环
   （启动初始化、紧凑的 CPU 循环），解释器就一直跑到它自然让出为止，真机 ARM
   慢一个数量级，很容易超过等待预算，读档就被放弃了。现在解释器自己每 2048
   条指令查一次请求并让出，无论 VM 在跑什么都能在几十毫秒内停稳。
+  **v0.2.13 修掉真机上仍偶发的 `pause failed -2` 与"卡带不同"误判**：
+  前者是暂停握手用"停稳次数 +1"，而 RetroArch 读档前会先 `serialize` 存一个
+  撤销点、两次暂停紧挨着 —— 上一次的 resume 还没被 VM 看到就又被置成请求，
+  VM 一直停在暂停循环里，不再产生第二次回执（trace 里是 `spot=3` 干等 5 秒）；
+  改成 want/done 双序号就没有"中间那次 resume 必须被观察到"的要求了。
+  后者是指纹算在了 `vm_patch_image()` **之后**的镜像上，而那一步会把 vtable
+  和内核函数指针写回镜像，占机 `-fPIC` 的 .so 走 ASLR，换个进程指纹就变 ——
+  自存的档重开后被当成"换了卡带"拒绝。现在指纹取装载时的原始字节（启动横幅
+  里的 `cart fingerprint` 就是它）。
 - **panic 显示化**：VM 崩溃（panic）时画面顶部会出现红底白字的
   `VM PANIC <code>` 横幅，重启成功后自动消失；详情仍同步进 RetroArch 日志
   （`[MCA-VM] panic code N`）。真机上不用翻日志就能对上故障码。

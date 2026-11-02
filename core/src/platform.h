@@ -124,3 +124,12 @@ size_t vm_flush_logs(void (*emit)(const char*, size_t)); // 倒 VM 日志
 int vm_panic_code();                                // 0 正常；见 M3-VM-HOST.md
 
 } // namespace mca
+
+// —— v0.2.13：卡带身份（C++ 链接，pxt 命名空间，定义在 runtime/pxtapp/core---vm/vmload.cpp）——
+// 装载时的**原始**镜像字节数 + FNV-1a 指纹（vm_patch_image 之前算，与 ASLR /
+// 模块基址无关）。启动横幅会打印它，存档跨会话靠它挡"换了卡带"。
+// 注意：必须放在上面的 extern "C" 之外，否则会变成 C 链接、与定义对不上。
+namespace pxt {
+uint32_t mca_image_bytes();
+uint32_t mca_image_hash();
+} // namespace pxt

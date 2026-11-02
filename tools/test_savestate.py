@@ -19,6 +19,10 @@
 #   S8 忙等：  游戏里有段不调 pause 的长循环，此时读档必须成功
 #              （v0.2.12：真机 `pause failed -2` 的根因是解释器里没有让出点，
 #                宿主等 5 秒也停不稳；桌面用 10 亿次自增复现）
+#   S9 连续存/读：存档紧接着读档（RetroArch 读档前存撤销点的时序）
+#              （v0.2.13：真机 `spot=3` 超时的根因是暂停握手协议有竞态）
+#   S10 卡带指纹：必须是"原始镜像字节"的 FNV-1a，跨进程一致
+#              （v0.2.13：旧实现算在 patch 之后，ASLR 一变就误判成换了卡带）
 #
 # 头部字段偏移（S6 要改写存档，格式定义见 scheduler.cpp 的 McaSnapHeader）：
 #   magic@0 version@4 heapUsed@8 ... modBase@56 modSize@64 imgBytes@72 imgHash@76
@@ -292,6 +296,57 @@ def main():
             why = "pause failed" if "pause failed" in outB else f"读档{'OK' if okLoad else '失败'}"
             print(f"   [FAIL] {why}，退出码={rcB}")
             fails.append("S8 忙等")
+
+    print("== S9 连续存/读：存档紧接着读档（RetroArch 读档前存撤销点的时序）")
+    # 真机 trace 是 `pause timeout 5s: spot=3` —— VM 明明停在安全点上，宿主却在
+    # 干等。根因是旧的"停稳次数 +1"协议：上一次 resume（request=0）还没被 VM
+    # 观察到就又被置成请求，VM 一直待在暂停循环里不出来、也不再产生第二个 ack。
+    # RetroArch 读档前会先 retro_serialize 存一个撤销点，两次 pause 紧挨着，
+    # 正好踩这个窗口（v0.2.12 之前桌面测不出，因为存取都隔了几十帧）。
+    btState = os.path.join(OUT, "backtoback.bin")
+    btArgs = []
+    for f in (120, 160, 200):
+        btArgs += [f"--save-state-at={f}:{btState}",
+                   f"--load-state-at={f}:{btState}"]
+    _, outBt, rcBt = run(PING, 240, btArgs)
+    nSave = outBt.count("快照已存")
+    nLoad = outBt.count("恢复快照")
+    nOk = sum(1 for L in outBt.splitlines() if "恢复快照" in L and "-> OK" in L)
+    if nSave == 3 and nLoad == 3 and nOk == 3 and "pause failed" not in outBt and rcBt == 0:
+        print("   OK  3 次紧密存/读全部成功（无 pause failed）")
+    else:
+        print(f"   [FAIL] 存 {nSave}/3、读 {nLoad}/3、成功 {nOk}/3"
+              + ("，出现 pause failed" if "pause failed" in outBt else "")
+              + f"，退出码={rcBt}")
+        fails.append("S9 连续存/读")
+
+    print("== S10 卡带指纹：只取决于原始镜像字节（打补丁之前），跨进程一致")
+    # 旧实现拿 vm_patch_image() **之后**的镜像算指纹，而 patch 会把 vtable 和
+    # 内核函数指针写进镜像 —— Linux/Android 的 .so 走 ASLR，换个进程指纹就变，
+    # 跨会话读档被误判成"换了卡带"（真机 `拒绝恢复：卡带不同 ... 181608 字节`）。
+    # Windows 的 DLL 基址固定，所以这条以前一直没暴露。
+    # 判据：两次独立进程的指纹相同，且等于"原始镜像字节的 FNV-1a"（Python 现算）。
+    def cart_id(out):
+        a = re.search(r"image (\d+) bytes, cart", out)
+        b = re.search(r"cart fingerprint ([0-9a-f]{8})", out)
+        return (int(a.group(1)), b.group(1)) if a and b else (None, None)
+
+    id1 = cart_id(run(PING, 12, [])[1])
+    id2 = cart_id(run(PING, 12, [])[1])
+    if not id1[0]:
+        print("   [FAIL] 启动横幅里没找到 image/fingerprint（横幅被改过？）")
+        fails.append("S10 指纹")
+    else:
+        raw = open(PING, "rb").read()[: id1[0]]
+        h = 2166136261
+        for x in raw:
+            h = ((h ^ x) * 16777619) & 0xFFFFFFFF
+        exp = "%08x" % h
+        if id1 == id2 and id1[1] == exp:
+            print(f"   OK  两次进程都是 {id1[1]}（= 原始镜像 {id1[0]} 字节的 FNV-1a）")
+        else:
+            print(f"   [FAIL] 两次={id1[1]}/{id2[1]}，原始镜像应为 {exp}")
+            fails.append("S10 指纹")
 
     print()
     if fails:
