@@ -6,18 +6,23 @@
 #   .gitlab-ci.yml             —— 给 libretro 官方 buildbot 收录用的 GitLab CI，
 #                                  不在这里跑，官方镜像仓库时才会生效
 #
-# 工具链说明（重要）：这里用**发行版交叉工具链**（Ubuntu 22.04 的 gcc /
-# mingw-w64 / Android NDK），Linux 产物的 glibc 基线是跑者自带的（2.35）。
-# 正式发行包仍由本地 tools/build_target.sh（zig，glibc 2.17 基线）生成，
-# 所以这里**不发布 Release**，只保证"源码在标准工具链下编得过"。
-# 这也正是官方 buildbot 的构型，两边一致才能证明收录后不会红。
+# 工具链说明（重要）：两套 job 各管一半——
+#   * 发行版工具链 job（gcc / mingw-w64 / Android NDK）：证明"源码在官方
+#     buildbot 的构型下编得过"。**不要换成 zig**：工具链差异本身就是回归
+#     价值（zig 的 mingw 头默认 _WIN32_WINNT=0x0a00，会藏住 GetTickCount64
+#     这类问题，正是发行版 gcc 在 CI 上第一次抓出来的）。
+#   * zig job：与本地发版矩阵（tools/build_matrix.sh）同一工具链、同一
+#     版本、同一份 build_target.sh，验证发版构型在 CI 上可复现。发行版
+#     工具链覆盖不了的两项也在这里补上：windows-arm64、glibc 2.17 基线断言。
+#     Android 本地就是 NDK clang 编，由上面 android job 覆盖，无需 zig。
+# 两边都绿 = 发版产物（本地 zig）与收录产物（发行版 gcc）都有回归兜底。
 #
 # 矩阵只列验证过能编过的平台：
 #   linux-x64 / linux-arm64 / linux-armhf（.so）
 #   windows-x64（mingw-w64，.dll）
 #   android arm64-v8a / armeabi-v7a（ndk-build，见 core/jni/）
 #   macOS 单独一个实验 job（continue-on-error，不阻塞）
-#   windows-arm64 需要 llvm-mingw，发行包里那个由本地 zig 矩阵出
+#   zig：x64/arm64 Windows + Linux x64/arm64/armhf（基线 2.17）
 
 name: build
 
@@ -280,6 +285,104 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.triple }}
+          path: core/dist/${{ matrix.triple }}/*
+          if-no-files-found: error
+          retention-days: 30
+
+  # ------------------------------------------------------------------ zig
+  # 与本地发版矩阵同工具链的一致性验证（分工见文件头注释）。
+  # 版本号必须与本地保持同步：zig 升级可能改变 libc 基线与代码生成。
+  zig:
+    name: zig-${{ matrix.triple }}
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - triple: x86_64-windows-gnu
+            ext: dll
+            apt: binutils-mingw-w64-x86-64
+          - triple: aarch64-windows-gnu
+            ext: dll
+            # objdump 只要认识 PE 格式即可，与目标架构无关
+            apt: binutils-mingw-w64-x86-64
+          - triple: x86_64-linux-gnu.2.17
+            ext: so
+            apt: ''
+          - triple: aarch64-linux-gnu.2.17
+            ext: so
+            apt: ''
+          - triple: arm-linux-gnueabihf.2.17
+            ext: so
+            apt: ''
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: mlugg/setup-zig@v1
+        with:
+          version: 0.17.0
+
+      - name: 安装 binutils（检查 PE 导入/导出表）
+        if: matrix.apt != ''
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends ${{ matrix.apt }}
+
+      - name: 编译
+        run: |
+          set -u
+          log=out/ci-zig.log
+          mkdir -p out
+          # 与本地发版同一份脚本、同一组参数；ZIG 覆盖默认的 common tools 路径
+          if ! ZIG=zig tools/build_target.sh ${{ matrix.triple }} > "$log" 2>&1; then
+            first=$(grep -n -m1 'error:' "$log" | cut -d: -f1 || true)
+            if [ -n "${first:-}" ]; then
+              sed -n "$((first > 8 ? first - 8 : 1)),$((first + 4))p" "$log" \
+                | sed 's/^/::error::zig ${{ matrix.triple }} /'
+            fi
+            grep -E 'error:|undefined reference|cannot find|Error [0-9]' "$log" | head -20
+            exit 1
+          fi
+          tail -5 "$log"
+          ls -l core/dist/${{ matrix.triple }}/
+
+      - name: 检查产物
+        run: |
+          bin=core/dist/${{ matrix.triple }}/makecode_arcade_libretro.${{ matrix.ext }}
+          case ${{ matrix.ext }} in
+            so)
+              file "$bin"
+              echo "== NEEDED =="
+              readelf -d "$bin" | sed -n 's/.*(NEEDED).*\[\(.*\)\]/  \1/p'
+              # 发版基线钉在 2.17：出现更高版本的符号引用说明 zig 升级或
+              # 链接方式变了，老掌机固件会加载失败——发行包的硬断言
+              max=$(readelf -V "$bin" 2>/dev/null | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1 || true)
+              echo "GLIBC 最高符号版本: ${max:-无}"
+              if [ -n "$max" ] && \
+                 [ "$(printf '%s\n%s\n' "$max" GLIBC_2.17 | sort -V | tail -1)" != "GLIBC_2.17" ]; then
+                echo "::error file=tools/build_target.sh::GLIBC 基线超出 2.17（$max），发版包会丢老系统"
+                exit 1
+              fi
+              ;;
+            dll)
+              echo "== 导入的 DLL =="
+              x86_64-w64-mingw32-objdump -p "$bin" | grep -i 'DLL Name' | sort -u
+              for bad in libstdc++-6.dll libgcc_s_seh-1.dll libgcc_s_dw2-1.dll libwinpthread-1.dll; do
+                if x86_64-w64-mingw32-objdump -p "$bin" | grep -q "$bad"; then
+                  echo "::error file=tools/build_target.sh::DLL 依赖 $bad，玩家机器上会加载失败"
+                  exit 1
+                fi
+              done
+              for sym in retro_init retro_run retro_get_system_info retro_load_game; do
+                x86_64-w64-mingw32-objdump -p "$bin" | grep -qw "$sym" \
+                  || { echo "::error::缺少导出符号 $sym"; exit 1; }
+              done
+              ;;
+          esac
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zig-${{ matrix.triple }}
           path: core/dist/${{ matrix.triple }}/*
           if-no-files-found: error
           retention-days: 30

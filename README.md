@@ -232,8 +232,20 @@ cd tools/vm-build && npm install
 | `linux-x64` / `linux-arm64` / `linux-armhf` | Ubuntu 22.04 + gcc 交叉包 | `.so` |
 | `windows-x64` | mingw-w64（**-posix** 线程模型，pxt VM 用 pthread） | `.dll` |
 | `android-arm64` / `android-armv7` | 跑者自带 NDK + `core/jni/`（与官方模板同一套参数） | `.so` |
+| `zig-*`（x64/arm64 Windows + Linux x64/arm64/armhf） | **与本地发版同一工具链**（zig 0.17.0 + `tools/build_target.sh`） | `.so` / `.dll` |
 | `macos-universal` | Xcode clang，arm64+x86_64 | `.dylib`（实验，`continue-on-error`） |
-| `package` | 汇总上面全部产物 → `tools/package_release.sh` | 6 个 zip |
+| `package` | 汇总发行版工具链产物 → `tools/package_release.sh` | 6 个 zip |
+
+工具链**刻意分两套**，别合并：
+
+- 发行版工具链（gcc / mingw / NDK）证明"源码在官方 buildbot 的构型下编得过"。
+  工具链差异本身就是回归价值——`GetTickCount64` 编不过的问题（mingw-gcc 的
+  `_WIN32_WINNT` 默认 XP）正是这套 job 第一次抓出来的，zig 的头文件默认够高，
+  全换 zig 就会把这类问题藏住。
+- `zig-*` job 与本地发版矩阵同一 zig 版本、同一份脚本，验证发版构型在 CI
+  上可复现，并补上发行版工具链覆盖不了的两项：**windows-arm64**、
+  **glibc 2.17 基线硬断言**（`readelf -V` 最高符号版本 ≤ 2.17，超出即红）。
+  Android 本地就是 NDK clang 编，与 android job 同工具链，无需重复。
 
 每个 job 都带断言，不只是"能编过"：
 
@@ -252,10 +264,9 @@ cd tools/vm-build && npm install
 | `.github/workflows/build.yml` | 本仓库（GitHub 托管机器） | 编译回归 + 测试用产物 |
 | `.gitlab-ci.yml` | libretro 官方 buildbot（镜像仓库） | 收录进 RetroArch Core Downloader 用 |
 
-**CI 不发布 Release**。两条原因：一是 CI 用发行版工具链，Linux 产物的 glibc
-基线跟着跑者走（Ubuntu 22.04 = 2.35），而正式发行包要求 2.17 基线；二是发版
-要过一遍 R1 真机验收。正式包仍然只由本地 `tools/build_matrix.sh`（zig）产出。
-CI 里的 `windows-arm64` 也因此缺失（apt 没有 aarch64 mingw，本地 zig 矩阵才有）。
+**CI 不发布 Release**。发版要过一遍 R1 真机验收，这个没法自动化；正式包仍然
+只由本地 `tools/build_matrix.sh`（zig）产出。CI 侧的兜底是 `zig-*` job：同
+工具链、同脚本、glibc 2.17 基线有硬断言，本地矩阵坏了 CI 会先红。
 
 手动触发：仓库 Actions 页 → build → Run workflow。
 
