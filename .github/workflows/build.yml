@@ -329,8 +329,8 @@ jobs:
           tar -xJf zig.tar.xz
           echo "$RUNNER_TEMP/zig-x86_64-linux-0.17.0" >> "$GITHUB_PATH"
           # 断言拿到的就是发版用的版本，防止 URL 改版后静默装错
-          zig version | grep -qx 0.17.0 \
-            || { echo "::error::zig 版本与发版矩阵不一致，检查下载 URL"; exit 1; }
+          v="$(zig version)"
+          [ "$v" = "0.17.0" ] || { echo "::error::zig 版本异常：实际 $v"; exit 1; }
 
       - name: 安装 binutils（检查 PE 导入/导出表）
         if: matrix.apt != ''
