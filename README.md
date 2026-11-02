@@ -261,3 +261,11 @@ functions.json 逐字节一致）。
 设计说明（含重置、卸载与重启后音频的实现）见 `docs/INPUT.md`。
 
 详见 docs/ROUTE-B-DESIGN.md。
+
+## 许可
+
+本项目以 [MIT](LICENSE) 许可发布。vendored 组件沿用其原始许可：
+`core/libretro.h`、`core/third_party/miniz/`、`runtime/pxtapp/`（Microsoft pxt
+运行时）为 MIT，`core/third_party/lzma/`（LzmaDec）为公有领域——来源与出处
+详见 `runtime/VENDORING.md`。`tools/cartconv/` 依赖的 pxt 工具链经
+`npm install` 获取，同为 Microsoft MIT 许可。

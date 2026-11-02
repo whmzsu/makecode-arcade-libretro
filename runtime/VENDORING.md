@@ -22,9 +22,8 @@
 
 ## 已确认的参考实现（不 vendor 进 core，仅对照）
 
-- jan4984/makecode-arcade-emulator（Rust+V8）：`refs/jan4984-lib.rs`
-  里的 PNG 隐写解码是可工作的移植，本项目的 C++ 版以其为蓝本并以
-  pxt 原始实现为准。
+- jan4984/makecode-arcade-emulator（Rust+V8）：其 PNG 隐写解码是可工作的
+  移植，本项目的 C++ 版以其为蓝本并以 pxt 原始实现为准。
 - makecode.games 的 PNG→native 转换服务：证明 PNG→字节码→原生链路
   可行，转换器（tools/pxt-convert）可参考其产物形态。
 
@@ -47,7 +46,8 @@
       已对齐到 core/src/platform.h
 - [x] 引擎分层：引擎 TS 编进 VM 字节码；C++ 侧只有 screen---ext /
       mixer---ext 设备原语
-- [ ] screen---ext / mixer---ext C++ 源完整性与 codal 依赖确认
-- [ ] Makefile.inc（PXT_OBJS）需跑一次 pxt 构建生成
-- [ ] scheduler.cpp 帧步进改造评估
-- [ ] Sound 合成器位置：mixer---ext（待确认实现与输出格式）
+- [x] screen---ext / mixer---ext C++ 源完整性与 codal 依赖确认（已 vendor
+      至 runtime/pxtapp/，剥离 codal 硬件层后独立构建通过）
+- [x] Makefile.inc（PXT_OBJS）已生成并接入 core/Makefile
+- [x] scheduler.cpp 帧步进改造完成（3 个游戏无关 patch，见 README）
+- [x] Sound 合成器位置：mixer---ext，44.1kHz 单声道输出
