@@ -53,17 +53,17 @@ makecode_arcade/
 │   ├── build_matrix.sh     发版矩阵（7 主流目标）/ --all 全架构
 │   ├── package_release.sh  打包发行 zip（core + .info + 说明）
 │   ├── inspect_binary.py   产物自检（架构/libc 基线/依赖/retro_* 导出，纯标准库）
-│   ├── png2pxt64.py        卡带(.png)→字节码(.pxt64) 全自动离线转换
-│   ├── vm-build/           pxt 工具链（node_modules）与 VM 构建脚本
+│   ├── png2pxt64.py        卡带(.png)→字节码(.pxt64) 全自动转换（调 pxt 工具链）
+│   ├── make_probe_cartridge.py  探针卡带生成器（按键/生命周期回归用）
+│   ├── test_buttons.py     按键映射回归（16 用例）
+│   ├── test_lifecycle.py   生命周期回归（换游戏/卸载/重置后音频）
+│   ├── libretro_host.py    假前端宿主 + 描述符静态自检（--dry）
 │   ├── extract_png_meta.py 独立 PNG 卡带解码验证工具（纯 Python 标准库）
-│   └── make_test_cartridge.py  合成测试卡带生成器（编解码回环自测）
-├── test_cartridge.png      合成卡带样本（自测通过）
-└── refs/                   参考资料（不进 core）
-    ├── jan4984-lib.rs      Rust+V8 原型的 PNG 解码与 libretro 胶水
-    ├── jan4984-binding.js  原型的模拟器 API 绑定清单
-    ├── whmzsu-mcarcade-core-README.md       姊妹核心 QuickJS 版说明
-    ├── whmzsu-mcarcade-libretro-README.md   姊妹核心 Hermes 版说明
-    └── whmzsu-libretro/    姊妹核心源码快照（cart/cache/compiler/core 等）
+│   ├── make_test_cartridge.py  合成测试卡带生成器（编解码回环自测）
+│   ├── vm-build/           pxt 工具链依赖清单（package.json）与 VM 构建脚本
+│   └── cartconv/           独立卡带转换器（Node.js，玩家用，详见其 README）
+├── png_examples/           真实卡带样本（ping / jumpy / cube-land / falling-duck）
+└── test_cartridge.png      合成卡带样本（自测通过）
 ```
 
 ## 里程碑速览
@@ -78,12 +78,25 @@ makecode_arcade/
 | M5 | 离线转换工具（PNG→bytecode）+ 游戏兼容性测试集 | ✅ tools/png2pxt64.py 全自动转换，三卡带实测通过 |
 | M6 | 交叉编译（掌机/桌面/移动）+ 性能验证 | ✅ **7 个主流目标全通并出 zip**（Windows x64/arm64、Linux x64/arm64/armhf、Android arm64/armv7）；✅ **RK3566 + ArkOS 真机验收通过**（v0.2.1，用户反馈运行正常、完全无卡顿；帧率数值待量化）；✅ **Android arm64 验收通过**（v0.2.7，功能与 Linux aarch64 一致） |
 
+## 环境要求与快速开始
+
+| 工具 | 什么时候需要 | 说明 |
+|---|---|---|
+| bash | 跑所有 .sh 脚本 | Windows 用 Git Bash 即可 |
+| zig ≥ 0.17 | 编译 core（唯一编译依赖） | `zig cc`/`zig c++` 当编译驱动。默认找 `<项目父目录>/common tools/zig/`，也可用环境变量 `ZIG` 指定可执行文件路径 |
+| Python 3 | 测试与打包脚本 | 只用标准库，无需 pip 装包 |
+| node + npm | 转换卡带（png2pxt64 / cartconv） | 首次使用先 `cd tools/vm-build && npm install`（锁文件锁定 pxt-arcade@4.2.1 + pxt-core@13.2.1；node_modules 不入库） |
+| Android NDK | 仅交叉编译 Android 目标 | r27c 验证过。`ANDROID_NDK_HOME` 环境变量，或放 `<项目父目录>/common tools/android-ndk-r27c` |
+
+即：**只想编译 core 跑测试** → zig 就够；**想转换自己的卡带** → 另装 node
+（或直接用 cartconv 便携包，见下）；**只想玩** → 下 release zip + 转好的 .pxt64，
+什么都不用装。
+
 ## 构建工具链
 
-本机统一用 **zig**（`zig cc`/`zig c++` 即 C/C++ 编译驱动，与姊妹 core
-一致），位于 `../common tools/zig/zig.exe`（0.17.0）。Android 目标用
-**NDK 自带 clang**（`../common tools/android-ndk-r27c`，zig 的 libc++ 与
-bionic 头不兼容）。
+编译统一用 **zig**（`zig cc`/`zig c++` 即 C/C++ 编译驱动，与姊妹 core
+一致）；Android 目标用 **NDK 自带 clang**（zig 的 libc++ 与 bionic 头
+不兼容）。
 
 ```bash
 tools/build_core.sh   # 本机：DLL + core_test + vm_smoke + cart_smoke
@@ -105,6 +118,7 @@ pxt 编译链，玩家解压后把 `.png` 拖到 `cartconv.exe` 上即可，单�
 | 拖拽 | 把 `.png` 或文件夹拖到 `cartconv.exe` |
 | 单张 | `cartconv.exe game.png` |
 | 批量 | `cartconv.exe carts\ -o out\` |
+| 非 Windows（源码直跑） | `node tools/cartconv/cartconv.js game.png`（需先完成上面的 `npm install`；首次运行自动准备编译环境，约 30 秒） |
 
 单张约 10 秒（旧脚本 29 秒）。实现细节与踩坑见 `tools/cartconv/README.md`。
 
@@ -155,15 +169,19 @@ python tools/inspect_binary.py                 # 架构 + libc 基线 + 依赖 +
 细节与坑（glibc 基线、Android NDK、32 位 MIPS、大端字节序）见
 **docs/CROSS-COMPILE.md**。
 
-pxt 工具链（仅重新生成字节码/升级 pxt 版本时需要）：node + npm，
-已装于 `tools/vm-build/node_modules`（pxt-arcade@4.2.1 + pxt-core@13.2.1）。
+pxt 工具链（png2pxt64.py 和 cartconv 转换卡带都依赖）：node + npm。
+首次使用先安装依赖：
+
+```bash
+cd tools/vm-build && npm install
+```
 
 ## 测试（不需要 RetroArch）
 
 ```bash
 tools/build_core.sh
 
-# 1) 卡带 → 字节码（离线，一次性）
+# 1) 卡带 → 字节码（离线；需要 node 工具链，见「环境要求」）
 python tools/png2pxt64.py png_examples/arcade-ping.png out/ping.pxt64
 
 # 2) 假前端走完整 libretro 路径跑 .pxt64（60fps 节拍，出 BMP）

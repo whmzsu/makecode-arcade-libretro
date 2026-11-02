@@ -5,8 +5,8 @@
 
 ## 1. 官方 VM 宿主 ABI（7 个 C 函数）
 
-来源：`microsoft/pxt-arcade` → `libs/hw---vm/sdlmain.cpp`（已存
-refs/pxt-arcade/hw---vm/）。SDL 宿主通过 dlsym 从 libpxt.{so,dll,dylib}
+来源：`microsoft/pxt-arcade` → `libs/hw---vm/sdlmain.cpp`（上游仓库）。
+SDL 宿主通过 dlsym 从 libpxt.{so,dll,dylib}
 取这些符号；我们的 libretro core 等价于把 SDL 换成 libretro 回调：
 
 | 官方 ABI | 作用 | libretro 对应 |

@@ -35,7 +35,7 @@ pxt 的 bytecode/VM 目标与 libSDL 原生版（iOS/Android/桌面）同源，
 ## 1.5 既有 QuickJS / Hermes core 的实测性能（路线 B 的立项依据）
 
 姊妹仓库 mcarcade-core（QuickJS）与 mcarcade-libretro（Hermes）提供了
-真实性能数据（详见 refs/ 下两份 README）：
+真实性能数据（详见姊妹仓库 mcarcade-core / mcarcade-libretro 的 README）：
 
 - **桌面 x64**：ping 5.0ms/帧、jumpy 8.0ms/帧、cube-land 10ms/帧
   （16.67ms 预算），优化已做完（精灵 blit C 化、音频段表游标、零拷贝
