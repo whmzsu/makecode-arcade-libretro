@@ -235,6 +235,7 @@ cd tools/vm-build && npm install
 | `zig-*`（x64/arm64 Windows + Linux x64/arm64/armhf） | **与本地发版同一工具链**（zig 0.17.0 + `tools/build_target.sh`） | `.so` / `.dll` |
 | `macos-universal` | Xcode clang，arm64+x86_64 | `.dylib`（实验，`continue-on-error`） |
 | `package` | 汇总发行版工具链产物 → `tools/package_release.sh` | 6 个 zip |
+| `release`（只在推 `core-v*` tag 时） | 汇总 `zig-*` + `android-*` 产物 → `package_release.sh` → `gh release create` | **7 个 zip**（含只有 zig 能出的 `windows-arm64`） |
 
 工具链**刻意分两套**，别合并：
 
@@ -264,9 +265,20 @@ cd tools/vm-build && npm install
 | `.github/workflows/build.yml` | 本仓库（GitHub 托管机器） | 编译回归 + 测试用产物 |
 | `.gitlab-ci.yml` | libretro 官方 buildbot（镜像仓库） | 收录进 RetroArch Core Downloader 用 |
 
-**CI 不发布 Release**。发版要过一遍 R1 真机验收，这个没法自动化；正式包仍然
-只由本地 `tools/build_matrix.sh`（zig）产出。CI 侧的兜底是 `zig-*` job：同
-工具链、同脚本、glibc 2.17 基线有硬断言，本地矩阵坏了 CI 会先红。
+**发布由 tag 触发**。推 `core-v*` tag 时，`release` job 等 `zig-*` 与
+`android-*` 编完，用与本地同一份 `tools/package_release.sh` 打 7 个包，再创建
+GitHub Release 并把 zip 挂上去。
+
+- 凭据用仓库内置 `GITHUB_TOKEN`（job 级 `contents: write`，全局仍是只读），
+  **不需要 PAT**。Release 对象与附件上传只有 HTTPS API 提供，git/SSH 到不了
+  这一层——SSH key 只能推 commit 和 tag。
+- 发版前硬断言：包数必须 7、每个包 `.info` 的 `display_version` 必须等于 tag，
+  少一个或版本对不上就红，不会发出半套包。
+- 说明文本取 `.github/release-notes/<tag>.md`；没写就退回 `--generate-notes`。
+- 重跑安全：Release 已存在时走 `upload --clobber` + `edit`，不报错。
+
+真机验收（R1）仍然只能在设备上做，自动化不了。tag 发的包和本地
+`tools/build_matrix.sh` 同工具链、同 2.17 基线，构建环境不同可能带来字节差异。
 
 手动触发：仓库 Actions 页 → build → Run workflow。
 
