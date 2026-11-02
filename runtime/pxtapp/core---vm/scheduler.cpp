@@ -99,14 +99,24 @@ static volatile int mcaRestartDone = 0;
 //     共享操作数栈里；VM 线程不在 exec_loop 中间 → 不需要抓 C 栈
 //   - 暂停期间虚拟时钟不走（帧驱动：不取帧就不前进），恢复后 wakeTime
 //     语义不变，也不存在"暂停期间游戏时间溜走"
-// 最坏等待：exec_loop 一个 tick（毫秒级）/ update 的 50ms 帧等待 /
-// target_yield 的 1ms —— 宿主侧 2 秒超时足够。
+// 最坏等待：本来以为只有"exec_loop 一个 tick（毫秒级）/ update 的帧等待 /
+// target_yield 的 1ms"，所以给了宿主 2 秒预算。**这个假设是错的**：fiber 里
+// 只要有一段不调 pause 的循环（游戏初始化、紧凑 CPU 循环），exec_loop 就会
+// 一直跑到它自然让出为止 —— 桌面上几十毫秒，真机 ARM 慢一个数量级，实测
+// 超过 2 秒，于是加载存档失败 `pause failed -2`。现在 exec_loop 自己每 2048
+// 条指令查一次 mca_pause_pending() 并让出，见 vm.cpp。
 static volatile int mcaPauseRequest = 0;
 static volatile int mcaPaused = 0;
 // 暂停握手序号：VM 每**真正**在循环顶停稳一次就 +1。宿主不能只看 mcaPaused —
 // 上一次暂停的 mcaPaused 可能还没被 VM 清掉，宿主会立刻拿到"已暂停"然后
 // 在 VM 还在跑的时候拍快照（拍出半截状态，恢复后几十帧后走岔，甚至崩）。
 static volatile unsigned mcaPauseAck = 0;
+// VM 线程当前在干什么（只在暂停超时时打到 trace 里，用来区分"卡在解释器"
+// 和"卡在等帧/清理"）：
+//   0 = 主循环顶   1 = 等前端取帧   2 = 跑 fiber   3 = 暂停中
+static volatile int mcaVmSpot = 0;
+
+int mca_pause_pending() { return mcaPauseRequest; }
 
 // MCA PATCH 6（本项目）：重启路径埋点。
 //
@@ -604,11 +614,13 @@ static void mainRunLoop() {
         if (mcaPauseRequest) {
             mcaPaused = 1;
             mcaPauseAck++; // 只有走到这里才算"停稳了"，见 pxt_state_pause
+            mcaVmSpot = 3;
             // 暂停期间低占用地等宿主搬完状态（sleep_core_us 的亚毫秒在
             // Windows 上退化成 Sleep(0)，会把一个核空转满）
             while (mcaPauseRequest)
                 mca_tick_wait(5);
             mcaPaused = 0;
+            mcaVmSpot = 0;
             f = NULL;
             continue;
         }
@@ -616,9 +628,12 @@ static void mainRunLoop() {
         // 没有这个同步，VM 的圈数会随调度在「前端帧数」附近漂移，虚拟时间
         // 跟着漂，同一输入的两次运行画面就分岔（存档确定性的前提）。
         if (!mca_frame_requested()) {
+            mcaVmSpot = 1;
             mca_tick_wait(5);
+            mcaVmSpot = 0;
             continue;
         }
+        mcaVmSpot = 2;
         g_loops++;
         g_virtTimeNum += MCA_FRAME_STEP;
         // 发布一帧给前端（内容 = 上一圈逻辑执行完后的画面缓冲）。
@@ -1187,8 +1202,18 @@ DLLEXPORT int pxt_state_pause() {
         struct timeval t1;
         gettimeofday(&t1, NULL);
         long elapsedMs = (t1.tv_sec - t0.tv_sec) * 1000L + (t1.tv_usec - t0.tv_usec) / 1000L;
-        if (elapsedMs >= 2000) {
+        if (elapsedMs >= 5000) {
             mcaPauseRequest = 0;
+            // 卡住时把 VM 线程的位置打出来：spot 1=等帧 2=跑 fiber（正常几毫秒
+            // 就该回来）3=卡在暂停里 0=主循环顶但没看到请求（内存可见性）
+            int nf = 0;
+            for (auto f = allFibers; f; f = f->next)
+                nf++;
+            mcaTrace("[snap] pause timeout 5s: spot=%d loops=%llu req=%llu "
+                     "fibers=%d live=%d online=%d panic=%d reset=%d",
+                     mcaVmSpot, (unsigned long long)g_loops,
+                     (unsigned long long)g_frameRequests, nf, (int)mcaMainLoopLive,
+                     pxtVmLive, panicCode, mcaResetRequest);
             return -2; // 超时：VM 卡在意外位置，放弃快照而不是挂死前端
         }
         sleep_core_us(1000);

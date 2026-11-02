@@ -356,7 +356,8 @@ def parse_args(argv):
            "turbo": False,
            "save_state_at": {},   # {帧号: 路径}
            "load_state_at": {},   # {帧号: 路径}
-           "hash_every": 0}       # >0：每 N 帧输出一次画面哈希
+           "hash_every": 0,       # >0：每 N 帧输出一次画面哈希
+           "stall_before_load": 0}  # >0：读档前先不拉帧等这么多毫秒（模拟前端菜单）
     for a in argv:
         if a.startswith("--bmp="):
             cfg["bmp"] = a.split("=", 1)[1]
@@ -387,6 +388,8 @@ def parse_args(argv):
         elif a.startswith("--load-state-at="):
             frm, path = a.split("=", 1)[1].split(":", 1)
             cfg["load_state_at"][int(frm)] = path
+        elif a.startswith("--stall-before-load="):
+            cfg["stall_before_load"] = int(a.split("=", 1)[1])   # 毫秒：模拟前端开着菜单
         elif a.startswith("--hash-every="):
             cfg["hash_every"] = max(1, int(a.split("=", 1)[1]))
         elif a.startswith("--switch="):
@@ -606,6 +609,13 @@ def main():
                 if i in cfg["load_state_at"]:
                     with open(cfg["load_state_at"][i], "rb") as fh:
                         data = fh.read()
+                    # --stall-before-load：读档前先"合上菜单前"的那段空转。
+                    # RetroArch 在菜单里不调 retro_run，VM 这时不在跑帧，
+                    # 与桌面测试"帧帧不断"的时序完全不同。
+                    stall = cfg.get("stall_before_load", 0)
+                    if stall:
+                        say(f"   [host] frame {i}: 模拟菜单 {stall}ms 不拉帧")
+                        time.sleep(stall / 1000.0)
                     sz = lib.retro_serialize_size()
                     buf = (ctypes.c_char * sz)()
                     ctypes.memmove(buf, data[:sz], min(len(data), sz))

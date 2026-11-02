@@ -15,6 +15,10 @@
 #   S6 跨基址：S5 的存档改写"保存时的模块基址"（模拟动态加载器换了地址），
 #              恢复必须照样逐帧重合 —— 堆里有指向 core 自身代码的指针，
 #              不做重定位的话这里会崩（真机上是"加载存档后 RetroArch 闪退"）
+#   S7 rewind：同一存档每 20 帧读一次，压恢复路径的内存管理
+#   S8 忙等：  游戏里有段不调 pause 的长循环，此时读档必须成功
+#              （v0.2.12：真机 `pause failed -2` 的根因是解释器里没有让出点，
+#                宿主等 5 秒也停不稳；桌面用 10 亿次自增复现）
 #
 # 头部字段偏移（S6 要改写存档，格式定义见 scheduler.cpp 的 McaSnapHeader）：
 #   magic@0 version@4 heapUsed@8 ... modBase@56 modSize@64 imgBytes@72 imgHash@76
@@ -43,6 +47,7 @@ else:
     CORE = os.path.join(ROOT, "core", "makecode_arcade_libretro.so")
 
 PING = os.path.join(ROOT, "out", "pxt64", "ping.pxt64")
+BUSY = os.path.join(ROOT, "out", "pxt64", "busy.pxt64")
 JUMPY = os.path.join(ROOT, "out", "pxt64", "jumpy.pxt64")
 
 
@@ -261,6 +266,32 @@ def main():
         print(f"   [FAIL] 存={'OK' if okSave else '失败'}，不重合帧数={len(bad)}"
               + (f"，例如 {bad[:3]}" if bad else ""))
         fails.append("S7 rewind")
+
+    print("== S8 忙等：游戏卡在不调 pause 的长循环里，读档必须成功")
+    # 真机报过 `unserialize: pause failed -2`（等 5 秒也没停稳）。根因不是握手，
+    # 是 VM 根本没机会看请求：fiber 里一段不调 pause 的循环会让解释器一直跑到
+    # 它自然让出为止，主循环顶的检查点轮不到。桌面上 10 亿次自增 ≈ 20 秒，
+    # 足够把"宿主 5 秒预算"撞穿。
+    #
+    # 判定：读档必须返回 OK，且日志里不能出现 pause failed（对照见 v0.2.11：
+    # 同一个卡带、同一个时机，必现 -2）。
+    if not os.path.isfile(BUSY):
+        subprocess.run([sys.executable, os.path.join(HERE, "make_probe_cartridge.py"),
+                        "--busy", BUSY], cwd=ROOT, check=False)
+    if not os.path.isfile(BUSY):
+        print("   [SKIP] 忙等探针卡带生成失败（需要 pxt 工具链）")
+    else:
+        busyState = os.path.join(OUT, "busy_state.bin")
+        _, outB, rcB = run(BUSY, 50, ["--press=a", "--press-at=20",
+                                      f"--save-state-at=10:{busyState}",
+                                      f"--load-state-at=40:{busyState}"])
+        okLoad = "-> OK" in outB
+        if okLoad and "pause failed" not in outB and rcB == 0:
+            print("   OK  忙等中断点生效：VM 在解释器内部被打断并停稳")
+        else:
+            why = "pause failed" if "pause failed" in outB else f"读档{'OK' if okLoad else '失败'}"
+            print(f"   [FAIL] {why}，退出码={rcB}")
+            fails.append("S8 忙等")
 
     print()
     if fails:

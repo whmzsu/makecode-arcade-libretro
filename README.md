@@ -81,7 +81,7 @@ makecode_arcade/
 | M1 | PNG 卡带解码（像素解码 + blob 位流 + LZMA + 项目 JSON） | ✅ cart.c 接入完成，3 张真实卡带冒烟通过（source 字节数与 Python 解码/生产日志一致） |
 | M2 | vendor pxt C++ 运行时（screen/sprite/引擎）独立构建 | ✅ pxtapp vendored 到 runtime/pxtapp（33 TU 游戏无关，已验证 ping/jumpy/cube-land 共用同一二进制） |
 | M3 | pxt VM 字节码解释器接入，跑通第一个游戏 | ✅ **三款游戏全通**：vm_smoke（官方 ABI 直调）+ libretro 假前端路径（RGB565/按键沿/音频） |
-| M4 | 输入 / 音频合成 / 60fps 帧模型完整化 | ✅ 宿主接口全部打通：按键描述符/分键重绑、音频合成与峰值回归、帧驱动虚拟时钟（前端一圈一帧，快进=前端多取帧）、panic 横幅、存档目录对接（trace/数据走 `GET_SAVE_DIRECTORY`）、**retro_serialize/unserialize 快照**（v0.2.11，同会话 + 跨会话精确恢复，S1–S7 回归全绿） |
+| M4 | 输入 / 音频合成 / 60fps 帧模型完整化 | ✅ 宿主接口全部打通：按键描述符/分键重绑、音频合成与峰值回归、帧驱动虚拟时钟（前端一圈一帧，快进=前端多取帧）、panic 横幅、存档目录对接（trace/数据走 `GET_SAVE_DIRECTORY`）、**retro_serialize/unserialize 快照**（v0.2.12，同会话 + 跨会话精确恢复，S1–S8 回归全绿） |
 | M5 | 离线转换工具（PNG→bytecode）+ 游戏兼容性测试集 | ✅ tools/png2pxt64.py 全自动转换，三卡带实测通过 |
 | M6 | 交叉编译（掌机/桌面/移动）+ 性能验证 | ✅ **7 个主流目标全通并出 zip**（Windows x64/arm64、Linux x64/arm64/armhf、Android arm64/armv7）；✅ **RK3566 + ArkOS 真机验收通过**（v0.2.1，用户反馈运行正常、完全无卡顿；帧率数值待量化）；✅ **Android arm64 验收通过**（v0.2.7，功能与 Linux aarch64 一致） |
 
@@ -310,8 +310,11 @@ python tools/test_buttons.py
 python tools/make_probe_cartridge.py --audio        # 生成 out/pxt64/audio_probe.pxt64
 python tools/test_lifecycle.py
 
-# 7) 即时存档回归（确定性 / 收敛 / 跨卡带与垃圾拒绝 / 跨进程 / 跨基址 / rewind）
+# 7) 即时存档回归（确定性 / 收敛 / 跨卡带与垃圾拒绝 / 跨进程 / 跨基址 /
+#    rewind / 忙等中断）
 python tools/test_savestate.py
+#    S8 需要"忙等探针"卡带，缺失时会自动生成：
+python tools/make_probe_cartridge.py --busy           # -> out/pxt64/busy.pxt64
 #    并行压测（多份套件同时跑，输出目录必须分开）：
 #    MCA_TEST_OUT=out/par1 python tools/test_savestate.py
 ```
@@ -364,7 +367,12 @@ functions.json 逐字节一致）。
   也随快照保存/恢复。
   确定性回归见 `tools/test_savestate.py`（S1 确定性 / S2 同会话收敛 /
   S3 跨卡带拒绝 / S4 垃圾拒绝 / S5 跨进程 / S6 跨模块基址 /
-  S7 rewind 热路径）。
+  S7 rewind 热路径 / S8 忙等中断）。
+  **v0.2.12 修掉真机上的 `pause failed -2`**：读档前核心要先把 VM 停到安全点，
+  而 VM 只在主循环顶检查这个请求 —— 游戏里只要有一段不调 `pause` 的长循环
+  （启动初始化、紧凑的 CPU 循环），解释器就一直跑到它自然让出为止，真机 ARM
+  慢一个数量级，很容易超过等待预算，读档就被放弃了。现在解释器自己每 2048
+  条指令查一次请求并让出，无论 VM 在跑什么都能在几十毫秒内停稳。
 - **panic 显示化**：VM 崩溃（panic）时画面顶部会出现红底白字的
   `VM PANIC <code>` 横幅，重启成功后自动消失；详情仍同步进 RetroArch 日志
   （`[MCA-VM] panic code N`）。真机上不用翻日志就能对上故障码。

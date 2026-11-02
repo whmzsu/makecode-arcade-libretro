@@ -136,6 +136,9 @@ void sleep_us(uint64_t us);
 void releaseFiber();
 uint64_t current_time_us();
 int current_time_ms();
+// MCA v0.2.12：宿主是否在请求快照暂停。解释器每 2048 条指令查一次就够
+// （fiber 里若有长循环不调 pause，光靠主循环顶的检查点会等不到）。
+int mca_pause_pending();
 void initRuntime();
 void initSystemTimer();
 void sendSerial(const char *data, int len);

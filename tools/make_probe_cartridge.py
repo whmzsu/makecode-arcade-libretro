@@ -78,19 +78,54 @@ PXT_JSON = """{
 }
 """
 
+# 忙等探针：按 A 后在 fiber 里跑一段**不调 pause**的循环。
+#
+# 用途：验证宿主请求快照暂停时，VM 能不能从"解释器内部"被打断。真机上加载
+# 存档报 `pause failed -2`（等 5 秒也没停稳）就是这个场景：游戏里有段长循环
+# （初始化、紧凑的 CPU 循环），解释器不回到主循环顶，检查点根本轮不到。
+# 循环次数要足够大 —— 桌面大约 1 亿次/2 秒，ARM 慢一个数量级。
+BUSY_TS = """// 忙等探针：按 A 后跑一亿次自增，中间不调用任何会让出的 API。
+scene.setBackgroundColor(1)
+controller.A.onEvent(ControllerButtonEvent.Pressed, function () {
+    scene.setBackgroundColor(2)
+    let t = 0
+    while (t < 1000000000) {
+        t += 1
+    }
+    scene.setBackgroundColor(3)
+})
+"""
+
+BUSY_JSON = """{
+    "name": "busy",
+    "description": "makecode_arcade busy-loop probe",
+    "dependencies": {
+        "device": "*"
+    },
+    "files": [
+        "main.ts"
+    ],
+    "target": { "name": "busy" }
+}
+"""
+
 
 def main():
     argv = [a for a in sys.argv[1:] if not a.startswith("--")]
     audio = "--audio" in sys.argv
-    if audio:
-        out = argv[0] if argv else os.path.join(P.ROOT, "out", "pxt64", "audio_probe.pxt64")
+    busy = "--busy" in sys.argv
+    if busy:
+        kind, ts, js, default = "busy", BUSY_TS, BUSY_JSON, "busy.pxt64"
+    elif audio:
+        kind, ts, js, default = "audio", AUDIO_TS, PXT_JSON, "audio_probe.pxt64"
     else:
-        out = argv[0] if argv else os.path.join(P.ROOT, "out", "pxt64", "probe.pxt64")
+        kind, ts, js, default = "probe", PROBE_TS, PXT_JSON, "probe.pxt64"
+    out = argv[0] if argv else os.path.join(P.ROOT, "out", "pxt64", default)
     if not os.path.isfile(P.PXT_JS):
         raise SystemExit(f"pxt core not found: {P.PXT_JS}\n先运行 tools/vm-build/setup_toolchain.sh")
 
     src = os.path.join(P.TARGET, "proj_ping")
-    proj = os.path.join(P.TARGET, "proj_audio_probe" if audio else "proj_probe")
+    proj = os.path.join(P.TARGET, "proj_" + ("audio_probe" if kind == "audio" else kind))
     if not os.path.isdir(os.path.join(src, "pxt_modules")):
         raise SystemExit(f"{src}/pxt_modules 不存在：先跑一次 png2pxt64.py 把依赖装上")
 
@@ -103,10 +138,10 @@ def main():
         print(f"[1/3] 复用已有工程 {proj}")
 
     with open(os.path.join(proj, "main.ts"), "w", encoding="utf8", newline="\n") as f:
-        f.write(AUDIO_TS if audio else PROBE_TS)
+        f.write(ts)
     with open(os.path.join(proj, "pxt.json"), "w", encoding="utf8", newline="\n") as f:
-        f.write(PXT_JSON)
-    print("[2/3] 写入%s main.ts" % ("声音探针" if audio else "按键探针"))
+        f.write(js)
+    print("[2/3] 写入%s main.ts" % {"busy": "忙等探针", "audio": "声音探针"}.get(kind, "按键探针"))
 
     proc = P.run_pxt(["build", "--hwvariant", "vm"], proj)
     image = os.path.join(proj, "built", "binary.pxt64")

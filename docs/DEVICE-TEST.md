@@ -315,3 +315,63 @@ failed: -10`、界面说"加载成功"但游戏照旧）都源于此。v0.2.11 �
   游戏加载存档能否续上、Rewind 长时间按住是否稳定。
 - 单份快照 ≈ 1.6MB（含 19240 字节画面双缓冲）；Rewind 环形缓冲默认几十份，
   掌机内存占用待实测。
+
+
+## 2026-11-02（真机反馈 → 修复）：v0.2.12 读档 `pause failed -2`
+
+### 真机现象
+
+v0.2.11 上保存正常，加载失败，日志：
+
+```
+[libretro ERROR] [MCA] unserialize: pause failed -2
+[ERROR] [State]: 加载状态失败于 ".../cubeland.state1"
+```
+
+（v0.2.11 之前是 `unserialize failed: -10`，两个问题不重叠：-10 是卡带身份/
+地址不符，-2 是"VM 停不下来，放弃快照"。）
+
+### 根因
+
+暂停请求只在 `mainRunLoop` 顶部被检查，而 fiber 里一段不调 `pause` 的循环会让
+`exec_loop` 一直跑到它自然让出为止。桌面几十毫秒，真机 ARM 慢一个数量级 →
+超过宿主 5 秒预算 → 放弃。
+
+**桌面复现**（`tools/make_probe_cartridge.py --busy` 生成 10 亿次自增探针）：
+
+```
+[host] frame 20: 按下 A
+[core] [MCA] unserialize: pause failed -2      <-- 与真机同一行
+trace: [snap] pause timeout 5s: spot=2 loops=24 req=151 fibers=3 live=1
+       online=1 panic=0 reset=0
+```
+
+`spot=2` = VM 卡在解释器里跑 fiber；`loops=24` = 帧号自第 24 圈起不再推进，
+说明它压根没回到循环顶，不是没看到请求。
+
+### 修法
+
+`exec_loop` 每 2048 条指令查一次 `mca_pause_pending()`，命中则把下一条指令存进
+`resumePC`、结束本次 exec_loop，调度器回主循环顶后立即停稳。
+
+**踩坑记录**：第一版在检查点里直接调 `sleep_ms(1)` 让出 —— 段错误。原因是
+`sleep_ms`/`schedule()` 作用于 `currentFiber`，而执行到该点的 `ctx` 未必等于
+当前 fiber（fiber 创建路径会改 `currentFiber`），结果把**别的** fiber 的 pc
+清空了。改成直接写 `ctx` 才安全。
+
+另外暂停超时预算 2s → 5s，超时写一行诊断到 `mca_trace.log`（spot / loops /
+req / fibers / live / online / panic / reset）。
+
+### 验证
+
+- 桌面 S8（忙等中读档）：v0.2.11 代码 **必现 -2**；v0.2.12 通过
+- `test_savestate` S1–S8 全绿；`test_buttons` 16/16；`test_lifecycle` 全过
+- 发版矩阵待跑
+
+### 真机待验（重点）
+
+1. **游戏启动后立刻从菜单加载存档** —— 这是最容易撞上"VM 正在跑启动代码"的时机
+2. 游戏里忙的那一刻（画面元素多、刚开局）加载存档
+3. 长按 Rewind 是否稳定
+4. 若仍失败，取 `mca_trace.log` 里 `[snap] pause timeout` 那行 —— 里面的
+   `spot` 直接指出 VM 卡在哪（1=等帧 2=跑 fiber 3=卡在暂停里 0=主循环顶）
