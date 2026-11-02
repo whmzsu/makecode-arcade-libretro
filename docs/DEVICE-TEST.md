@@ -43,9 +43,11 @@ pxt 上游 `core---vm/platform.cpp` 的 `initRandomSeed()` 在
 
 ### 安装位置（ArkOS）
 
-- 解压发行 zip，把 core 与 `.info` 放同一目录：ArkOS 通常为 `/roms/cores/`
-  （系统分区只读，core 放 roms 分区）。**`.info` 必须同放**，否则「加载核心」
-  列表里不显示 "MakeCode Arcade"。
+- 解压发行 zip，把 core 与 `.info` 放同一目录：ArkOS 上通常为 `/roms/cores/`
+  （系统分区只读，core 放 roms 分区）。**不同平台/发行版的目录位置不一样**，
+  以 RetroArch `设置 → 目录 → 核心 / 核心信息` 里显示的为准；ArkOS 的
+  菜单入口可能在 `options → retroarch` 下。**`.info` 必须同放**，否则
+  「加载核心」列表里不显示 "MakeCode Arcade"。
 - 架构确认：`uname -m` 必须为 `aarch64`；若为 `armv7l` 需换
   `makecode_arcade_linux-armhf.zip`（armhf 尚未真机验证，见下）。
 

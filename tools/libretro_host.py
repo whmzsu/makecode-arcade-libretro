@@ -57,6 +57,7 @@ ENV_GET_LOG_INTERFACE = 27
 ENV_GET_SAVE_DIRECTORY = 31
 ENV_SET_CONTROLLER_INFO = 35
 ENV_GET_INPUT_BITMASKS = 51 | 0x10000        # | RETRO_ENVIRONMENT_EXPERIMENTAL
+ENV_GET_FASTFORWARDING = 49 | 0x10000        # | RETRO_ENVIRONMENT_EXPERIMENTAL
 
 PIXEL_FORMAT_0RGB1555 = 0
 PIXEL_FORMAT_XRGB8888 = 1
@@ -154,12 +155,13 @@ class LogCallbackStruct(ctypes.Structure):
 stats = {"video_frames": 0, "nonblack": 0, "w": 0, "h": 0, "audio_frames": 0,
          "audio_peak": 0, "audio_loud": 0, "audio_peak_win": 0,
          "last_frame": None, "descriptors": [], "port_types": [],
-         "vars": {}, "vars_read": []}
+         "vars": {}, "vars_read": [], "distinct": 0}
 _keepalive = []          # 回调对象/字符串必须保活，否则被 GC 后前端调用会崩
 LOG_PREFIX = {LOG_ERROR: "[E]", LOG_WARN: "[W]", LOG_INFO: "[I]", LOG_DEBUG: "[D]"}
 
 OPTIONS = {}             # 核心选项当前值（key -> value）
 BITMASK = False          # GET_INPUT_BITMASKS 的回答
+FASTFORWARD = False      # GET_FASTFORWARDING 的回答（--fastforward 打开）
 HELD = set()             # 当前按住的按键 id
 
 
@@ -224,6 +226,10 @@ def env_cb(cmd, data):
         say(f"  [host] GET_INPUT_BITMASKS -> {BITMASK}")
         return BITMASK
 
+    if cmd == ENV_GET_FASTFORWARDING:
+        ctypes.cast(data, ctypes.POINTER(ctypes.c_ubyte))[0] = 1 if FASTFORWARD else 0
+        return True
+
     if cmd == ENV_SET_INPUT_DESCRIPTORS:
         arr = ctypes.cast(data, ctypes.POINTER(retro_input_descriptor))
         descs = []
@@ -274,7 +280,12 @@ def video_cb(data, width, height, pitch):
         dark = sum(1 for i in range(n) if pixels[i] & 0xF800 == 0 and pixels[i] & 0x07E0 == 0
                    and pixels[i] & 0x001F == 0)
         stats["nonblack"] = max(stats["nonblack"], 100 - dark * 100 // n)
-    stats["last_frame"] = (bytes(ctypes.string_at(data, width * height * 2)), width, height)
+    raw = bytes(ctypes.string_at(data, width * height * 2))
+    # 独立帧计数：turbo 模式下拉帧远快于游戏产出，重复帧不代表游戏在动。
+    # 相邻两次画面不同才算游戏真的走了一帧（快进测试的量化依据）。
+    if stats["last_frame"] is None or stats["last_frame"][0] != raw:
+        stats["distinct"] += 1
+    stats["last_frame"] = (raw, width, height)
     stats["video_frames"] += 1
 
 
@@ -338,10 +349,11 @@ def input_state_cb(port, device, index, id_):
 
 def parse_args(argv):
     """把 --opt k=v / --press=A 这类选项摘出来，返回剩余位置参数。"""
-    global BITMASK
+    global BITMASK, FASTFORWARD
     pos = []
     cfg = {"bmp": None, "press": None, "press_at": 4, "release": None, "dry": False,
-           "seq": None, "switch": None, "dlclose": False, "data_dir": None}
+           "seq": None, "switch": None, "dlclose": False, "data_dir": None,
+           "turbo": False}
     for a in argv:
         if a.startswith("--bmp="):
             cfg["bmp"] = a.split("=", 1)[1]
@@ -362,6 +374,10 @@ def parse_args(argv):
             cfg["release"] = int(a.split("=", 1)[1])
         elif a == "--bitmask":
             BITMASK = True
+        elif a == "--fastforward":
+            FASTFORWARD = True                     # 对核心回答"正在快进"
+        elif a == "--turbo":
+            cfg["turbo"] = True                    # 帧循环不 sleep（测快进用）
         elif a.startswith("--switch="):
             cfg["switch"] = a.split("=", 1)[1]     # 换游戏：第二张卡带路径
         elif a == "--dlclose":
@@ -561,7 +577,8 @@ def main():
                     f"audio_frames={stats['audio_frames']} "
                     f"audio_peak(近30帧)={stats['audio_peak_win']}")
                 stats["audio_peak_win"] = 0
-            time.sleep(0.016)
+            if not cfg["turbo"]:
+                time.sleep(0.016)
         return time.time() - t_start
 
     say(f"== 10. 帧循环（{frames} 帧，16ms 节拍）")
@@ -571,7 +588,8 @@ def main():
         say(f"   [FAIL] 帧循环异常 @ {stats['video_frames']} 帧: {exc}")
         return 4
 
-    say(f"== 11. 统计：video={stats['video_frames']} 帧, "
+    say(f"== 11. 统计：video={stats['video_frames']} 帧（其中独立画面 {stats['distinct']} 帧，"
+        f"游戏真实帧率 ≈ {stats['distinct'] / dt:.0f} fps）, "
         f"画面非黑峰值 {stats['nonblack']}%, audio={stats['audio_frames']} 采样帧, "
         f"音频峰值 {stats['audio_peak']}（有声采样帧 {stats['audio_loud']}）, "
         f"{frames / dt:.1f} fps 实际节拍")

@@ -50,6 +50,11 @@ int pxt_vm_poll_exit();   // 返回 1 表示 VM 线程已退出（读后自动�
 int pxt_vm_stop();
 int pxt_vm_running();     // VM 线程是否仍在运行
 
+// MCA PATCH 10：VM 时钟刻度（快进/慢放基础）。100 = 实时；快进时核心侧
+// 传 400（4 倍速）。游戏节拍（forever 循环 / pause）全挂在 VM 虚拟时钟上，
+// 刻度调高后同样的墙钟时间里虚拟时间流得更快。
+void pxt_set_time_scale(int percent);
+
 } // extern "C"
 
 namespace mca {

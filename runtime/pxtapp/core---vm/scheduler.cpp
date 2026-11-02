@@ -151,10 +151,6 @@ static volatile int pxtVmLive = 1;
 DLLEXPORT int pxt_vm_online() { return pxtVmLive; }
 DLLEXPORT void pxt_vm_set_online(int online) { pxtVmLive = online ? 1 : 0; }
 
-#ifndef PXT_ESP32
-static uint64_t startTime;
-#endif
-
 FiberContext *allFibers;
 FiberContext *currentFiber;
 static pthread_mutex_t eventMutex;
@@ -281,10 +277,48 @@ static uint64_t currTime() {
     return tv.tv_sec * 1000000LL + tv.tv_usec;
 }
 
+// MCA PATCH 10：可缩放的 VM 时钟（快进/慢放的基础）。
+//
+// 游戏的节拍全部挂在 current_time_ms() 上：forever 循环每 20ms 一个 tick、
+// pause(ms) 等 wakeTime —— 都是墙钟。快进时前端以远高于 60fps 的频率调
+// retro_run，但墙钟不变，游戏照样 1x 跑，多余的画面请求只能拿到重复帧。
+// 把"现在几点"改成虚拟时钟后，核心侧把刻度调高，同样的墙钟时间里
+// 虚拟时间流得更快，游戏随之加速；音频是拉动式（fillSamples 按请求产出），
+// 自动跟随游戏速度，快进时的音频表现与其它核心一致（加速播放）。
+//
+// 刻度换基（rebase）只在 VM 线程做：current_time_us 的全部调用方都在
+// VM 线程，g_timeScalePct 是唯一跨线程写入口，int 宽度天然原子。
+static volatile int g_timeScalePct = 100; // 100 = 实时；核心侧快进时写 400
+static uint64_t g_virtBaseUs = 0;         // 换基时刻的虚拟时间
+static uint64_t g_wallBaseUs = 0;         // 换基时刻的墙钟
+static int g_appliedPct = 100;            // VM 线程视角已生效的刻度
+
+DLLEXPORT void pxt_set_time_scale(int percent) {
+    if (percent < 1) percent = 1;
+    if (percent > 10000) percent = 10000;
+    g_timeScalePct = percent;
+}
+
 uint64_t current_time_us() {
-    if (!startTime)
-        startTime = currTime();
-    return currTime() - startTime;
+    const uint64_t wall = currTime();
+    const int pct = g_timeScalePct;
+
+    if (!g_wallBaseUs) {
+        // 首次调用：虚拟时间从 0 起步（与旧 startTime 语义一致）
+        g_wallBaseUs = wall;
+        g_virtBaseUs = 0;
+        g_appliedPct = pct;
+    } else if (pct != g_appliedPct) {
+        // 刻度变了：把当前虚拟时刻冻结成新基准，之后按新刻度外推。
+        // 必须用**旧**刻度把最后一段墙钟折算完，否则换基瞬间时间会跳。
+        g_virtBaseUs += (uint64_t)((double)(wall - g_wallBaseUs)
+                                   * (double)g_appliedPct / 100.0);
+        g_wallBaseUs = wall;
+        g_appliedPct = pct;
+    }
+
+    return g_virtBaseUs +
+           (uint64_t)((double)(wall - g_wallBaseUs) * (double)g_appliedPct / 100.0);
 }
 #endif
 

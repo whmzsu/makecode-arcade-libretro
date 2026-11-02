@@ -177,14 +177,21 @@ MakeCode Arcade — libretro core ($plat)
   所以解压这一步绕不开。
 
   方式 A：手动拷贝（推荐，最直接）
-    1) 把 makecode_arcade_libretro.$ext 放进 RetroArch 的 cores 目录
-       Windows/Linux: <RetroArch>/cores/
-    2) 把 makecode_arcade_libretro.info 放进同一个 cores 目录
+    1) 把 makecode_arcade_libretro.$ext 放进 RetroArch 的「核心」目录，
+       把 makecode_arcade_libretro.info 放进「核心信息」目录
+       （两者也可以是同一个目录，取决于 RetroArch 的配置）。
+       目录的实际位置因平台/发行版而异，请打开
+       RetroArch 设置 → 目录 → 核心 / 核心信息 查看你设备上的真实路径，
+       不要照搬网上教程里写死的路径。
+    2) 有的发行版「核心信息」目录默认与核心目录不同，且菜单里看不到
+       该项——先开 设置 → 用户界面 → 显示高级设置，或用配置文件给
+       libretro_info_path 赋值。.info 没放对目录时，「加载核心」列表里
+       不会出现本核心。
 
   方式 B：用 RetroArch 安装
     1) 加载核心 → 「安装或恢复核心」→ 选中解压出来的
        makecode_arcade_libretro.$ext，它会被拷进已配置的核心目录
-    2) Install 只拷二进制，.info 不会被带过去——装完确认 cores 目录里
+    2) Install 只拷二进制，.info 不会被带过去——装完确认「核心信息」目录里
        有 makecode_arcade_libretro.info，没有就按方式 A 的第 2 步补上
 
   3) 加载核心 → 选择 .pxt64 文件

@@ -81,7 +81,7 @@ makecode_arcade/
 | M1 | PNG 卡带解码（像素解码 + blob 位流 + LZMA + 项目 JSON） | ✅ cart.c 接入完成，3 张真实卡带冒烟通过（source 字节数与 Python 解码/生产日志一致） |
 | M2 | vendor pxt C++ 运行时（screen/sprite/引擎）独立构建 | ✅ pxtapp vendored 到 runtime/pxtapp（33 TU 游戏无关，已验证 ping/jumpy/cube-land 共用同一二进制） |
 | M3 | pxt VM 字节码解释器接入，跑通第一个游戏 | ✅ **三款游戏全通**：vm_smoke（官方 ABI 直调）+ libretro 假前端路径（RGB565/按键沿/音频） |
-| M4 | 输入 / 音频合成 / 60fps 帧模型完整化 | 宿主接口全部打通；剩余：菜单键映射细化、panic 恢复策略、存档目录对接前端 |
+| M4 | 输入 / 音频合成 / 60fps 帧模型完整化 | 宿主接口全部打通；剩余：存档目录对接前端、retro_serialize 快照（P1） |
 | M5 | 离线转换工具（PNG→bytecode）+ 游戏兼容性测试集 | ✅ tools/png2pxt64.py 全自动转换，三卡带实测通过 |
 | M6 | 交叉编译（掌机/桌面/移动）+ 性能验证 | ✅ **7 个主流目标全通并出 zip**（Windows x64/arm64、Linux x64/arm64/armhf、Android arm64/armv7）；✅ **RK3566 + ArkOS 真机验收通过**（v0.2.1，用户反馈运行正常、完全无卡顿；帧率数值待量化）；✅ **Android arm64 验收通过**（v0.2.7，功能与 Linux aarch64 一致） |
 
@@ -299,10 +299,13 @@ functions.json 逐字节一致）。
 > 转换成 `.pxt64`**（见上文「卡带转换」）。核心不接受 `.png` 作为加载内容。
 
 1. 取 `core/dist/release/makecode_arcade_<platform>.zip`，**先解压**，把其中的
-   core 二进制与 `makecode_arcade_libretro.info` 一起放进 RetroArch 的 cores
-   目录（最直接）。也可以用「安装或恢复核心」选中解压出来的二进制，但那个
-   文件浏览器只列**当前平台的核心文件扩展名**（Windows `.dll` / Linux `.so` /
-   macOS `.dylib`），**zip 不会出现在列表里**，而且 `.info` 不会被带过去；
+   core 二进制放进 RetroArch 的「核心」目录、`makecode_arcade_libretro.info`
+   放进「核心信息」目录（最直接；两者也可以配置为同一目录）。**目录的实际
+   位置因平台/发行版而异**，请在 RetroArch `设置 → 目录 → 核心 / 核心信息`
+   里查看你设备上的真实路径。也可以用「安装或恢复核心」选中解压出来的
+   二进制，但那个文件浏览器只列**当前平台的核心文件扩展名**（Windows `.dll` /
+   Linux `.so` / macOS `.dylib`），**zip 不会出现在列表里**，而且 `.info`
+   不会被带过去；
 2. 加载内容 → 选转换好的 `.pxt64` 文件；
 3. 像素格式 RGB565，160x120@60fps，音频 44.1kHz 单声道。
    重置 / 重启 / 换游戏：
@@ -313,6 +316,21 @@ functions.json 逐字节一致）。
    - 每次重置都会写 trace 到存档目录下的 `mca_trace.log`（写不进去会退到
      当前目录 / `/tmp`，实际路径会打进 RetroArch 日志的
      `[MCA] core version ... trace -> ...` 一行），卡住时看它停在哪一步。
+
+## 快进、慢放与 panic 提示
+
+- **快进**：按住 RetroArch 的快进键（默认可绑）即可，核心通过
+  `GET_FASTFORWARDING`（libretro 实验接口，RetroArch 已支持）感知并把 VM
+  虚拟时钟调到 4 倍速。游戏的节拍（forever 循环、`pause`）全挂在虚拟时钟上，
+  音频是拉动式所以自动加速播放，与其它核心的快进表现一致。老前端不支持该
+  接口时退化为实时速度（不会出错）。慢放无需特殊处理：前端低于 60fps 拉帧
+  时，"上一帧没被取走"的等待会自然把游戏压到消费速度。
+  量化验证（桌面，CPU 满负荷）：4x 时每帧虚拟时间步长 ≈ 墙钟 × 4.0
+  （dt=60~63ms 虚拟 / 15ms 墙钟），表现为精灵 4 倍速移动；CPU 有富余的
+  机器上则会直接表现为帧率上升。
+- **panic 显示化**：VM 崩溃（panic）时画面顶部会出现红底白字的
+  `VM PANIC <code>` 横幅，重启成功后自动消失；详情仍同步进 RetroArch 日志
+  （`[MCA-VM] panic code N`）。真机上不用翻日志就能对上故障码。
 
 ## 按键
 

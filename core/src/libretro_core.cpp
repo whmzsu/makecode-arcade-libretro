@@ -57,10 +57,37 @@ static retro_input_state_t g_input_state = nullptr;
 static retro_log_printf_t g_log = nullptr;
 static bool g_pixel_format_set = false;
 // 版本号只在这里出现一次：.info 打包脚本和运行时横幅都读它
-static const char* const kCoreVersion = "0.2.8";
+static const char* const kCoreVersion = "0.2.9";
 
 static unsigned g_frame = 0;
 static bool g_game_loaded = false;
+
+// ---- 快进 / 慢放 ---------------------------------------------------------
+//
+// RetroArch 快进 = 前端以远超 60fps 的频率调 retro_run。本核心的画面与音频
+// 都是拉动式，消费越快产出越快，但游戏的节拍挂在 VM 虚拟时钟上（forever
+// 循环 20ms 一个 tick、pause 等 wakeTime），刻度不变就永远 1x 跑。
+// 这里每帧问一次前端"是否在快进"（GET_FASTFORWARDING，实验接口，老前端
+// 不支持就返回 false = 永远实时），是则把 VM 时钟调到 4 倍速。
+// 慢放不需要额外处理：前端低于 60fps 拉帧时，"上一帧没被取走"的等待
+// 自然把游戏压到消费速度，音频跟帧走（半速播放），本身就是慢放效果。
+static void log_printf(enum retro_log_level level, const char* fmt, ...);
+static const int kNormalScalePct = 100;
+static const int kFastForwardScalePct = 400;
+static int g_scale_applied = 0; // 0 = 尚未设置过；避免每帧重复写同一值
+
+static void update_time_scale() {
+    if (!runtime_available()) return;
+    bool ff = false;
+    if (g_env) g_env(RETRO_ENVIRONMENT_GET_FASTFORWARDING, &ff);
+    const int pct = ff ? kFastForwardScalePct : kNormalScalePct;
+    if (pct != g_scale_applied) {
+        log_printf(RETRO_LOG_INFO, "[MCA] time scale -> %d%% (%s)\n", pct,
+                   ff ? "fast-forward" : "normal");
+        pxt_set_time_scale(pct);
+        g_scale_applied = pct;
+    }
+}
 
 // ---- 输入配置 -----------------------------------------------------------
 //
@@ -97,6 +124,70 @@ static int16_t g_audio_mono[735];     // VM 输出为 44.1kHz 单声道 S16
 static uint32_t g_bgra[kScreenWidth * kScreenHeight];
 static uint32_t g_prev_buttons = 0;
 static int g_last_panic = 0;
+
+// ---- panic 显示化 --------------------------------------------------------
+//
+// VM 崩溃（panic）以前只进 RetroArch 日志，玩家看到的只是"画面冻住"，
+// 完全不知道发生了什么。这里在输出帧顶部叠一条横幅（自绘 3x5 像素字体，
+// 无外部依赖），把 panic code 直接给玩家：报障时一句话就能对上号。
+// 真机掌机屏幕小、玩家也不会接日志，这条比日志有用得多。
+
+namespace {
+
+// 每字符 5 行、每行 3 位（0b111 = 三格全亮），只在横幅里用
+uint32_t glyph3x5(char c) {
+    switch (c) {
+        case 'P': return 0b111101111100100;
+        case 'A': return 0b111101111101101;
+        case 'N': return 0b101111111101101;
+        case 'I': return 0b111010010010111;
+        case 'C': return 0b111100100100111;
+        case '0': return 0b111101101101111;
+        case '1': return 0b010110010010111;
+        case '2': return 0b111001111100111;
+        case '3': return 0b111001111001111;
+        case '4': return 0b101101111001001;
+        case '5': return 0b111100111001111;
+        case '6': return 0b111100111101111;
+        case '7': return 0b111001010010010;
+        case '8': return 0b111101111101111;
+        case '9': return 0b111101111001111;
+        case '-': return 0b000000111000000;
+        default:  return 0; // 空格
+    }
+}
+
+void draw_text_scaled(const char* text, int x, int y, int scale,
+                      uint16_t color, int bg_w) {
+    for (const char* p = text; *p; ++p) {
+        const uint32_t g = glyph3x5(*p);
+        for (int row = 0; row < 5; ++row) {
+            for (int col = 0; col < 3; ++col) {
+                if (!((g >> (14 - row * 3 - col)) & 1)) continue;
+                for (int sy = 0; sy < scale; ++sy) {
+                    uint16_t* line = g_fb + (y + row * scale + sy) * kScreenWidth;
+                    for (int sx = 0; sx < scale; ++sx)
+                        line[x + col * scale + sx] = color;
+                }
+            }
+        }
+        x += 4 * scale;
+        if (x + 3 * scale > bg_w) break; // 防越界（横幅宽度内必然够用，双保险）
+    }
+}
+
+// panic 横幅：顶部整宽红条 + 白字 "VM PANIC -1234"。
+// scale=2 时字符宽 8px，20 字符 + 间隔 < 160，够放。
+void draw_panic_banner(int code) {
+    char msg[24];
+    std::snprintf(msg, sizeof(msg), "VM PANIC %d", code);
+    const int bar_h = 5 * 2 + 2 * 3; // 5 行字 * 2 倍 + 上下留白 3
+    for (int y = 0; y < bar_h; ++y)
+        for (int x = 0; x < kScreenWidth; ++x) g_fb[y * kScreenWidth + x] = 0xF800;
+    draw_text_scaled(msg, 4, 3, 2, 0xFFFF, kScreenWidth);
+}
+
+} // namespace
 
 // 每帧从 VM 日志环倒出的回调（转发到 libretro 日志）
 static void vm_log_emit(const char* text, size_t len) {
@@ -342,6 +433,7 @@ bool retro_load_game(const struct retro_game_info* game) {
     g_frame = 0;
     g_prev_buttons = 0;
     g_last_panic = 0;
+    g_scale_applied = 0; // 重新装载后强制重设一次时钟刻度
 
     const uint8_t* data = static_cast<const uint8_t*>(game->data);
     const size_t size = game->size;
@@ -526,11 +618,16 @@ void render_vm_frame() {
 
     const int panic = vm_panic_code();
     // -1 = 用户代码/宿主请求的重启中（systemReset 会把 panicCode 置 -1），
-    // 不是真崩溃，不刷日志
-    if (panic != 0 && panic != -1 && panic != g_last_panic) {
-        log_printf(panic >= 1000 ? RETRO_LOG_WARN : RETRO_LOG_ERROR,
-                   "[MCA-VM] panic code %d\n", panic);
-        g_last_panic = panic;
+    // 不是真崩溃，不刷日志、不画横幅
+    if (panic != 0 && panic != -1) {
+        if (panic != g_last_panic) {
+            log_printf(panic >= 1000 ? RETRO_LOG_WARN : RETRO_LOG_ERROR,
+                       "[MCA-VM] panic code %d\n", panic);
+            g_last_panic = panic;
+        }
+        // 横幅每帧都画：画面可能还在动（panic 不一定停帧），叠在上面最直观；
+        // 重启成功后 panic 归零，横幅自然消失
+        draw_panic_banner(panic);
     }
 }
 
@@ -542,6 +639,7 @@ void retro_run(void) {
     if (g_frame == 0) log_printf(RETRO_LOG_INFO, "[MCA] first retro_run\n");
 
     if (runtime_available()) {
+        update_time_scale();
         const unsigned jp = read_joypad_mask();
 
         // 重置键：上升沿触发 VM 重启（真机右侧的 reset 小键）。
