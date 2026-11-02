@@ -131,23 +131,50 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # 必须用 -posix 变体的 mingw（pxt VM 用 pthread，win32 线程模型编不过）
-      - name: 安装 mingw-w64
+      # pxt VM 用 pthread，必须 posix 线程模型（win32 变体没有 pthread.h）。
+      # Ubuntu 的做法是 update-alternatives 在两个变体间切换，切完用不带
+      # 后缀的名字即可（比直接写 -posix 后缀可靠：后缀名字随包版本变过）。
+      #
+      # 失败时把输出转成 ::error:: 注解：job 日志要鉴权才能下，注解在
+      # 公开仓库上是可匿名读的，排查只靠它。
+      - name: 安装 mingw-w64（posix 线程模型）
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends g++-mingw-w64-x86-64-posix
+          set -u
+          out=$( (
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq --no-install-recommends g++-mingw-w64-x86-64-posix
+            sudo update-alternatives --set x86_64-w64-mingw32-gcc \
+                 /usr/bin/x86_64-w64-mingw32-gcc-posix
+            sudo update-alternatives --set x86_64-w64-mingw32-g++ \
+                 /usr/bin/x86_64-w64-mingw32-g++-posix
+            x86_64-w64-mingw32-gcc --version | head -1
+            x86_64-w64-mingw32-g++ --version | head -1
+            ls -l /usr/x86_64-w64-mingw32/lib/libpthread* || true
+          ) 2>&1 ) || {
+            printf '%s\n' "$out" | tail -40
+            printf '%s\n' "$out" | tail -40 | sed 's/^/::error::mingw /'
+            exit 1
+          }
+          printf '%s\n' "$out" | tail -12
 
       - name: 编译
         env:
-          CC: x86_64-w64-mingw32-gcc-posix
-          CXX: x86_64-w64-mingw32-g++-posix
+          CC: x86_64-w64-mingw32-gcc
+          CXX: x86_64-w64-mingw32-g++
           # 三个运行库全部静态链：分发出去的 DLL 不能依赖
           # libstdc++-6.dll / libgcc_s_seh-1.dll / libwinpthread-1.dll
           LDFLAGS: -static-libgcc -static-libstdc++
           # -Wl,-Bstatic 只作用于紧跟的 -lpthread（放行尾，符号已在前面的
           # 目标文件里出现，静态库才能被正确抽取）
           LDLIBS: -Wl,-Bstatic -lpthread -Wl,-Bdynamic
-        run: make -f core/Makefile platform=win64 -j"$(nproc)"
+        run: |
+          set -u
+          out=$( make -f core/Makefile platform=win64 -j"$(nproc)" 2>&1 ) || {
+            printf '%s\n' "$out" | tail -50
+            printf '%s\n' "$out" | tail -50 | sed 's/^/::error::win64 /'
+            exit 1
+          }
+          printf '%s\n' "$out" | tail -15
 
       - name: 检查导入表与导出符号
         run: |
