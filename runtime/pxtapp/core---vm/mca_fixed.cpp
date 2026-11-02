@@ -312,12 +312,26 @@ void computeModuleRange() {
     char *buf = readMaps(&len);
     if (!buf)
         return;
-    // probe 用**数据符号**的地址（&g_modTried），不用函数地址：aarch64 -fPIC 下
-    // 取函数地址可能拿到 PLT 跳板（虽然仍落在本模块内），数据符号没有这层
-    // 间接性，落在哪儿都在 .bss 里，语义最直接。
+
+    // probe 必须取**代码地址**（本函数），不能取数据符号。
+    //
+    // v0.2.14 的教训：一开始用 &g_modTried（.bss），CI 上（真 Linux）算出
+    // base=0 —— Linux 会给 .bss 单独建匿名映射，那一行在 /proc/self/maps 里
+    // 往往**没有路径名**（行尾为空）。按"probe 所在行的路径"去找模块，自然
+    // 一条都匹配不上。代码段（r-xp）一定带路径，所以拿函数地址最稳；
+    // aarch64 -fPIC 下取函数地址走 GOT 拿到的是真实地址，仍在 .text 内。
+    const unsigned long long probe = (unsigned long long)(uintptr_t)(void *)&computeModuleRange;
+
     unsigned long long lo = 0, hi = 0;
-    const int ok = mcaMapsProbe(buf, (unsigned long long)(uintptr_t)&g_modTried, &lo, &hi);
+    int ok = mcaMapsProbe(buf, probe, &lo, &hi);
     free(buf);
+
+    // 合理性校验：算出来的区间必须**包住 probe 自己**，否则说明匹配到了别的
+    // 东西（比如通用路径名把一堆无关的匿名段聚在一起），那样重定位会改坏内存。
+    if (ok && !(lo <= probe && probe < hi)) {
+        mcaTrace("[mod] maps probe 区间异常（lo=%llx hi=%llx probe=%llx），丢弃", lo, hi, probe);
+        ok = 0;
+    }
     if (ok && hi > lo) {
         g_modBase = lo;
         g_modSize = hi - lo;
@@ -400,6 +414,14 @@ static const char *kModSelfTestSpace =
     "20000-2a000 rw-p 0 fd:01 7 /tmp/my core.so (deleted)\n"
     "30000-31000 r-xp 0 fd:01 8 /tmp/other.so\n";
 
+// 没有路径名的匿名映射：Linux 给 .bss 单独建的映射常常长这样。
+// 按"probe 所在行的路径"去找模块时必须干净地失败（返回 0，调用方判
+// UNAVAILABLE），绝不能拿空路径去把一堆无关匿名段聚成一个巨大区间 ——
+// 那样重定位会把堆里所有落在该区间的指针全部平移，直接写坏内存。
+static const char *kModSelfTestAnon =
+    "600000-601000 rw-p 00000000 00:00 0\n"
+    "601000-602000 rw-p 00000000 00:00 0\n";
+
 extern "C" MCA_TEST_EXPORT int mcaModuleMapSelfTest() {
     int fails = 0;
     unsigned long long lo = 0, hi = 0, lo2 = 0, hi2 = 0;
@@ -435,6 +457,11 @@ extern "C" MCA_TEST_EXPORT int mcaModuleMapSelfTest() {
     // 空文本 / 非映射行也不能崩
     MCA_ST(!mcaMapsProbe("", 0x1000ull, &lo, &hi));
     MCA_ST(!mcaMapsProbe("garbage line\n", 0x1000ull, &lo, &hi));
+
+    // probe 落在没有路径名的匿名段里（Linux 的 .bss 就是这样）：必须返回 0，
+    // 不能把空路径当成"模块路径"去聚合。v0.2.14 在 CI 上踩过这个坑 ——
+    // 当时 probe 用的是数据符号，真实 Linux 上 base 恒 0。
+    MCA_ST(!mcaMapsProbe(kModSelfTestAnon, 0x600100ull, &lo, &hi));
 
     (void)lo2;
     (void)hi2;
