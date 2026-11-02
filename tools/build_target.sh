@@ -78,13 +78,14 @@ if [ -z "${CXX:-}" ]; then
   NDK_VERSION="$(sed -n 's/^Pkg.Revision *= *//p' "$NDK/source.properties" 2>/dev/null | head -1)"
 fi
 
-# 目标形态
+# 目标形态（WIN_BASELINE 只对 Windows 目标非空）
+WIN_BASELINE=()
 case "$TAG" in
   *windows*) EXT="dll"; LINK_EXTRA=(-shared -Wl,--export-all-symbols)
-             # mingw-gcc 默认按 XP（0x0502）裁 windows.h，platform.cpp 用了
-             # GetTickCount64（Vista+），不抬到 Win7 编不过（zig 的头默认够高，
-             # 所以只有换 gcc 时才暴露）
-             TARGET_FLAGS=("${TARGET_FLAGS[@]}" -D_WIN32_WINNT=0x0601) ;;
+             # mingw-gcc 默认按 XP 裁 windows.h，platform.cpp 用了
+             # GetTickCount64（Vista+），不抬到 Win7 编不过；用 #ifndef 兜底，
+             # zig 自己的 0x0a00 不会被覆盖（见 core/src/win32_baseline.h）
+             WIN_BASELINE=(-include "$CORE/src/win32_baseline.h") ;;
   *macos*)   EXT="dylib"; LINK_EXTRA=(-dynamiclib) ;;
   *android*) # -static-libstdc++：把 libc++ 静态链进去，产物只依赖 libc/libm/libdl，
              # RetroArch 加载插件时无需 libc++_shared.so（不同 App 的 STL 版本差异会炸）
@@ -103,7 +104,7 @@ PIC=(-fPIC)
 case "$TAG" in *windows*) PIC=() ;; esac
 
 CXXFLAGS=(
-  "${TARGET_FLAGS[@]}" "${PIC[@]}"
+  "${TARGET_FLAGS[@]}" "${PIC[@]}" "${WIN_BASELINE[@]}"
   -std=c++11
   -fno-rtti -fno-exceptions -fno-unwind-tables
   -fwrapv -fno-threadsafe-statics -fno-strict-aliasing
@@ -111,7 +112,7 @@ CXXFLAGS=(
   -I"$PXTAPP"
   -Wno-unused-parameter -Wno-unused-private-field -Wno-vla-cxx-extension
 )
-CFLAGS=("${TARGET_FLAGS[@]}" "${PIC[@]}" -O2)
+CFLAGS=("${TARGET_FLAGS[@]}" "${PIC[@]}" "${WIN_BASELINE[@]}" -O2)
 INC=(-I"$CORE/src" -I"$CORE/third_party/miniz" -I"$CORE/third_party/lzma")
 
 needs_build() { [ ! -f "$2" ] || [ "$1" -nt "$2" ]; }
