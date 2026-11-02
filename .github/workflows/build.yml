@@ -412,7 +412,19 @@ jobs:
       - name: 模块区间自测（maps 解析 + 真实区间非零）
         if: matrix.triple == 'x86_64-linux-gnu.2.17'
         run: |
-          python3 tools/test_modrange.py core/dist/x86_64-linux-gnu.2.17/makecode_arcade_libretro.so
+          set -u
+          # 失败原因要能匿名读（job 日志要鉴权），所以把尾部转成注解。
+          log=out/modrange.log
+          mkdir -p out
+          echo "python3: $(python3 -V 2>&1) / LANG=${LANG:-unset}"
+          if ! python3 tools/test_modrange.py \
+                 core/dist/x86_64-linux-gnu.2.17/makecode_arcade_libretro.so \
+                 > "$log" 2>&1; then
+            tail -30 "$log" | sed 's/^/::error::modrange /'
+            echo "::error::模块区间自测失败（见上方 ::error:: 行）"
+            exit 1
+          fi
+          tail -8 "$log"
 
       - uses: actions/upload-artifact@v4
         with:

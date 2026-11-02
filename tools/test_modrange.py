@@ -35,6 +35,13 @@ else:
 
 
 def main():
+    # CI runner 的 locale 可能是 C，中文输出会撞 UnicodeEncodeError。
+    # 统一按 UTF-8 输出（失败也只丢字符，不影响结论）。
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
     # 先转绝对路径：下面会 chdir 到 out/ 下（避免 mcaTrace 把日志写到仓库根），
     # 之后再 abspath 就变成相对新 cwd 了。
     core = os.path.abspath(CORE)
