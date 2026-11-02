@@ -169,12 +169,21 @@ jobs:
           LDLIBS: -Wl,-Bstatic -lpthread -Wl,-Bdynamic
         run: |
           set -u
-          out=$( make -f core/Makefile platform=win64 -j"$(nproc)" 2>&1 ) || {
-            printf '%s\n' "$out" | tail -50
-            printf '%s\n' "$out" | tail -50 | sed 's/^/::error::win64 /'
+          log=out/ci-win64.log
+          mkdir -p out
+          # 输出重定向到文件而不是 $(...) 捕获：make 的命令回显走 stdout（管道
+          # 下是块缓冲），编译错误走 stderr（无缓冲），捕获方式会把所有回显
+          # 堆积到末尾，真正的错误行反而看不到
+          if ! make -f core/Makefile platform=win64 -j"$(nproc)" > "$log" 2>&1; then
+            first=$(grep -n -m1 'error:' "$log" | cut -d: -f1 || true)
+            if [ -n "${first:-}" ]; then
+              sed -n "$((first > 8 ? first - 8 : 1)),$((first + 4))p" "$log" \
+                | sed 's/^/::error::win64 /'
+            fi
+            grep -E 'error:|undefined reference|cannot find|Error [0-9]' "$log" | head -20
             exit 1
-          }
-          printf '%s\n' "$out" | tail -15
+          fi
+          tail -5 "$log"
 
       - name: 检查导入表与导出符号
         run: |
