@@ -326,10 +326,13 @@ jobs:
           cd "$RUNNER_TEMP"
           curl -fsSLo zig.tar.xz \
             "https://ziglang.org/download/0.17.0/zig-x86_64-linux-0.17.0.tar.xz"
+          # 内层目录名不猜，从 tarball 解析
+          zigdir="$(tar -tf zig.tar.xz | head -1 | cut -d/ -f1)"
           tar -xJf zig.tar.xz
-          echo "$RUNNER_TEMP/zig-x86_64-linux-0.17.0" >> "$GITHUB_PATH"
-          # 断言拿到的就是发版用的版本，防止 URL 改版后静默装错
-          v="$(zig version)"
+          echo "$RUNNER_TEMP/$zigdir" >> "$GITHUB_PATH"
+          # 断言拿到的就是发版用的版本，防止 URL 改版后静默装错。
+          # 注意 $GITHUB_PATH 只对后续步骤生效，当前步骤要用显式路径
+          v="$("$RUNNER_TEMP/$zigdir/zig" version)"
           [ "$v" = "0.17.0" ] || { echo "::error::zig 版本异常：实际 $v"; exit 1; }
 
       - name: 安装 binutils（检查 PE 导入/导出表）
