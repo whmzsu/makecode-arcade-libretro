@@ -81,7 +81,7 @@ makecode_arcade/
 | M1 | PNG 卡带解码（像素解码 + blob 位流 + LZMA + 项目 JSON） | ✅ cart.c 接入完成，3 张真实卡带冒烟通过（source 字节数与 Python 解码/生产日志一致） |
 | M2 | vendor pxt C++ 运行时（screen/sprite/引擎）独立构建 | ✅ pxtapp vendored 到 runtime/pxtapp（33 TU 游戏无关，已验证 ping/jumpy/cube-land 共用同一二进制） |
 | M3 | pxt VM 字节码解释器接入，跑通第一个游戏 | ✅ **三款游戏全通**：vm_smoke（官方 ABI 直调）+ libretro 假前端路径（RGB565/按键沿/音频） |
-| M4 | 输入 / 音频合成 / 60fps 帧模型完整化 | 宿主接口全部打通；剩余：存档目录对接前端、retro_serialize 快照（P1） |
+| M4 | 输入 / 音频合成 / 60fps 帧模型完整化 | ✅ 宿主接口全部打通：按键描述符/分键重绑、音频合成与峰值回归、拉动式帧模型、快进/慢放（虚拟时钟 v0.2.9）、panic 横幅、存档目录对接（trace/数据走 `GET_SAVE_DIRECTORY`）；仅剩 retro_serialize 快照（P1） |
 | M5 | 离线转换工具（PNG→bytecode）+ 游戏兼容性测试集 | ✅ tools/png2pxt64.py 全自动转换，三卡带实测通过 |
 | M6 | 交叉编译（掌机/桌面/移动）+ 性能验证 | ✅ **7 个主流目标全通并出 zip**（Windows x64/arm64、Linux x64/arm64/armhf、Android arm64/armv7）；✅ **RK3566 + ArkOS 真机验收通过**（v0.2.1，用户反馈运行正常、完全无卡顿；帧率数值待量化）；✅ **Android arm64 验收通过**（v0.2.7，功能与 Linux aarch64 一致） |
 
