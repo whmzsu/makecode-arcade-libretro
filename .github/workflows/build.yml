@@ -301,11 +301,10 @@ jobs:
         include:
           - triple: x86_64-windows-gnu
             ext: dll
-            apt: binutils-mingw-w64-x86-64
+            apt: ''
           - triple: aarch64-windows-gnu
             ext: dll
-            # objdump 只要认识 PE 格式即可，与目标架构无关
-            apt: binutils-mingw-w64-x86-64
+            apt: ''
           - triple: x86_64-linux-gnu.2.17
             ext: so
             apt: ''
@@ -398,18 +397,10 @@ jobs:
               fi
               ;;
             dll)
-              echo "== 导入的 DLL =="
-              x86_64-w64-mingw32-objdump -p "$bin" | grep -i 'DLL Name' | sort -u
-              for bad in libstdc++-6.dll libgcc_s_seh-1.dll libgcc_s_dw2-1.dll libwinpthread-1.dll; do
-                if x86_64-w64-mingw32-objdump -p "$bin" | grep -q "$bad"; then
-                  echo "::error file=tools/build_target.sh::DLL 依赖 $bad，玩家机器上会加载失败"
-                  exit 1
-                fi
-              done
-              for sym in retro_init retro_run retro_get_system_info retro_load_game; do
-                x86_64-w64-mingw32-objdump -p "$bin" | grep -qw "$sym" \
-                  || { echo "::error::缺少导出符号 $sym"; exit 1; }
-              done
+              # 不能用 x86_64-w64-mingw32-objdump：它解不了 aarch64 PE 的导出表
+              # （误报"缺少导出符号"，实际 25 个 retro_* 都在）。pefile 架构无关。
+              pip install --quiet pefile
+              python3 tools/check_pe.py "$bin"
               ;;
           esac
 
