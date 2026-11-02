@@ -21,6 +21,14 @@ OUT="$DIST/release"
 STAGE_ROOT="$OUT/.stage"
 mkdir -p "$OUT"
 
+# zip 用 python 的 zipfile 生成（保证跨平台确定性、无额外依赖）。
+# Ubuntu / macOS 只有 python3，Windows 的 Git Bash 里 python 也能用。
+PYTHON_BIN="$(command -v python3 || command -v python || true)"
+if [ -z "$PYTHON_BIN" ]; then
+  echo "需要 python 3（用来打 zip），但没找到 python3/python" >&2
+  exit 2
+fi
+
 # 发版目标 = build_matrix.sh 的 MAIN_TARGETS
 MAIN_TARGETS=(
   x86_64-windows-gnu
@@ -52,6 +60,11 @@ esac
 
 # 平台短名：只给主流目标固定名字（用户看到的就是这个）；其余用完整三元组，
 # 避免 x86_64-linux-gnu / .2.17 / gnux32 这类变体互相覆盖
+#
+# 同一平台有两套三元组名：
+#   *.2.17                —— 本地 zig 矩阵（glibc 2.17 基线，正式发行包）
+#   不带版本号             —— GitHub Actions 用发行版工具链编的（跑者自带基线）
+# 只决定 zip 的内容和文件名，两者产出的包名相同（不同时存在，不会互相覆盖）
 platform_of() {
   case "$1" in
     x86_64-windows-gnu)        echo "windows-x64" ;;
@@ -59,6 +72,9 @@ platform_of() {
     x86_64-linux-gnu.2.17)     echo "linux-x64" ;;
     aarch64-linux-gnu.2.17)    echo "linux-arm64" ;;
     arm-linux-gnueabihf.2.17)  echo "linux-armhf" ;;
+    x86_64-linux-gnu)          echo "linux-x64" ;;
+    aarch64-linux-gnu)         echo "linux-arm64" ;;
+    arm-linux-gnueabihf)       echo "linux-armhf" ;;
     aarch64-linux-android21)   echo "android-arm64" ;;
     armv7a-linux-androideabi21) echo "android-armv7" ;;
     *)                         echo "${1//\//-}" ;;
@@ -192,7 +208,7 @@ EOF
   esac
   zip="$OUT/makecode_arcade_$plat.zip"
   rm -f "$zip"
-  python - "$stag" "$zip" <<'PY'
+  "$PYTHON_BIN" - "$stag" "$zip" <<'PY'
 import os, sys, zipfile
 src, dst = sys.argv[1], sys.argv[2]
 with zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as z:

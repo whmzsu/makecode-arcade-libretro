@@ -24,6 +24,9 @@ JS 引擎层**——JS 模拟层（DOM mock、promise 微任务、GC、JS 逐帧
 ```
 makecode_arcade/
 ├── README.md               本文件
+├── LICENSE                 MIT
+├── .github/workflows/build.yml  GitHub Actions：全平台编译回归 + 测试产物
+├── .gitlab-ci.yml          libretro 官方 buildbot 收录用（镜像仓库时生效）
 ├── docs/
 │   ├── ROUTE-B-DESIGN.md   路线 B 总体设计（架构 / 数据流 / 里程碑 / 风险）
 │   ├── PNG-FORMAT.md       .png 卡带（隐写打包）格式规格
@@ -215,6 +218,44 @@ pxt 工具链（png2pxt64.py 和 cartconv 转换卡带都依赖）：node + npm�
 ```bash
 cd tools/vm-build && npm install
 ```
+
+## 持续集成（GitHub Actions）
+
+`.github/workflows/build.yml` 在每次 push / PR 上把所有平台编一遍，作用是
+**拦住"源码编不过"的提交**，并把可运行产物挂成 workflow artifact（保留 30 天，
+在 Actions 运行页底部下载）。
+
+| 矩阵 | 工具链 | 产物 |
+|---|---|---|
+| `linux-x64` / `linux-arm64` / `linux-armhf` | Ubuntu 22.04 + gcc 交叉包 | `.so` |
+| `windows-x64` | mingw-w64（**-posix** 线程模型，pxt VM 用 pthread） | `.dll` |
+| `android-arm64` / `android-armv7` | 跑者自带 NDK + `core/jni/`（与官方模板同一套参数） | `.so` |
+| `macos-universal` | Xcode clang，arm64+x86_64 | `.dylib`（实验，`continue-on-error`） |
+| `package` | 汇总上面全部产物 → `tools/package_release.sh` | 6 个 zip |
+
+每个 job 都带断言，不只是"能编过"：
+
+- Linux：`readelf -d` 的 `NEEDED` 只允许 libc/libm/libdl/libpthread/librt/
+  libstdc++/libgcc_s（出现别的说明链接方式跑偏），并打印 GLIBC 符号版本
+- Windows：导入表里不允许出现 `libstdc++-6.dll` / `libgcc_s_*.dll` /
+  `libwinpthread-1.dll`（这几个 DLL 玩家机器上通常没有），并检查
+  `retro_init` / `retro_run` 等导出符号在（`--export-all-symbols` 生效检查）
+- Android：不允许依赖 `libc++_shared.so`；`LOAD` 段必须是 `0x4000` 对齐
+  （16KB 页设备）
+
+两个 CI 文件的分工，别混：
+
+| 文件 | 跑在哪 | 干什么 |
+|---|---|---|
+| `.github/workflows/build.yml` | 本仓库（GitHub 托管机器） | 编译回归 + 测试用产物 |
+| `.gitlab-ci.yml` | libretro 官方 buildbot（镜像仓库） | 收录进 RetroArch Core Downloader 用 |
+
+**CI 不发布 Release**。两条原因：一是 CI 用发行版工具链，Linux 产物的 glibc
+基线跟着跑者走（Ubuntu 22.04 = 2.35），而正式发行包要求 2.17 基线；二是发版
+要过一遍 R1 真机验收。正式包仍然只由本地 `tools/build_matrix.sh`（zig）产出。
+CI 里的 `windows-arm64` 也因此缺失（apt 没有 aarch64 mingw，本地 zig 矩阵才有）。
+
+手动触发：仓库 Actions 页 → build → Run workflow。
 
 ## 测试（不需要 RetroArch）
 

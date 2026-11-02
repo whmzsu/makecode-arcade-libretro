@@ -1,0 +1,316 @@
+# GitHub Actions：编译回归 + 可下载产物
+#
+# 分工（两个 CI 文件互不替代）：
+#   .github/workflows/build.yml —— 本仓库自己的编译回归，每次 push / PR 跑，
+#                                  产物是 workflow artifact（保留 30 天）
+#   .gitlab-ci.yml             —— 给 libretro 官方 buildbot 收录用的 GitLab CI，
+#                                  不在这里跑，官方镜像仓库时才会生效
+#
+# 工具链说明（重要）：这里用**发行版交叉工具链**（Ubuntu 22.04 的 gcc /
+# mingw-w64 / Android NDK），Linux 产物的 glibc 基线是跑者自带的（2.35）。
+# 正式发行包仍由本地 tools/build_target.sh（zig，glibc 2.17 基线）生成，
+# 所以这里**不发布 Release**，只保证"源码在标准工具链下编得过"。
+# 这也正是官方 buildbot 的构型，两边一致才能证明收录后不会红。
+#
+# 矩阵只列验证过能编过的平台：
+#   linux-x64 / linux-arm64 / linux-armhf（.so）
+#   windows-x64（mingw-w64，.dll）
+#   android arm64-v8a / armeabi-v7a（ndk-build，见 core/jni/）
+#   macOS 单独一个实验 job（continue-on-error，不阻塞）
+#   windows-arm64 需要 llvm-mingw，发行包里那个由本地 zig 矩阵出
+
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['core-v*']
+  pull_request:
+  workflow_dispatch:
+
+# 只读：CI 不改仓库内容（发版是本地 zig 矩阵 + 手工上传）
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CORENAME: makecode_arcade
+
+jobs:
+  # ------------------------------------------------------------------ Linux
+  linux:
+    name: linux-${{ matrix.arch }}
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            triple: x86_64-linux-gnu
+            platform: unix
+            cc: gcc
+            cxx: g++
+            apt: ''
+          - arch: arm64
+            triple: aarch64-linux-gnu
+            platform: unix-aarch64
+            cc: aarch64-linux-gnu-gcc
+            cxx: aarch64-linux-gnu-g++
+            apt: g++-aarch64-linux-gnu
+          - arch: armhf
+            triple: arm-linux-gnueabihf
+            platform: unix-armv7-hardfloat-neon
+            cc: arm-linux-gnueabihf-gcc
+            cxx: arm-linux-gnueabihf-g++
+            apt: g++-arm-linux-gnueabihf
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装交叉工具链
+        if: matrix.apt != ''
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends ${{ matrix.apt }}
+
+      # CC/CXX 一律走环境变量：make 的命令行赋值会覆盖 Makefile 里的
+      # `LDFLAGS += -shared`，导致 -shared 丢失（在 Windows 上表现为
+      # lld-link: undefined symbol: WinMain）。环境变量是在 Makefile 的追加
+      # 赋值之前生效，两者叠加。
+      #
+      # 链接参数刻意保持 gcc 默认：官方 buildbot 就是这么编的，加
+      # -static-libstdc++ 反而可能在 x86_64 上撞 libstdc++.a 的
+      # "relocation ... can not be used when making a shared object"。
+      # 依赖 libstdc++.so.6 是 Linux core 的常态（RetroArch 自己也链它）。
+      - name: 编译
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+        run: make -f core/Makefile platform=${{ matrix.platform }} -j"$(nproc)"
+
+      - name: 检查动态依赖
+        run: |
+          so=core/makecode_arcade_libretro.so
+          file "$so"
+          echo "== NEEDED =="
+          readelf -d "$so" | sed -n 's/.*(NEEDED).*\[\(.*\)\]/  \1/p'
+          echo "== GLIBC 符号版本（信息性） =="
+          readelf -V "$so" 2>/dev/null | grep -o 'GLIBC_[0-9.]*' | sort -uV | tr '\n' ' ' || true
+          echo
+          # 只允许常见系统库（libatomic 是 armhf 上 64 位原子操作可能带出来的，
+          # ld-linux 是 zig 链接器的习惯，一并放行）：出现别的（静态链进来的
+          # libc、libandroid 之类）说明链接方式跑偏，玩家机器上加载会失败
+          bad=0
+          for lib in $(readelf -d "$so" | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p'); do
+            case "$lib" in
+              libc.so.*|libm.so.*|libdl.so.*|libpthread.so.*|librt.so.*| \
+              libstdc++.so.*|libgcc_s.so.*|libatomic.so.*|ld-linux*.so.*) ;;
+              *) echo "::error file=core/Makefile::意外的动态依赖 $lib"; bad=1 ;;
+            esac
+          done
+          [ "$bad" = 0 ] || exit 1
+
+      - name: 归档
+        run: |
+          mkdir -p "core/dist/${{ matrix.triple }}"
+          cp core/makecode_arcade_libretro.so "core/dist/${{ matrix.triple }}/"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.triple }}
+          path: core/dist/${{ matrix.triple }}/*
+          if-no-files-found: error
+          retention-days: 30
+
+  # ---------------------------------------------------------------- Windows
+  windows:
+    name: windows-x64
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      # 必须用 -posix 变体的 mingw（pxt VM 用 pthread，win32 线程模型编不过）
+      - name: 安装 mingw-w64
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends g++-mingw-w64-x86-64-posix
+
+      - name: 编译
+        env:
+          CC: x86_64-w64-mingw32-gcc-posix
+          CXX: x86_64-w64-mingw32-g++-posix
+          # 三个运行库全部静态链：分发出去的 DLL 不能依赖
+          # libstdc++-6.dll / libgcc_s_seh-1.dll / libwinpthread-1.dll
+          LDFLAGS: -static-libgcc -static-libstdc++
+          # -Wl,-Bstatic 只作用于紧跟的 -lpthread（放行尾，符号已在前面的
+          # 目标文件里出现，静态库才能被正确抽取）
+          LDLIBS: -Wl,-Bstatic -lpthread -Wl,-Bdynamic
+        run: make -f core/Makefile platform=win64 -j"$(nproc)"
+
+      - name: 检查导入表与导出符号
+        run: |
+          dll=core/makecode_arcade_libretro.dll
+          echo "== 导入的 DLL =="
+          x86_64-w64-mingw32-objdump -p "$dll" | grep -i 'DLL Name' | sort -u
+          for bad in libstdc++-6.dll libgcc_s_seh-1.dll libgcc_s_dw2-1.dll libwinpthread-1.dll; do
+            if x86_64-w64-mingw32-objdump -p "$dll" | grep -q "$bad"; then
+              echo "::error file=core/Makefile::DLL 依赖 $bad，玩家机器上会加载失败"
+              exit 1
+            fi
+          done
+          # 导出符号是 libretro 的硬要求（--export-all-symbols 生效检查）
+          for sym in retro_init retro_run retro_get_system_info retro_load_game; do
+            x86_64-w64-mingw32-objdump -p "$dll" | grep -qw "$sym" \
+              || { echo "::error::缺少导出符号 $sym"; exit 1; }
+          done
+
+      - name: 归档
+        run: |
+          mkdir -p core/dist/x86_64-windows-gnu
+          cp core/makecode_arcade_libretro.dll core/dist/x86_64-windows-gnu/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: x86_64-windows-gnu
+          path: core/dist/x86_64-windows-gnu/*
+          if-no-files-found: error
+          retention-days: 30
+
+  # ---------------------------------------------------------------- Android
+  android:
+    name: android-${{ matrix.abi }}
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - abi: arm64-v8a
+            triple: aarch64-linux-android21
+          - abi: armeabi-v7a
+            triple: armv7a-linux-androideabi21
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 定位 NDK
+        run: |
+          NDK="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_HOME}"
+          if [ ! -x "$NDK/ndk-build" ]; then
+            echo "::error::找不到 ndk-build（\$ANDROID_NDK_LATEST_HOME=$ANDROID_NDK_LATEST_HOME）"
+            exit 1
+          fi
+          echo "NDK=$NDK" >> "$GITHUB_ENV"
+          sed -n 's/^Pkg.Revision *= *//p' "$NDK/source.properties" | head -1 | sed 's/^/NDK 版本: /'
+
+      # 与官方 android-jni 模板同一套参数：APP_BUILD_SCRIPT / NDK_APPLICATION_MK
+      # 明指 core/jni/，ABI 逐个覆盖；产物落 out/ 不污染源码树
+      - name: 编译
+        run: |
+          "$NDK/ndk-build" \
+            NDK_PROJECT_PATH=. \
+            APP_BUILD_SCRIPT=core/jni/Android.mk \
+            NDK_APPLICATION_MK=core/jni/Application.mk \
+            APP_ABI=${{ matrix.abi }} \
+            NDK_OUT=out/ndk/obj NDK_LIBS_OUT=out/ndk/libs \
+            -j"$(nproc)"
+
+      - name: 检查 .so（16KB 页对齐 + 无 libc++_shared 依赖）
+        run: |
+          so="out/ndk/libs/${{ matrix.abi }}/libmakecode_arcade_libretro.so"
+          ls -l "$so"
+          echo "== NEEDED =="
+          readelf -d "$so" | sed -n 's/.*(NEEDED).*\[\(.*\)\]/  \1/p'
+          if readelf -d "$so" | grep -q 'libc++_shared'; then
+            echo "::error file=core/jni/Application.mk::依赖 libc++_shared.so，APP_STL 应为 c++_static"
+            exit 1
+          fi
+          # Android 15 起有 16KB 页设备，LOAD 段必须 0x4000 对齐
+          echo "== LOAD 对齐 =="
+          readelf -lW "$so" | awk '$1 == "LOAD" { print "  " $NF }' | sort -u
+          if readelf -lW "$so" | awk '$1 == "LOAD" { print $NF }' | grep -qv '^0x4000$'; then
+            echo "::error file=core/jni/Android.mk::LOAD 段不是 16KB 对齐，16KB 页设备无法 dlopen"
+            exit 1
+          fi
+
+      # 发行包里的 Android 产物叫 makecode_arcade_libretro.so（无 lib 前缀），
+      # 与 package_release.sh 的 glob 对齐
+      - name: 归档
+        run: |
+          mkdir -p "core/dist/${{ matrix.triple }}"
+          cp "out/ndk/libs/${{ matrix.abi }}/libmakecode_arcade_libretro.so" \
+             "core/dist/${{ matrix.triple }}/makecode_arcade_libretro.so"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.triple }}
+          path: core/dist/${{ matrix.triple }}/*
+          if-no-files-found: error
+          retention-days: 30
+
+  # ------------------------------------------------------------------ macOS
+  # 实验：Makefile 支持 osx，但本机没有 macOS 工具链，作者未在真机验证过
+  # 加载/音频；先只做"编得过"的观察，红了不算回归失败（continue-on-error）
+  macos:
+    name: macos-universal (实验)
+    runs-on: macos-14
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 编译（arm64 + x86_64 通用二进制）
+        env:
+          CC: clang
+          CXX: clang++
+          CXXFLAGS: -arch arm64 -arch x86_64
+          CFLAGS: -arch arm64 -arch x86_64
+          LDFLAGS: -arch arm64 -arch x86_64
+        run: make -f core/Makefile platform=osx -j"$(sysctl -n hw.ncpu)"
+
+      - name: 检查
+        run: |
+          dylib=core/makecode_arcade_libretro.dylib
+          lipo -info "$dylib"
+          otool -L "$dylib" | tail -n +2
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: osx-universal
+          path: core/makecode_arcade_libretro.dylib
+          if-no-files-found: warn
+          retention-days: 14
+
+  # ---------------------------------------------------------------- 打包
+  # 用与本地发版同一个脚本（tools/package_release.sh）出 zip，
+  # 方便验证"发行包结构"这条链路本身没坏
+  package:
+    name: package
+    needs: [linux, windows, android]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: core/dist
+
+      - name: 打成 RetroArch 发行包
+        run: |
+          tools/package_release.sh \
+            x86_64-linux-gnu aarch64-linux-gnu arm-linux-gnueabihf \
+            x86_64-windows-gnu \
+            aarch64-linux-android21 armv7a-linux-androideabi21
+          echo "== 产物 =="
+          ls -l core/dist/release
+          echo "== 各包清单 =="
+          for z in core/dist/release/*.zip; do
+            echo "-- $z"
+            python3 -c "import sys,zipfile;print('   '+'\n   '.join(zipfile.ZipFile(sys.argv[1]).namelist()))" "$z"
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-zips
+          path: core/dist/release/*.zip
+          if-no-files-found: error
+          retention-days: 30

@@ -9,9 +9,10 @@ core/*.pdb
 core/*.exe
 core/makecode_arcade_libretro.*
 core/build/
+core/libs/
+core/obj/
 core/dist/*
 !core/dist/MATRIX.md
-!core/dist/makecode_arcade_libretro.info
 !core/dist/release/
 core/tests/*.exe
 
