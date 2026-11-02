@@ -57,7 +57,7 @@ static retro_input_state_t g_input_state = nullptr;
 static retro_log_printf_t g_log = nullptr;
 static bool g_pixel_format_set = false;
 // 版本号只在这里出现一次：.info 打包脚本和运行时横幅都读它
-static const char* const kCoreVersion = "0.2.14";
+static const char* const kCoreVersion = "0.2.15";
 
 static unsigned g_frame = 0;
 static bool g_game_loaded = false;

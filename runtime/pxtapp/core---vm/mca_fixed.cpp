@@ -10,12 +10,14 @@
 #include "mca_fixed.h"
 
 #include <string.h>
+#include <stdlib.h> // getenv（MCA_SIM_FALLBACK 本地仿真用）
 
 #if defined(_WIN32)
 #include <windows.h>
 #else
 #include <sys/mman.h>
 #include <unistd.h>
+#include <errno.h>
 #endif
 
 #if !defined(_WIN32) && !defined(__APPLE__)
@@ -34,15 +36,14 @@ FixedRange g_ranges[MCA_FIXED_MAX];
 int g_rangeCount = 0;
 } // namespace
 
-extern "C" void *mcaFixedMap(unsigned long long addr, size_t size) {
+// 在 addr 处真正执行一次固定映射（不做 g_ranges 登记）。成功返回恰好等于 addr
+// 的指针；失败（被占 / 地址非法 / 内核不认固定映射）返回 NULL。失败时把 errno
+// 记进 trace —— 真机上"拿不到固定地址"的根因就藏在这里。
+static void *mcaTryMapRaw(unsigned long long addr, size_t size) {
     if (!addr || !size)
         return NULL;
-
     void *got = NULL;
-
 #if defined(_WIN32)
-    // 先按"恰好这个地址"申请；VirtualAlloc 在目标被占时会给别的地址，
-    // 这种结果对我们没用（快照里的绝对地址要求分毫不差），直接释放。
     got = VirtualAlloc((void *)(uintptr_t)addr, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
     if (got && (unsigned long long)(uintptr_t)got != addr) {
         VirtualFree(got, 0, MEM_RELEASE);
@@ -59,26 +60,110 @@ extern "C" void *mcaFixedMap(unsigned long long addr, size_t size) {
     void *p = mmap((void *)(uintptr_t)addr, size, PROT_READ | PROT_WRITE,
                    MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
     if (p == MAP_FAILED) {
+        mcaTrace("[fix] mmap(%p, %zu) 失败 errno=%d %s", (void *)(uintptr_t)addr, size,
+                 errno, strerror(errno));
         got = NULL;
     } else if ((unsigned long long)(uintptr_t)p != addr) {
         // 老内核不认识 MAP_FIXED_NOREPLACE：当成普通 mmap 给了别的地址。
-        // 不能留着（否则内存泄漏且地址没钉住），释放后按失败处理。
+        // 这种结果对我们没用（快照绝对地址要求分毫不差），释放后按失败处理。
+        mcaTrace("[fix] mmap(%p) 拿到 %p（非固定，疑似旧内核不支持 NOREPLACE）",
+                 (void *)(uintptr_t)addr, p);
         munmap(p, size);
         got = NULL;
     } else {
         got = p;
     }
 #endif
+    return got;
+}
 
-    if (!got)
+// 与 mcaTryMapRaw 配对：把探测时临时占住的整段释放回去。Windows 走 VirtualFree，
+// 其余走 munmap（同一份 size，因为探测时就是整段映射）。
+static void mcaUnmapRaw(void *p, size_t size) {
+    if (!p)
+        return;
+#if defined(_WIN32)
+    VirtualFree(p, 0, MEM_RELEASE);
+#else
+    munmap(p, size);
+#endif
+}
+
+static void *mcaMapAt(unsigned long long addr, size_t size) {
+    void *p = mcaTryMapRaw(addr, size);
+    if (!p)
         return NULL;
-
     if (g_rangeCount < MCA_FIXED_MAX) {
         g_ranges[g_rangeCount].addr = addr;
         g_ranges[g_rangeCount].size = size;
         g_rangeCount++;
     }
-    return got;
+    return p;
+}
+
+// 固定区整体布局（相对 GC_BASE）：
+//   [GC_BASE,        +1MB)   VM 堆
+//   [GC_BASE + 1MB,  +4MB)   卡带镜像
+//   [GC_BASE + 5MB,  +512KB) 单例 bump 区
+// 只要"基址"在每次运行都一样，三块就都在同一地址 —— 快照的跨会话能力才成立。
+//
+// v0.2.15：原来只钉死 GC_BASE=0x2000000000。真机（RK3566/ArkOS）上这个地址
+// 拿不到（被占或内核/加载器不认），于是三种固定区全部退化成随机会址，跨会话
+// 快照彻底失效（每次启动堆/镜像地址都变，加载时必然"地址不符"被拒）。
+// 改为"候选基址列表 + 整体探测"：第一个能整体占住的地址即为本进程的固定基址。
+// 同一台设备/固件下该基址是确定的（MAP_FIXED 不受 ASLR 影响，只有别的映射可能
+// 落到候选上；低地址区本就空着，命中率高），于是跨进程一致 → 跨会话恢复成立。
+static unsigned long long mcaChooseBase() {
+    static int tried = 0;
+    static unsigned long long base = 0;
+    if (tried)
+        return base;
+    tried = 1;
+    // 候选顺序：**先试原有的 0x2000000000（Windows/本机原本就钉在这里、行为不变），
+    // 失败再依次试更低和更高的候选**。低地址（512MB 起）通常空闲、且不受 ASLR 影响，
+    // 命中率高；更高的候选作为最后的兜底。同一台设备/固件下第一个"整体能占住"的
+    // 地址是确定的，于是跨进程一致 → 跨会话恢复成立。
+    static const unsigned long long cands[] = {
+        0x2000000000ULL, // 原有基址：Windows/本机/支持的设备尽量不动它
+        0x20000000ULL,  0x40000000ULL,  0x80000000ULL,  0x100000000ULL,
+        0x200000000ULL,  0x400000000ULL, 0x800000000ULL,
+        0x4000000000ULL, 0x8000000000ULL,
+    };
+    size_t total = MCA_HEAP_BYTES + MCA_IMG_MAX_BYTES + MCA_SINGLETON_MAX_BYTES;
+    // MCA_SIM_FALLBACK：本地仿真"原基址 0x2000000000 拿不到"的设备场景。
+    // 设了就跳过候选 #0，强制走更低/更高的兜底地址，验证 fallback 路径下
+    // 跨进程基址仍然确定（快照才能跨会话恢复）。生产默认不跳。
+    static int skipFirst = -1;
+    if (skipFirst < 0)
+        skipFirst = getenv("MCA_SIM_FALLBACK") ? 1 : 0;
+    for (size_t i = (size_t)skipFirst; i < sizeof(cands) / sizeof(cands[0]); ++i) {
+        void *p = mcaTryMapRaw(cands[i], total); // 探测整段是否空闲
+        if (p == (void *)(uintptr_t)cands[i]) {
+            mcaUnmapRaw(p, total); // 仅探测；真正映射在后面分块进行
+            base = cands[i];
+            mcaTrace("[fix] 固定基址选定 %p（候选 #%zu，整体 %zu 字节）",
+                     (void *)(uintptr_t)base, i, total);
+            return base;
+        }
+        if (p)
+            mcaUnmapRaw(p, total);
+    }
+    mcaTrace("[fix] 没有任何候选基址可固定；退回随机分配（跨会话快照将退化）");
+    return 0;
+}
+
+extern "C" void *mcaFixedMap(unsigned long long addr, size_t size) {
+    if (!addr || !size)
+        return NULL;
+    unsigned long long total = MCA_HEAP_BYTES + MCA_IMG_MAX_BYTES + MCA_SINGLETON_MAX_BYTES;
+    // 只接管我们自己管理的固定区；其余地址按原逻辑（目前没有这类调用）。
+    if (addr < GC_BASE || addr >= GC_BASE + total)
+        return mcaMapAt(addr, size);
+    unsigned long long off = addr - GC_BASE;
+    unsigned long long base = mcaChooseBase();
+    if (!base)
+        return NULL;
+    return mcaMapAt(base + off, size);
 }
 
 extern "C" int mcaIsFixedPtr(const void *p) {
