@@ -152,8 +152,10 @@ tools/package_release.sh  # 打包成可直接放进 RetroArch 的 zip
 基线（覆盖 2012 年后的掌机固件）；Android 静态链 libc++ 并做 16KB 页对齐
 （Android 15）。
 
-> **Android 安装要点**：RetroArch 的「安装或恢复核心」只提取 `.so`，`.info`
-> 需要单独放到**核心信息目录**（`libretro_info_path`，默认为核心目录本身）。
+> **Android 安装要点**：先解压 zip——「安装或恢复核心」的文件浏览器按平台
+> 过滤扩展名，Android 上只列 `.so`（**zip 不出现**），选中解压出的 `.so` 后
+> 它才被拷进核心目录；`.info` 不会被带过去，需要单独放到**核心信息目录**
+> （`libretro_info_path`，默认为核心目录本身）。
 > 核心目录必须留在 App 私有空间——Android 10 起 `/storage/emulated/0` 是
 > noexec，core 放那里能识别但加载必失败。完整步骤见
 > `docs/DEVICE-TEST.md` 第五轮。
@@ -213,8 +215,11 @@ functions.json 逐字节一致）。
 > 只有**源码**（meta + source），不是可直接运行的游戏——**必须先用 cartconv
 > 转换成 `.pxt64`**（见上文「卡带转换」）。核心不接受 `.png` 作为加载内容。
 
-1. 取 `core/dist/release/makecode_arcade_<platform>.zip`，把其中的 core 二进制
-   与 `makecode_arcade_libretro.info` 一起放进 RetroArch 的 cores 目录；
+1. 取 `core/dist/release/makecode_arcade_<platform>.zip`，**先解压**，把其中的
+   core 二进制与 `makecode_arcade_libretro.info` 一起放进 RetroArch 的 cores
+   目录（最直接）。也可以用「安装或恢复核心」选中解压出来的二进制，但那个
+   文件浏览器只列**当前平台的核心文件扩展名**（Windows `.dll` / Linux `.so` /
+   macOS `.dylib`），**zip 不会出现在列表里**，而且 `.info` 不会被带过去；
 2. 加载内容 → 选转换好的 `.pxt64` 文件；
 3. 像素格式 RGB565，160x120@60fps，音频 44.1kHz 单声道。
    重置 / 重启 / 换游戏：

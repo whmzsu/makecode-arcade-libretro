@@ -43,9 +43,9 @@ pxt 上游 `core---vm/platform.cpp` 的 `initRandomSeed()` 在
 
 ### 安装位置（ArkOS）
 
-- core 与 `.info` 放同一目录：ArkOS 通常为 `/roms/cores/`（系统分区只读，
-  core 放 roms 分区）。**`.info` 必须同放**，否则「加载核心」列表里不显示
-  "MakeCode Arcade"。
+- 解压发行 zip，把 core 与 `.info` 放同一目录：ArkOS 通常为 `/roms/cores/`
+  （系统分区只读，core 放 roms 分区）。**`.info` 必须同放**，否则「加载核心」
+  列表里不显示 "MakeCode Arcade"。
 - 架构确认：`uname -m` 必须为 `aarch64`；若为 `armv7l` 需换
   `makecode_arcade_linux-armhf.zip`（armhf 尚未真机验证，见下）。
 
@@ -183,11 +183,12 @@ Android 上装第三方 core 有个绕不开的矛盾：
   `failed to map segment`）。
 - **核心信息目录**（`libretro_info_path`）里的 `.info` 只是文本，随便哪都能读。
 
-而 `Install or Restore a Core` 只从 zip 里挑 `*_libretro.so` 拷进核心目录，
-`.info` 直接丢弃。所以正确做法是把两个目录分开：
+而 `Install or Restore a Core` 的文件浏览器**按平台过滤扩展名**——Android 上
+只列 `.so`，`zip` 根本不出现在列表里，必须先手动解压；选中 `.so` 后它只把
+这一个文件拷进核心目录，`.info` 直接丢弃。所以正确做法是把两个目录分开：
 
 1. 设置 → 目录 → **核心（Cores）**：保持**默认**（App 私有，
-   `/data/user/0/com.retroarch.*/cores`），`.so` 用 Install 装进去
+   `/data/user/0/com.retroarch.*/cores`），解压出的 `.so` 用 Install 装进去
 2. 设置 → 目录 → **核心信息（Core Info）**：指向可写的外部目录，
    例如 `/storage/emulated/0/RetroArch/info`，把 `.info` 放这儿
    （该项默认隐藏，需先开 设置 → 用户界面 → 显示高级设置）
@@ -202,7 +203,8 @@ Android 上装第三方 core 有个绕不开的矛盾：
 
 ### 踩坑顺序（供下次装 Android 时避开）
 
-1. 用 zip 走 Install → 只有 `.so` 进去，`.info` 丢失
+1. 想直接选 zip 走 Install → 文件浏览器只列 `.so`，**zip 压根不在列表里**；
+   解压后用 Install 能装进 `.so`，但 `.info` 照样被丢弃
 2. 为了补 `.info` 把**核心目录**改到外部存储 → 能识别、加载必失败（noexec）
 3. 正确解：核心目录留默认，只把**核心信息目录**指出去
 

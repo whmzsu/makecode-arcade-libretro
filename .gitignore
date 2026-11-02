@@ -39,3 +39,8 @@ tools/vm-build/node_modules/pxt-arcade/testproj/built/
 
 # ---- 本地工作数据（不发布）----
 .workbuddy/
+
+# ---- 测试时 core 写入的存档 / trace（相对路径，跑测试就在仓库根下生成）----
+/libretro_host_saves/
+/makecode_arcade/
+mca_trace.log

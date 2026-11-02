@@ -116,9 +116,13 @@ MakeCode Arcade — libretro core ($plat)
   2) 设置 → 目录 → 核心（Cores）      保持默认（App 私有），不要改到外部存储
   3) 设置 → 目录 → 核心信息（Core Info）→ 指向可写的外部目录，例如
                                    内部存储/RetroArch/info
-  4) 把 makecode_arcade_libretro.info 放进第 3 步的目录
-  5) 加载核心 → 「安装或恢复核心」→ 选本 zip，它会把 .so 装进核心目录
-     （注意：Install 只会提取 .so，.info 会被丢弃，所以第 3~4 步必须手动做）
+  4) 把本 zip 里的 makecode_arcade_libretro.info 放进第 3 步的目录
+  5) 先解压本 zip（解到 RetroArch 能访问的目录，如 内部存储/Download），
+     得到 makecode_arcade_libretro.so；然后
+     加载核心 → 「安装或恢复核心」→ 选中这个 .so，它会被拷进核心目录。
+     注意：该文件浏览器按平台过滤扩展名，Android 上只列 .so，
+     zip 不会出现在列表里，必须先解压；
+     而且 Install 只拷 .so、.info 会被丢弃，所以第 3~4 步必须手动做。
   6) 重启 RetroArch → 加载核心列表里出现 "MakeCode Arcade"
   7) 加载内容 → 选 .pxt64
 
@@ -152,9 +156,21 @@ EOF
 MakeCode Arcade — libretro core ($plat)
 
 安装：
-  1) 把 makecode_arcade_libretro.$ext 放进 RetroArch 的 cores 目录
-     Windows/Linux: <RetroArch>/cores/
-  2) 把 makecode_arcade_libretro.info 放进同一个 cores 目录
+  先解压本 zip。「安装或恢复核心」的文件浏览器按平台过滤扩展名，只列当前
+  平台的核心文件（Windows .dll / Linux .so / macOS .dylib），zip 不在列表里，
+  所以解压这一步绕不开。
+
+  方式 A：手动拷贝（推荐，最直接）
+    1) 把 makecode_arcade_libretro.$ext 放进 RetroArch 的 cores 目录
+       Windows/Linux: <RetroArch>/cores/
+    2) 把 makecode_arcade_libretro.info 放进同一个 cores 目录
+
+  方式 B：用 RetroArch 安装
+    1) 加载核心 → 「安装或恢复核心」→ 选中解压出来的
+       makecode_arcade_libretro.$ext，它会被拷进已配置的核心目录
+    2) Install 只拷二进制，.info 不会被带过去——装完确认 cores 目录里
+       有 makecode_arcade_libretro.info，没有就按方式 A 的第 2 步补上
+
   3) 加载核心 → 选择 .pxt64 文件
 
 内容格式：
