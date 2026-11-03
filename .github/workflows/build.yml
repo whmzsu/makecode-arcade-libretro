@@ -715,13 +715,14 @@ jobs:
         run: |
           mkdir -p out/mr out/mr-system
           set +e
-          # 必需参数：--core --rom --output（帧转储前缀）--system（system 目录）
+          # --output 是目录（截图写到 <dir>/screenshot%06u.png），不是文件前缀；
+          # --dump-frames 接帧号列表。源码确认（miniretro.cc video_update）。
           ./miniretro/miniretro \
             --core core/dist/aarch64-linux-gnu.2.17/makecode_arcade_libretro.so \
             --rom tools/fixtures/ping.pxt64 \
-            --output out/mr/ping \
+            --output out/mr \
             --system out/mr-system \
-            --frames 900 --dump-frames-every 300 --dump-frames 300 600 900 \
+            --frames 900 --dump-frames 300 600 900 \
             > miniretro.log 2>&1
           rc=$?
           set -e
