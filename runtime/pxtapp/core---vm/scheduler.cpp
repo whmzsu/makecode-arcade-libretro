@@ -1324,8 +1324,13 @@ void *mcaMapEventAddr(void *p) {
 } // anonymous namespace
 
 DLLEXPORT int pxt_state_pause() {
-    if (!pxtVmLive || mcaResetRequest)
+    if (!pxtVmLive || mcaResetRequest) {
+        // v0.2.15 发现 armhf 上走到这里（64 位不会）：-1 之前完全静默，
+        // 连"哪个标志导致的"都看不见，先留下现场
+        mcaTrace("[snap] pause reject -1: live=%d reset=%d panic=%d spot=%d",
+                 pxtVmLive, mcaResetRequest, panicCode, mcaVmSpot);
         return -1; // VM 未运行 / 正在重启，没有安全点可等
+    }
     // 换一个**新的**序号（协议见文件顶部）。绝不能写成"等停稳次数 +1"：
     // 连续两次 pause 时，中间那次 resume 可能压根没被 VM 观察到。
     unsigned my = ++mcaPauseSeq;
