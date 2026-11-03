@@ -97,17 +97,37 @@ display_version = \"$VERSION\"
 supports_no_game = \"false\"
 notes = \"Unofficial core: not affiliated with or endorsed by Microsoft. 64-BIT FRONTENDS ONLY: cartridge images are PXT64-only (the official pxt compiler has no 32-bit output and the runtime's PXT32 image patching is an unimplemented upstream TODO), so 32-bit builds can load but cannot run anything. Plays ONLY .pxt64 bytecode images - the file browser lists .pxt64 files only. MakeCode Arcade .png cartridges contain source code only, NOT a playable game: convert them FIRST with cartconv (github.com/whmzsu/makecode-arcade-cartconv). Buttons are remappable under Quick Menu > Controls (Start = in-game menu, Select = reset); the core exposes no options.\""
 
+# 只在"可加载的核心二进制"里挑，绝不靠 glob 顺序。
+# 血泪教训（v0.3.0/v0.3.1 的 Windows 包）：`compgen -G ... | head -1` 在 CI 的
+# bash 上不保证排序，Windows 产物目录里同时有 .dll 和 .pdb 时挑中了 .pdb，
+# 发出去的包里只有调试符号、没有 DLL，README 也照着写了 .pdb 的安装步骤。
+# 显式按扩展名优先级找，找不到就是打包失败，不能静默降级。
+pick_core() { # $1=目录  → 打印核心文件路径（找不到则空）
+  local d="$1" e
+  for e in dll so dylib; do
+    if [ -f "$d/makecode_arcade_libretro.$e" ]; then
+      printf '%s\n' "$d/makecode_arcade_libretro.$e"
+      return 0
+    fi
+  done
+  return 1
+}
+
 ok=0; skipped=0
 for t in "${TARGETS[@]}"; do
   dir="$DIST/$t"
-  core="$(compgen -G "$dir/makecode_arcade_libretro.*" | head -1)"
+  core="$(pick_core "$dir" || true)"
   if [ -z "$core" ]; then
-    echo "跳过 $t（无产物）"
+    echo "跳过 $t（无核心二进制 .dll/.so/.dylib）"
     skipped=$((skipped + 1))
     continue
   fi
   plat="$(platform_of "$t")"
   ext="${core##*.}"
+  case "$ext" in
+    dll|so|dylib) ;;
+    *) echo "打包失败：$t 选中的不是核心二进制（$core）" >&2; exit 1 ;;
+  esac
   stag="$STAGE_ROOT/$plat"
   rm -rf "$stag"
   mkdir -p "$stag"
@@ -230,7 +250,21 @@ with zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as z:
         z.write(os.path.join(src, name), name)
 PY
   size=$(stat -c%s "$zip" 2>/dev/null || echo 0)
-  echo "  $(printf '%-32s' "$t") -> makecode_arcade_$plat.zip  ($((size / 1024)) KB)"
+  # 硬断言：zip 里必须真的躺着核心二进制（.dll/.so），.info 版本还得对得上。
+  # 只数包数量是不够的——v0.3.1 就是"5 个包都在、但 Windows 包里没有 DLL"。
+  "$PYTHON_BIN" - "$zip" "makecode_arcade_libretro.$ext" "$VERSION" <<'PY'
+import re, sys, zipfile
+path, core, version = sys.argv[1], sys.argv[2], sys.argv[3]
+names = zipfile.ZipFile(path).namelist()
+if core not in names:
+    sys.exit(f"打包失败：{path} 里没有 {core}，实际内容 {names}")
+info = zipfile.ZipFile(path).read("makecode_arcade_libretro.info").decode()
+got = re.search(r'display_version = "([^"]+)"', info)
+if not got or got.group(1) != version:
+    sys.exit(f"打包失败：{path} 的 .info 版本 "
+             f"{got.group(1) if got else '缺失'} != {version}")
+PY
+  echo "  $(printf '%-32s' "$t") -> makecode_arcade_$plat.zip  ($((size / 1024)) KB, 含 $ext)"
   ok=$((ok + 1))
 done
 
