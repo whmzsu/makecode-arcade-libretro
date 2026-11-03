@@ -70,7 +70,8 @@ android-arm64-v8a:
     - .libretro-android-jni-arm64-v8a
     - .core-defs
 
-android-armeabi-v7a:
-  extends:
-    - .libretro-android-jni-armeabi-v7a
-    - .core-defs
+# 不列 android-armeabi-v7a：32 位目标已整体移除（卡带镜像是 PXT64，官方 pxt
+# 编译器没有 32 位镜像输出，runtime 的 PXT32 镜像补丁是上游未实现的 TODO，
+# 32 位核心装得上但跑不了任何游戏，见 README「只支持 64 位前端」）。
+# buildbot 的产物会直接进 RetroArch 的 Core Downloader，不能给玩家塞一个
+# 装得上、跑不起来的 32 位包。

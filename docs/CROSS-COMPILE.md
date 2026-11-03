@@ -6,12 +6,17 @@
 是纯 C/C++，无汇编、无平台专有 API、无外部依赖（miniz/LzmaDec 都 vendor 进来了）。
 zig 自带 libc 头与 glibc/musl stub，换 `-target` 就能出对应架构的产物。
 
-## 发版矩阵（主流目标）
+## 发版矩阵（主流目标，全部 64 位）
 
 ```bash
-tools/build_matrix.sh     # 默认只跑下面这 7 个
+tools/build_matrix.sh     # 默认只跑下面这 5 个
 tools/package_release.sh  # 打包成可直接放进 RetroArch 的 zip
 ```
+
+> **32 位目标已整体移除**（v0.3.1）。卡带镜像是 PXT64，官方 pxt 编译器没有
+> 32 位镜像输出，runtime 的 PXT32 镜像补丁是上游未实现的 TODO
+>（`verify.cpp`: `"TODO: NumberBoxes"`），32 位核心装得上但跑不了任何游戏。
+> 详见 README「只支持 64 位前端」。
 
 | 目标三元组 | 平台 | 格式 | libc 基线 | 产物 | 备注 |
 |---|---|---|---|---|---|
@@ -19,11 +24,9 @@ tools/package_release.sh  # 打包成可直接放进 RetroArch 的 zip
 | `aarch64-windows-gnu` | Windows ARM64 | PE | UCRT | 605 KB | 无第三方运行时 |
 | `x86_64-linux-gnu.2.17` | Linux x64 | ELF | glibc **2.16** | 4.6 MB | |
 | `aarch64-linux-gnu.2.17` | Linux ARM64（RK3566/RK3326） | ELF | glibc **2.17** | 4.9 MB | 掌机主力 |
-| `arm-linux-gnueabihf.2.17` | Linux ARM32 硬浮点 | ELF | glibc **2.16** | 4.3 MB | 老掌机 / 树莓派 |
 | `aarch64-linux-android21` | Android ARM64 | ELF | bionic API 21 | 933 KB | 16KB 页对齐 |
-| `armv7a-linux-androideabi21` | Android ARMv7 | ELF | bionic API 21 | 699 KB | 16KB 页对齐 |
 
-7 个目标的 14 个 `retro_*` 符号全部导出，动态依赖只有 libc/libm/libdl(+ld.so)。
+5 个目标的 14 个 `retro_*` 符号全部导出，动态依赖只有 libc/libm/libdl(+ld.so)。
 Linux 产物明显更大是因为带着完整符号表与 libc++ 静态部分；Windows 侧 PE 只有导出表。
 
 > Windows 产物依赖 UCRT（`api-ms-win-crt-*`，Win10 起系统自带）——与 RetroArch
@@ -131,7 +134,7 @@ zig 的 libc++ 用 `#include_next <math.h>` 找 C 数学头，而 bionic 的数�
 | 项 | 取值 |
 |---|---|
 | 编译器 | `$NDK/toolchains/llvm/prebuilt/<host>/bin/clang++.exe` |
-| 目标 | `--target=aarch64-linux-android21` / `armv7a-linux-androideabi21` |
+| 目标 | `--target=aarch64-linux-android21`（32 位 ABI 已移除，不再构建） |
 | sysroot | clang 自动按自身路径定位，无需显式传 |
 | NDK 位置 | `$ANDROID_NDK_HOME`，缺省回落到 `../common tools/android-ndk-r27c` |
 
@@ -145,40 +148,45 @@ zig 的 libc++ 用 `#include_next <math.h>` 找 C 数学头，而 bionic 的数�
 
 API 级别即三元组末尾数字；NDK r27 的下限是 21（也是 RetroArch Android 的最低要求）。
 
-将来若要支持 x86_64 / x86 Android 模拟器，把 `x86_64-linux-android21` /
-`i686-linux-android21` 加进 `build_matrix.sh --all` 即可（脚本已支持，NDK 也有对应 sysroot）。
+将来若要支持 x86_64 Android 模拟器，把 `x86_64-linux-android21` 加进
+`build_matrix.sh --all` 即可（脚本已支持，NDK 也有对应 sysroot）。x86（i686）
+Android 是 32 位，不在支持范围。
 
 ## 全架构验证（`--all`）
 
-`tools/build_matrix.sh --all`：**26 个目标通过，1 个失败**（sparc64，zig 后端崩溃）。
+`tools/build_matrix.sh --all`（**现在只跑 64 位目标**）：20 个目标全部通过。
+
+> 下表是 v0.3.0 期间的历史实测记录，当时还包含 32 位目标（arm32/armeb/x86/
+> x32/riscv32）。这些条目已从 `--all` 移除——**32 位目标一律不构建**，原因见
+> 上方「32 位目标已整体移除」。保留这张表只是为了记下当时各架构的实际产物
+> 尺寸与基线。
 
 | 目标 | 架构 | 格式 | libc 基线 | 产物大小 |
 |---|---|---|---|---|
 | `aarch64-linux-gnu(.2.17)` | AArch64 | ELF | 2.29 / **2.17** | 4.9 MB |
-| `arm-linux-gnueabihf(.2.17)` | ARM32 硬浮点 | ELF | 2.34 / **2.16** | 4.3 MB |
-| `arm-linux-gnueabi` | ARM32 软浮点 | ELF | 2.34 | 4.4 MB |
-| `armeb-linux-gnueabi` / `-musleabi` | ARM 大端 | ELF | 2.34 / musl | 4.4 MB |
 | `aarch64_be-linux-gnu` | AArch64 大端 | ELF | 2.29 | 5.0 MB |
 | `x86_64-linux-gnu(.2.17)` | x86_64 | ELF | 2.29 / **2.16** | 4.7 MB |
-| `x86-linux-gnu` | i386 | ELF | 2.34 | 3.9 MB |
-| `x86_64-linux-gnux32` | x32 ABI | ELF | 2.29 | 4.0 MB |
-| `aarch64/arm/x86_64-linux-musl` | 三架构 musl | ELF | 无 glibc 依赖 | 4.4–5.0 MB |
-| `riscv64` / `riscv32` | RISC-V | ELF | 2.27 / 2.33 | 6.5 / 5.5 MB |
+| `aarch64/x86_64-linux-musl` | 双架构 musl | ELF | 无 glibc 依赖 | 4.4–5.0 MB |
+| `riscv64` | RISC-V 64 | ELF | 2.27 | 6.5 MB |
 | `loongarch64` | 龙芯 | ELF | 2.36 | 6.1 MB |
 | `mips64` / `mips64el` | MIPS64 | ELF | 2.29 | 5.2 / 5.1 MB |
 | `powerpc64le` | PowerPC64 LE | ELF | 2.29 | 5.2 MB |
 | `s390x` | S/390 | ELF | 2.29 | 5.2 MB |
 | `x86_64-macos` / `aarch64-macos` | Intel / Apple Silicon | Mach-O | 系统自带 | 699 / 753 KB |
 
+历史（已移除的 32 位条目）：`arm-linux-gnueabihf(.2.17)` 4.3 MB、
+`arm-linux-gnueabi` 4.4 MB、`armeb-linux-gnueabi` 4.4 MB、
+`arm-linux-musleabihf` 4.4 MB、`x86-linux-gnu` 3.9 MB、
+`x86_64-linux-gnux32` 4.0 MB、`riscv32-linux-gnu` 5.5 MB。
+
 ## glibc 基线：掌机兼容性的关键
 
-zig 默认 glibc 基线与新发行版对齐，32 位 ARM 甚至要求 **2.34**（Ubuntu 22.04 级），
+zig 默认 glibc 基线与新发行版对齐（32 位 ARM 甚至要求 **2.34**，Ubuntu 22.04 级），
 老掌机固件（glibc 2.27~2.33）直接装不上。三元组里钉版本即可：
 
 | 三元组 | 默认 | 钉版本后 |
 |---|---|---|
 | `aarch64-linux-gnu` | 2.29 | `aarch64-linux-gnu.2.17` → **2.17** |
-| `arm-linux-gnueabihf` | 2.34 | `arm-linux-gnueabihf.2.17` → **2.16** |
 | `x86_64-linux-gnu` | 2.29 | `x86_64-linux-gnu.2.17` → **2.16** |
 
 2.17 发布于 2012 年，覆盖几乎所有在跑的 ARM 固件（ArkOS / JelOS / Batocera /

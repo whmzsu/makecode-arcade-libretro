@@ -17,12 +17,13 @@
 #     Android 本地就是 NDK clang 编，由上面 android job 覆盖，无需 zig。
 # 两边都绿 = 发版产物（本地 zig）与收录产物（发行版 gcc）都有回归兜底。
 #
-# 矩阵只列验证过能编过的平台：
-#   linux-x64 / linux-arm64 / linux-armhf（.so）
+# 矩阵只列验证过能编过的平台（**全部 64 位**；32 位目标已整体移除，
+# 原因见 README「只支持 64 位前端」）：
+#   linux-x64 / linux-arm64（.so）
 #   windows-x64（mingw-w64，.dll）
-#   android arm64-v8a / armeabi-v7a（ndk-build，见 core/jni/）
+#   android arm64-v8a（ndk-build，见 core/jni/）
 #   macOS 单独一个实验 job（continue-on-error，不阻塞）
-#   zig：x64/arm64 Windows + Linux x64/arm64/armhf（基线 2.17）
+#   zig：x64/arm64 Windows + Linux x64/arm64（基线 2.17）
 #   behavior-miniretro：真 aarch64 硬件 runner（ubuntu-24.04-arm，公开仓库
 #     免费）上用第三方前端 miniretro 跑 900 帧冒烟 —— 行为层验证
 
@@ -68,12 +69,6 @@ jobs:
             cc: aarch64-linux-gnu-gcc
             cxx: aarch64-linux-gnu-g++
             apt: g++-aarch64-linux-gnu
-          - arch: armhf
-            triple: arm-linux-gnueabihf
-            platform: unix-armv7-hardfloat-neon
-            cc: arm-linux-gnueabihf-gcc
-            cxx: arm-linux-gnueabihf-g++
-            apt: g++-arm-linux-gnueabihf
     steps:
       - uses: actions/checkout@v4
 
@@ -107,9 +102,10 @@ jobs:
           echo "== GLIBC 符号版本（信息性） =="
           readelf -V "$so" 2>/dev/null | grep -o 'GLIBC_[0-9.]*' | sort -uV | tr '\n' ' ' || true
           echo
-          # 只允许常见系统库（libatomic 是 armhf 上 64 位原子操作可能带出来的，
-          # ld-linux 是 zig 链接器的习惯，一并放行）：出现别的（静态链进来的
-          # libc、libandroid 之类）说明链接方式跑偏，玩家机器上加载会失败
+          # 只允许常见系统库（libatomic 是历史遗留：32 位目标上 64 位原子操作
+          # 可能带出来，如今已不构建 32 位，仍放行以免误报；ld-linux 是 zig
+          # 链接器的习惯）：出现别的（静态链进来的 libc、libandroid 之类）
+          # 说明链接方式跑偏，玩家机器上加载会失败
           bad=0
           for lib in $(readelf -d "$so" | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p'); do
             case "$lib" in
@@ -223,6 +219,8 @@ jobs:
           retention-days: 30
 
   # ---------------------------------------------------------------- Android
+  # 只构建 arm64-v8a：32 位 ABI 已整体移除（PXT64 镜像在 32 位 VM 下跑不了，
+  # 见 README「只支持 64 位前端」）。
   android:
     name: android-${{ matrix.abi }}
     runs-on: ubuntu-22.04
@@ -232,8 +230,6 @@ jobs:
         include:
           - abi: arm64-v8a
             triple: aarch64-linux-android21
-          - abi: armeabi-v7a
-            triple: armv7a-linux-androideabi21
     steps:
       - uses: actions/checkout@v4
 
@@ -312,9 +308,6 @@ jobs:
             ext: so
             apt: ''
           - triple: aarch64-linux-gnu.2.17
-            ext: so
-            apt: ''
-          - triple: arm-linux-gnueabihf.2.17
             ext: so
             apt: ''
     steps:
@@ -616,9 +609,9 @@ jobs:
       - name: 打成 RetroArch 发行包
         run: |
           tools/package_release.sh \
-            x86_64-linux-gnu aarch64-linux-gnu arm-linux-gnueabihf \
+            x86_64-linux-gnu aarch64-linux-gnu \
             x86_64-windows-gnu \
-            aarch64-linux-android21 armv7a-linux-androideabi21
+            aarch64-linux-android21
           echo "== 产物 =="
           ls -l core/dist/release
           echo "== 各包清单 =="
@@ -636,7 +629,7 @@ jobs:
 
   # ---------------------------------------------------------------- 发版
   # 只在推 core-v* tag 时跑：把 zig（与本地发版矩阵同工具链、2.17 基线）
-  # 和 NDK 的产物打成 7 个平台包，创建 GitHub Release 并上传。
+  # 和 NDK 的产物打成 5 个平台包（仅 64 位），创建 GitHub Release 并上传。
   #
   # 为什么不复用上面的 package job：那个 job 吃的是发行版 gcc 产物，用途是
   # 验证"打包链路没坏"；发版包必须是 zig 2.17 基线（+ 只有 zig 才出的
@@ -674,13 +667,15 @@ jobs:
           done
           ls -d core/dist/*/ | sed 's/^/  /'
 
-      - name: 打发行包（7 平台）
+      - name: 打发行包（5 平台，仅 64 位）
         run: |
           set -euo pipefail
+          # 只出 64 位包：32 位目标已整体移除（PXT64 镜像在 32 位 VM 下跑不了
+          # 任何游戏，官方编译器也没有 32 位镜像输出，见 README）。
           tools/package_release.sh \
             x86_64-windows-gnu aarch64-windows-gnu \
-            x86_64-linux-gnu.2.17 aarch64-linux-gnu.2.17 arm-linux-gnueabihf.2.17 \
-            aarch64-linux-android21 armv7a-linux-androideabi21
+            x86_64-linux-gnu.2.17 aarch64-linux-gnu.2.17 \
+            aarch64-linux-android21
           echo "== 产物 =="
           ls -l core/dist/release
 
@@ -691,7 +686,7 @@ jobs:
           tag="${GITHUB_REF#refs/tags/}"
           ver="${tag#core-v}"
           n=$(ls core/dist/release/*.zip | wc -l)
-          [ "$n" -eq 7 ] || { echo "::error::期望 7 个包，实际 $n"; exit 1; }
+          [ "$n" -eq 5 ] || { echo "::error::期望 5 个包，实际 $n"; exit 1; }
           for z in core/dist/release/*.zip; do
             got=$(python3 -c "import sys,zipfile,re;d=zipfile.ZipFile(sys.argv[1]).read('makecode_arcade_libretro.info').decode();print(re.search(r'display_version = \"([^\"]+)\"',d).group(1))" "$z")
             [ "$got" = "$ver" ] || { echo "::error file=$z::.info 版本 $got 与 tag $ver 不符"; exit 1; }
@@ -704,7 +699,7 @@ jobs:
         run: |
           set -euo pipefail
           tag="${GITHUB_REF#refs/tags/}"
-          title="core ${tag#core-} - libretro core (7 platforms)"
+          title="core ${tag#core-} - libretro core (5 platforms, 64-bit)"
           notes=".github/release-notes/${tag}.md"
           if [ -f "$notes" ]; then
             body=(--notes-file "$notes")

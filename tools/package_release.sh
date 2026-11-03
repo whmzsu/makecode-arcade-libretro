@@ -29,15 +29,13 @@ if [ -z "$PYTHON_BIN" ]; then
   exit 2
 fi
 
-# 发版目标 = build_matrix.sh 的 MAIN_TARGETS
+# 发版目标 = build_matrix.sh 的 MAIN_TARGETS（全部 64 位；32 位目标已整体移除）
 MAIN_TARGETS=(
   x86_64-windows-gnu
   aarch64-windows-gnu
   x86_64-linux-gnu.2.17
   aarch64-linux-gnu.2.17
-  arm-linux-gnueabihf.2.17
   aarch64-linux-android21
-  armv7a-linux-androideabi21
 )
 
 case "${1:-}" in
@@ -71,12 +69,9 @@ platform_of() {
     aarch64-windows-gnu)       echo "windows-arm64" ;;
     x86_64-linux-gnu.2.17)     echo "linux-x64" ;;
     aarch64-linux-gnu.2.17)    echo "linux-arm64" ;;
-    arm-linux-gnueabihf.2.17)  echo "linux-armhf" ;;
     x86_64-linux-gnu)          echo "linux-x64" ;;
     aarch64-linux-gnu)         echo "linux-arm64" ;;
-    arm-linux-gnueabihf)       echo "linux-armhf" ;;
     aarch64-linux-android21)   echo "android-arm64" ;;
-    armv7a-linux-androideabi21) echo "android-armv7" ;;
     *)                         echo "${1//\//-}" ;;
   esac
 }
@@ -100,7 +95,7 @@ license = \"MIT\"
 permissions = \"\"
 display_version = \"$VERSION\"
 supports_no_game = \"false\"
-notes = \"Unofficial core: not affiliated with or endorsed by Microsoft. Plays ONLY .pxt64 bytecode images - the file browser lists .pxt64 files only. MakeCode Arcade .png cartridges contain source code only, NOT a playable game: convert them FIRST with cartconv (github.com/whmzsu/makecode-arcade-cartconv). Buttons are remappable under Quick Menu > Controls (Start = in-game menu, Select = reset); the core exposes no options.\""
+notes = \"Unofficial core: not affiliated with or endorsed by Microsoft. 64-BIT FRONTENDS ONLY: cartridge images are PXT64-only (the official pxt compiler has no 32-bit output and the runtime's PXT32 image patching is an unimplemented upstream TODO), so 32-bit builds can load but cannot run anything. Plays ONLY .pxt64 bytecode images - the file browser lists .pxt64 files only. MakeCode Arcade .png cartridges contain source code only, NOT a playable game: convert them FIRST with cartconv (github.com/whmzsu/makecode-arcade-cartconv). Buttons are remappable under Quick Menu > Controls (Start = in-game menu, Select = reset); the core exposes no options.\""
 
 ok=0; skipped=0
 for t in "${TARGETS[@]}"; do
@@ -146,8 +141,8 @@ MakeCode Arcade — libretro core ($plat)
   （设置 → 配置 → 保存新配置 → 编辑该行 → 加载配置）。
   只装 .so 不装 .info 是不行的：实测选中游戏后「选择核心」列表里选不到本核心。
 
-  选包：现代设备（arm64-v8a）用 android-arm64；
-        老旧 32 位设备用 android-armv7。装错会表现为"核心加载失败"。
+  选包：Android 只有 64 位版（arm64-v8a）。本核心不支持 32 位设备——
+        卡带镜像是 PXT64，32 位 VM 跑不了任何游戏，详见 README。
 
 内容格式：
   .pxt64  转换后的 VM 字节码镜像，核心只认这个格式（加载内容里也只列出它）

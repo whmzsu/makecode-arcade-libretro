@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # build_matrix.sh — 交叉编译矩阵
 #
-# 三种档位：
-#   ./build_matrix.sh            # 主流目标（发版用，7 个：Win x64/arm64、Linux x86_64/aarch64/armhf、Android arm64/armv7）
-#   ./build_matrix.sh --all      # 全架构（验证用，含 riscv/loongarch/ppc/s390x/musl/macOS/大端…）
+# 档位：
+#   ./build_matrix.sh            # 主流目标（发版用，5 个：Win x64/arm64、Linux x86_64/aarch64、Android arm64）
+#   ./build_matrix.sh --all      # 全架构（验证用，含 riscv/loongarch/ppc/s390x/musl/macOS/大端…，均 64 位）
 #   ./build_matrix.sh <triple>…  # 只跑指定目标
 #
 # 附加参数：
@@ -30,26 +30,22 @@ MAIN_TARGETS=(
   # Linux
   x86_64-linux-gnu.2.17
   aarch64-linux-gnu.2.17
-  arm-linux-gnueabihf.2.17
   # Android
   aarch64-linux-android21
-  armv7a-linux-androideabi21
 )
+
+# 32 位目标（armhf / armv7 / x86 / i686-android…）**一律不构建**：
+# 卡带镜像是 PXT64，官方 pxt 编译器没有 32 位镜像输出，runtime 的 PXT32
+# 镜像补丁是上游未实现的 TODO（verify.cpp: "TODO: NumberBoxes"），所以
+# 32 位核心能装能识别但跑不了任何游戏。详见 README「只支持 64 位前端」。
 
 # —— 扩展目标：--all 时追加 ——
 EXTRA_TARGETS=(
   # musl 发行版（Alpine / 部分静态固件）
   aarch64-linux-musl
   x86_64-linux-musl
-  arm-linux-musleabihf
-  # 32 位 x86 与 x32 ABI
-  x86-linux-gnu
-  x86_64-linux-gnux32
-  # 树莓派等 armv6 设备
-  arm-linux-gnueabi
-  # 其它架构（社区向）
+  # 其它 64 位架构（社区向）
   riscv64-linux-gnu
-  riscv32-linux-gnu
   loongarch64-linux-gnu
   powerpc64le-linux-gnu
   mips64-linux-gnuabi64
@@ -57,13 +53,11 @@ EXTRA_TARGETS=(
   s390x-linux-gnu
   # 大端
   aarch64_be-linux-gnu
-  armeb-linux-gnueabi
   # macOS
   aarch64-macos
   x86_64-macos
-  # Android 其它 ABI
+  # Android 其它 64 位 ABI
   x86_64-linux-android21
-  i686-linux-android21
 )
 
 # 已知不可行（记录在案，见 docs/CROSS-COMPILE.md）：

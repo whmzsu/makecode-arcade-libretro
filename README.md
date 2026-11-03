@@ -80,7 +80,7 @@ makecode_arcade/
 | M3 | pxt VM 字节码解释器接入，跑通第一个游戏 | ✅ **三款游戏全通**：vm_smoke（官方 ABI 直调）+ libretro 假前端路径（RGB565/按键沿/音频） |
 | M4 | 输入 / 音频合成 / 60fps 帧模型完整化 | ✅ 宿主接口全部打通：按键描述符/分键重绑、音频合成与峰值回归、帧驱动虚拟时钟（前端一圈一帧，快进=前端多取帧）、panic 横幅、存档目录对接（trace/数据走 `GET_SAVE_DIRECTORY`）、panic 自愈见 `test_lifecycle`。**v0.3.0 范围收敛：不做即时存档 / rewind（`retro_serialize*` 为 stub，前端自动禁用），核心只做官方模拟器同等的基本功能** |
 | M5 | 离线转换工具（PNG→bytecode）+ 游戏兼容性测试集 | ✅ 已拆分到独立仓库 [makecode-arcade-cartconv](https://github.com/whmzsu/makecode-arcade-cartconv)（cartconv 便携包 + png2pxt64.py 参照实现），三卡带实测通过 |
-| M6 | 交叉编译（掌机/桌面/移动）+ 性能验证 | ✅ **7 个主流目标全通并出 zip**（Windows x64/arm64、Linux x64/arm64/armhf、Android arm64/armv7）；✅ **RK3566 + ArkOS 真机验收通过**（v0.2.1，用户反馈运行正常、完全无卡顿；帧率数值待量化）；✅ **Android arm64 验收通过**（v0.2.7，功能与 Linux aarch64 一致） |
+| M6 | 交叉编译（掌机/桌面/移动）+ 性能验证 | ✅ **5 个 64 位主流目标全通并出 zip**（Windows x64/arm64、Linux x64/arm64、Android arm64）；32 位目标已整体移除（不再构建、不再发布）——PXT64 镜像在 32 位 VM 下跑不了，见下方「只支持 64 位前端」；✅ **RK3566 + ArkOS 真机验收通过**（v0.2.1→v0.3.0 全功能回归，满速 166~361fps）；✅ **RK3326 + ArkOS 下限机型验收通过**（v0.3.0，最重游戏 66fps）；✅ **Android arm64 验收通过**（v0.2.7） |
 
 ## 环境要求与快速开始
 
@@ -164,15 +164,36 @@ pxt 编译链已拆分到独立仓库：
 纯 C/C++、无平台专有依赖，zig 自带 libc 头，换 `-target` 即可：
 
 ```bash
-tools/build_matrix.sh     # 发版矩阵：7 个主流目标（约 30 秒）
+tools/build_matrix.sh     # 发版矩阵：5 个主流目标（全部 64 位，约 30 秒）
 tools/package_release.sh  # 打包成可直接放进 RetroArch 的 zip
 ```
 
 | 平台 | 产物 |
 |---|---|
 | Windows x64 / ARM64 | `makecode_arcade_windows-x64.zip` / `-arm64.zip` |
-| Linux x64 / ARM64 / ARMhf | `makecode_arcade_linux-x64.zip` / `-arm64.zip` / `-armhf.zip` |
-| Android ARM64 / ARMv7 | `makecode_arcade_android-arm64.zip` / `-armv7.zip` |
+| Linux x64 / ARM64 | `makecode_arcade_linux-x64.zip` / `-arm64.zip` |
+| Android ARM64 | `makecode_arcade_android-arm64.zip` |
+
+> **只支持 64 位前端**（重要）。卡带里装的是 **PXT64** 字节码镜像：官方 pxt
+> 编译器（`pxt-core` 的 arcade target）**没有产出 32 位镜像的开关**，它唯一
+> 能适配 32 位目标的地方是把镜像就地补丁成原生布局，而这个函数
+> （`runtime/pxtapp/core---vm/verify.cpp` 的 `vm_patch_image`）的 `PXT32`
+> 分支至今是上游留下的 `return "TODO: NumberBoxes"`——从来没实现过，调用方
+> 也不检查返回值，于是镜像原样装载 → boxed number 的 vtable 是垃圾 → 校验报
+> 1064 → VM 线程几毫秒就退出。
+>
+> 真机实测（RK3566 / RK3326 各一台，`retroarch32` + armhf 核心）：前端能列出
+> 核心、能加载、日志还打 `VM started`，但 **VM 线程 3ms 就退出**
+> （trace `vm ready (online=0 live=0)`），画面全黑。
+>
+> 所以**核心不再支持、也不再构建 32 位目标**：armhf / armeabi-v7a / i686 等
+> 已从发版矩阵、GitHub Actions、buildbot 列表全部移除；CI 里没有 32 位 job，
+> `core/jni/Application.mk` 只列 `arm64-v8a`。32 位构建连编译验证都不做——
+> 上游那个 TODO 不解决，编出来的东西必然跑不了，留着只是噪音。
+>
+> 补上游这个坑不在本项目范围内：PXT64 → 32 位原生布局的转换是编译器侧的
+> 职责，核心侧硬补等于自造一套 ABI，而且收益近零——两台真机的 64 位前端
+> 都跑得动。
 
 每个 zip 内含 core 二进制 + `.info` + 安装说明。Linux 目标固定用 glibc 2.17
 基线（覆盖 2012 年后的掌机固件）；Android 静态链 libc++ 并做 16KB 页对齐
@@ -187,15 +208,14 @@ tools/package_release.sh  # 打包成可直接放进 RetroArch 的 zip
 > `docs/DEVICE-TEST.md` 第五轮。
 
 ```bash
-tools/build_matrix.sh --all                    # 全架构验证（26/27 通过）
-tools/build_matrix.sh --prune                  # 回到发版 7 目标，并删掉其余目标的 dist/build 目录
+tools/build_matrix.sh --all                    # 全架构验证（20 个 64 位目标全通过）
+tools/build_matrix.sh --prune                  # 回到发版 5 目标，并删掉其余目标的 dist/build 目录
 python tools/inspect_binary.py                 # 架构 + libc 基线 + 依赖 + retro_* 导出
 ```
 
 产物在 `core/dist/<triple>/`，汇总表 `core/dist/MATRIX.md`。工作区默认只保留
-发版 7 个目标的产物（`--all` 验证完用 `--prune` 收拾，`dist/release/` 的 zip 不受影响）。
-细节与坑（glibc 基线、Android NDK、32 位 MIPS、大端字节序）见
-**docs/CROSS-COMPILE.md**。
+发版 5 个目标的产物（`--all` 验证完用 `--prune` 收拾，`dist/release/` 的 zip 不受影响）。
+细节与坑（glibc 基线、Android NDK、大端字节序）见 **docs/CROSS-COMPILE.md**。
 
 pxt 工具链（本仓库探针/测试卡带生成依赖）：node + npm。依赖清单与安装说明
 在并列仓库 **makecode-arcade-cartconv** 的 `vm-build/` 下：
@@ -212,13 +232,13 @@ cd ../makecode_arcade_cartconv/vm-build && npm install
 
 | 矩阵 | 工具链 | 产物 |
 |---|---|---|
-| `linux-x64` / `linux-arm64` / `linux-armhf` | Ubuntu 22.04 + gcc 交叉包 | `.so` |
+| `linux-x64` / `linux-arm64` | Ubuntu 22.04 + gcc 交叉包 | `.so` |
 | `windows-x64` | mingw-w64（**-posix** 线程模型，pxt VM 用 pthread） | `.dll` |
-| `android-arm64` / `android-armv7` | 跑者自带 NDK + `core/jni/`（与官方模板同一套参数） | `.so` |
-| `zig-*`（x64/arm64 Windows + Linux x64/arm64/armhf） | **与本地发版同一工具链**（zig 0.17.0 + `tools/build_target.sh`） | `.so` / `.dll` |
+| `android-arm64` | 跑者自带 NDK + `core/jni/`（与官方模板同一套参数） | `.so` |
+| `zig-*`（x64/arm64 Windows + Linux x64/arm64） | **与本地发版同一工具链**（zig 0.17.0 + `tools/build_target.sh`） | `.so` / `.dll` |
 | `macos-universal` | Xcode clang，arm64+x86_64 | `.dylib`（实验，`continue-on-error`） |
-| `package` | 汇总发行版工具链产物 → `tools/package_release.sh` | 6 个 zip |
-| `release`（只在推 `core-v*` tag 时） | 汇总 `zig-*` + `android-*` 产物 → `package_release.sh` → `gh release create` | **7 个 zip**（含只有 zig 能出的 `windows-arm64`） |
+| `package` | 汇总发行版工具链产物 → `tools/package_release.sh` | 4 个 zip |
+| `release`（只在推 `core-v*` tag 时） | 汇总 `zig-*` + `android-*` 产物 → `package_release.sh` → `gh release create` | **5 个 zip**（含只有 zig 能出的 `windows-arm64`） |
 
 工具链**刻意分两套**，别合并：
 
@@ -249,13 +269,13 @@ cd ../makecode_arcade_cartconv/vm-build && npm install
 | `.gitlab-ci.yml` | libretro 官方 buildbot（镜像仓库） | 收录进 RetroArch Core Downloader 用 |
 
 **发布由 tag 触发**。推 `core-v*` tag 时，`release` job 等 `zig-*` 与
-`android-*` 编完，用与本地同一份 `tools/package_release.sh` 打 7 个包，再创建
-GitHub Release 并把 zip 挂上去。
+`android-*` 编完，用与本地同一份 `tools/package_release.sh` 打 5 个包（仅 64 位），
+再创建 GitHub Release 并把 zip 挂上去。
 
 - 凭据用仓库内置 `GITHUB_TOKEN`（job 级 `contents: write`，全局仍是只读），
   **不需要 PAT**。Release 对象与附件上传只有 HTTPS API 提供，git/SSH 到不了
   这一层——SSH key 只能推 commit 和 tag。
-- 发版前硬断言：包数必须 7、每个包 `.info` 的 `display_version` 必须等于 tag，
+- 发版前硬断言：包数必须 5、每个包 `.info` 的 `display_version` 必须等于 tag，
   少一个或版本对不上就红，不会发出半套包。
 - 说明文本取 `.github/release-notes/<tag>.md`；没写就退回 `--generate-notes`。
 - 重跑安全：Release 已存在时走 `upload --clobber` + `edit`，不报错。

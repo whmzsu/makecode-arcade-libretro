@@ -4,6 +4,12 @@
 > 只做官方模拟器同等的基本功能。下文 v0.2.10–v0.2.15 各节记录的存档类
 > 问题（暂停握手、跨会话地址、固定基址、PANIC 840 等）随功能移除而**整体
 > 作废**，仅作历史留档；真机验收只需覆盖运行/重置/卸载/按键/音频。
+>
+> **v0.3.1（2026-11-03）只支持 64 位前端**：32 位目标（armhf / armeabi-v7a）
+> 已整体移除，不再构建也不发布。原因：卡带镜像是 PXT64，官方 pxt 编译器没有
+> 32 位镜像输出，runtime 的 PXT32 镜像补丁是上游未实现的 TODO，32 位核心
+> 装得上但跑不了任何卡带。详见 README「只支持 64 位前端」，实测见下文
+> 2026-11-03 节。
 
 ## 2026-11-01 · RK3566 + ArkOS（首台实机）
 
@@ -53,20 +59,18 @@ pxt 上游 `core---vm/platform.cpp` 的 `initRandomSeed()` 在
   以 RetroArch `设置 → 目录 → 核心 / 核心信息` 里显示的为准；ArkOS 的
   菜单入口可能在 `options → retroarch` 下。**`.info` 必须同放**，否则
   「加载核心」列表里不显示 "MakeCode Arcade"。
-- 架构确认：`uname -m` 必须为 `aarch64`；若为 `armv7l` 需换
-  `makecode_arcade_linux-armhf.zip`（armhf 尚未真机验证，见下）。
+- 架构确认：`uname -m` 必须为 `aarch64`。**本核心不提供 32 位版本**——armv7l
+  等 32 位系统请升级到 64 位前端，或换设备。原因与实测见 README
+  「只支持 64 位前端」。
 
 ### 待量化 / 待覆盖
 
-1. **帧率与占用**：目前只有主观"无卡顿"。RetroArch OSD 打开 FPS 显示，
-   或 SSH 上 `top -H -p $(pidof retroarch)` 看单核占用，可给出确切数字。
-2. **RK3326**（4×A35 @1.3GHz，比 A55 再弱一档）未测；这是路线 B 立项时
-   点名的另一颗芯片。
-3. **armhf（32 位）** 编译通过但未真机验证。注意 `base/gc.cpp` 的
-   `gcAllocBlock()` 在非 PXT64 分支走 `mmap(GC_BASE=0x2000000000)`，
-   32 位下该常量会截断；实际行为未验证（不带 `MAP_FIXED` 时 addr 仅作
-   提示，可能不影响，但需实测）。
-4. **Android** 两个包未上机。
+1. ~~**帧率与占用**~~：已在 2026-11-03 用两台真机量化（见该节）。
+2. ~~**RK3326**~~：已测（R36S / RK3326，2026-11-03 节，满速 cubeland 66fps）。
+3. ~~**armhf（32 位）**~~：已上真机并得结论——**跑不了**。不是性能问题，
+   是 PXT64 镜像与 32 位 VM 的格式不兼容（官方编译器无 32 位输出，上游
+   PXT32 补丁是 TODO）。32 位已从发版矩阵移除，见 README。
+4. **Android** 两个包未上机（其中 armv7 已随 32 位一并废弃）。
 
 ## 2026-11-01（第二晚）：重置挂起（v0.2.5 修复）
 
@@ -218,7 +222,7 @@ Android 上装第三方 core 有个绕不开的矛盾：
 ### 未覆盖
 
 - Android 上的量化数据（fps / 单核占用）还没测。
-- 32 位 armv7 产物未上真机（设备是 64 位）。
+- ~~32 位 armv7 产物未上真机~~：已测（2026-11-03，结论=跑不了，见该节）。
 
 
 ## 2026-11-02（桌面端）：v0.2.10 确定性 + 即时存档落地
@@ -569,3 +573,69 @@ load 跑 700/1600 帧均正常，无法本地复现），随固定基址稳定�
    若打「退回随机分配」说明全部候选被占，跨会话仍退化，需换更大候选表。
 4. 若仍报 `PANIC 840`：抓完整 trace（看 `[snap]` 段 + 是否还有「取不到固定地址」），
    这是本修复的推断项，需新证据。
+
+## 2026-11-03：两台真机 v0.3.0 全量回归 + 32 位结论
+
+### 设备
+
+| | RG353M | R36S（clone） |
+|---|---|---|
+| SoC | RK3566（4×A55 @1.8GHz） | RK3326（4×A35 @1.3GHz） |
+| RAM | 2GB（1.9GB 可用） | 918MB |
+| 系统 | ArkOS / aarch64 / Python 3.7.5 | Debian 13 / glibc 2.41 / aarch64 |
+| 连接 | `ssh rg353m`（192.168.1.130） | `ssh r36s`（192.168.1.53） |
+
+> R36S 的 `/home/ark` 原本是 0777，被 sshd `StrictModes` 拒掉公钥（密码能进、
+> 免密静默失败）。已改成 755。
+
+### v0.3.0 功能回归（两台一致通过）
+
+| 项 | 结果 |
+|---|---|
+| ping 300 帧 | 正常，148 独立帧，无 panic |
+| 重置（SELECT@120） | 清理 → 新 VM 线程 12ms 就绪 → 跑完；trace 有 `new vm thread created` |
+| 换游戏 ping→jumpy | 第二张卡带正常出帧 |
+| panic 1007 自愈 | 自动重启 1/3、2/3、3/3 后按设计放弃，无死锁 |
+| 音频 | audio_probe 峰值 8160 |
+| 真 RetroArch 前端 | 加载核心 → VM 启动 → 主循环 → SIGTERM 干净退出（临时配置 + null 驱动，不碰用户 cfg） |
+
+### 性能（`--turbo` 满速，Python 宿主含自身开销）
+
+| 游戏 | RG353M (RK3566) | R36S (RK3326) |
+|---|---|---|
+| ping | 361 fps | 158 fps |
+| jumpy | 240 fps | 95 fps |
+| cubeland | 166 fps | **66 fps** |
+
+- 峰值 RSS：RG353M 11MB / R36S 13MB（含 Python 宿主）。
+- 60fps 节拍下单核占用：RG353M 46%（含宿主），真实 RetroArch 更低。
+- **R36S 是下限机型**：cubeland 只剩 1.1 倍余量，理论上单核会吃满；
+  宿主节拍在 R36S 上本身只能到 ~40fps，真实 C 前端会好一些，需玩家实机手感确认。
+
+### 32 位前端：结论是"跑不了"
+
+两台都装了 `retroarch32` + 32 位核心（armhf zip 直接可用，glibc 2.17 基线向下兼容）：
+
+- 前端能列出核心、能加载，日志也打 `VM started`；
+- 但 **VM 线程 3ms 就退出**（trace `vm ready (online=0 live=0)`），画面全黑；
+- 日志 `validation error 1064`（boxed number 的 vtable 校验失败）。
+
+根因在 `runtime/pxtapp/core---vm/verify.cpp`：
+
+```c
+#ifdef PXT32
+    if (sect.type == SectionType::NumberBoxes) {
+        return (state->error = "TODO: NumberBoxes");   // 上游从未实现
+    }
+#endif
+```
+
+官方 pxt 编译器只产 PXT64 镜像，没有任何产出 32 位镜像的开关；它唯一的
+32 位适配路径就是这个"把镜像就地补丁成 32 位原生布局"的函数，而上游把它
+留成了 TODO，且调用方 `vmStartCore` 不检查返回值 → 镜像原样装载 → vtable 是
+垃圾 → 1064。
+
+处置（v0.3.1）：32 位**整体移除**——发版矩阵、GitHub Actions、buildbot 列表
+里都不再有 32 位目标，`core/jni/Application.mk` 只列 `arm64-v8a`。核心侧也
+不加任何运行时判断（既然不再产出 32 位构建，判断就是死代码）。除非上游把
+`vm_patch_image` 的 `"TODO: NumberBoxes"` 补完，否则 32 位前端一律不支持。
