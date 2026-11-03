@@ -671,23 +671,13 @@ jobs:
             > armhf-suite.log 2>&1
           rc=$?
           set -e
-          # 失败诊断：套件尾部 + core trace（[snap] 拒绝原因/[heap]/PANIC）。
-          # 注解上限 10 条/job，细节写进 Step Summary（公开可读），注解只带尾部
+          # 失败诊断：只抓关键标记行（注解上限 10 条/job，不能多）
           {
-            echo '### armhf 套件失败诊断'
-            echo '```'
-            tail -8 armhf-suite.log
-            echo '---- mca_trace ----'
-            sudo grep -hE '\[snap\]|\[heap\]|\[img\]|\[fix\]|PANIC' \
+            grep -E 'serialize|unserialize|pause failed|快照已存|恢复快照|-> OK|\[FAIL\]' \
+              armhf-suite.log | tail -6
+            sudo grep -hE '\[snap\]|\[heap\]|\[fix\]|PANIC' \
               /opt/armhf-root/repo/out/savestate_test/makecode_arcade/mca_trace.log \
-              2>/dev/null | tail -20 || true
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY" || true
-          {
-            tail -4 armhf-suite.log
-            sudo grep -hE '\[snap\]|\[heap\]|PANIC' \
-              /opt/armhf-root/repo/out/savestate_test/makecode_arcade/mca_trace.log \
-              2>/dev/null | tail -4 || true
+              2>/dev/null | tail -3 || true
           } | sed 's/^/::error::armhf /'
           # [SKIP] 缺文件会 exit 0 —— CI 上必须当失败处理
           if grep -q '\[SKIP\]' armhf-suite.log; then
