@@ -1,0 +1,42 @@
+{
+  "about": "测试语料清单。真实游戏，来源是 MakeCode 官方社区清单 docs/GameList.json（share id），用 makecode-arcade-cartconv 的 tools/fetch_shared.py 取源码 + 编译；png_carts 里的四张是从 .png 卡带走 cartconv 正常转换路径。不要往仓库里提交 .pxt64 本体：那是第三方游戏内容，且可由本清单随时重建。",
+  "fetch": "python tools/fetch_shared.py --manifest <本文件去掉 png_carts 后的 games 列表> -o out/testcarts    # 在 makecode-arcade-cartconv 仓库下执行",
+  "sweep": "python tools/sweep_carts.py out/testcarts -n 600 --press A --press-at 60 --release 90",
+  "tiers": {
+    "smoke": "每次改 core 都跑，覆盖面够、总耗时约 1 分钟",
+    "full": "发版前跑，补齐机制与边界",
+    "known_bad": "已知会崩，用来确认\"崩溃行为本身\"没变坏（不是要它通过）"
+  },
+  "games": [
+    {"name": "ping", "id": null, "png": "png_examples/arcade-ping.png", "tier": "smoke", "expect": "ok", "why": "最小基准：单精灵 + 球拍，改动后最先看它"},
+    {"name": "arcade-falling-duck", "id": null, "png": "png_examples/arcade-falling-duck.png", "tier": "smoke", "expect": "ok", "why": "真实 .png 卡带路径（cartconv 转换），粒子 + 计时器"},
+    {"name": "arcade-jumpy-platformer", "id": null, "png": "png_examples/arcade-jumpy-platformer.png", "tier": "smoke", "expect": "ok", "why": "平台跳跃：瓦片地图 + 物理 + 相机滚动"},
+    {"name": "arcade-cube-land", "id": null, "png": "png_examples/arcade-cube-land.png", "tier": "smoke", "expect": "ok", "why": "下限机型压力样本（RK3326 上唯一余量接近 1 的场景）"},
+    {"name": "Blocky_Boss_Battle", "id": "69052-09321-39220-20264", "tier": "smoke", "expect": "ok", "why": "短平快射击，帧率高（27fps），适合看\"是不是真在跑\""},
+    {"name": "GalgaMulti", "id": "_Y8VUmcHYsdsy", "tier": "smoke", "expect": "ok", "why": "双人 + arcade-mp 扩展 + 精灵数据扩展，扩展装载路径"},
+    {"name": "TicTacTwo_", "id": "13412-17300-80986-88577", "tier": "smoke", "expect": "ok", "why": "回合制：画面几乎不动（独立帧 5），验证\"静止画面不算卡死\""},
+    {"name": "Caterpillar", "id": "91782-54072-13194-99228", "tier": "smoke", "expect": "ok", "why": "小体量 + 瓦片地图 + 音效，跑得快"},
+    {"name": "Secure_the_river_", "id": "32777-59846-95775-11055", "tier": "full", "expect": "ok", "why": "双人合作，帧率满（27fps）"},
+    {"name": "Bunny_Hop_", "id": "91201-59331-72477-53174", "tier": "full", "expect": "ok", "why": "横版跑酷，自动滚动 + 物理"},
+    {"name": "Pigeon__Deliverance", "id": "24832-19682-40817-54648", "tier": "full", "expect": "ok", "why": "大工程（171KB 源码），瓦片 + 物理 + 精灵数据"},
+    {"name": "Save_the_Forest", "id": "19410-44885-95661-59850", "tier": "full", "expect": "ok", "why": "极短源码（1.1KB）但瓦片+物理齐全，小样本"},
+    {"name": "Space_Destroyer", "id": "50225-04801-24334-14778", "tier": "full", "expect": "ok", "why": "也很短（1.5KB），粒子密集"},
+    {"name": "Hot_Air_Balloon", "id": "27640-75402-47530-91242", "tier": "full", "expect": "ok", "why": "背景音乐 + 滚动场景"},
+    {"name": "Jewel_Raider", "id": "14111-27578-89085-17056", "tier": "full", "expect": "ok", "why": "多关卡 + 音乐，独立帧少（12）说明停在标题"},
+    {"name": "Kickoff_", "id": "99776-77448-58171-80239", "tier": "full", "expect": "ok", "why": "极简逻辑（只有数组/循环），验证\"几乎没图形操作\"的卡带"},
+    {"name": "Falling_Duck", "id": "96744-30917-11312-43375", "tier": "full", "expect": "ok", "why": "与 png 版同名不同源，对比两条取卡路径"},
+    {"name": "Stack_the_Goats", "id": "86980-49044-76449-93183", "tier": "full", "expect": "ok", "why": "瓦片 + 精灵数据 + 粒子"},
+    {"name": "Cave_Explorer", "id": "02651-16710-47798-38995", "tier": "full", "expect": "ok", "why": "多关卡洞穴，瓦片地图为主"},
+    {"name": "Mouse_Adventure", "id": "21784-44427-92956-37509", "tier": "full", "expect": "ok", "why": "最大的镜像（382KB），瓦片 + 精灵数据 + 大量状态"},
+    {"name": "Strawberry_Slam", "id": "39705-92830-48491-01106", "tier": "known_bad", "expect": "panic:980", "why": "固定第 5133 tick 崩 PANIC_CAST_FROM_UNDEFINED（与按键无关），留作\"崩溃处理是否优雅\"的样本"}
+  ],
+  "excluded": [
+    {"name": "Asphodel_follows_directions", "id": "07573-63879-62644-28924", "reason": "依赖 thermometer / lightsensor 硬件扩展，hw---vm 变体下 C++ 常量无法求值，编不出来——这类卡带在掌机上本来也跑不了（没有温度/光照传感器）"}
+  ],
+  "gaps": [
+    "音效触发：600 帧只按一次 A，多数游戏没触发音效，音频峰值全程 0，不能据此判断音频链路",
+    "长跑：没有跑过 5 分钟以上，帧循环里的缓慢泄漏（如果有）看不出来",
+    "堆上限：现有最大镜像 382KB，仍未逼近 1MB VM 堆；缺一个\"故意吃满堆\"的样本验证 soft_panic 横幅 + 自动重启",
+    "真机：本地宿主验证过，尚未在 RK3566 / RK3326 上批量跑"
+  ]
+}
