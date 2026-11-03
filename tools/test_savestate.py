@@ -50,9 +50,19 @@ elif os.name == "nt":
 else:
     CORE = os.path.join(ROOT, "core", "makecode_arcade_libretro.so")
 
-PING = os.path.join(ROOT, "out", "pxt64", "ping.pxt64")
-BUSY = os.path.join(ROOT, "out", "pxt64", "busy.pxt64")
-JUMPY = os.path.join(ROOT, "out", "pxt64", "jumpy.pxt64")
+def _cart(name):
+    """优先用本地转换产物（out/pxt64/）；没有就退回仓库内置夹具
+    （tools/fixtures/）。CI 的 ARM runner 上没有 pxt 编译环境，无法
+    现场从 png_examples 生成，所以三张测试卡带直接入库作夹具。"""
+    local = os.path.join(ROOT, "out", "pxt64", name)
+    if os.path.exists(local):
+        return local
+    return os.path.join(HERE, "fixtures", name)
+
+
+PING = _cart("ping.pxt64")
+BUSY = _cart("busy.pxt64")
+JUMPY = _cart("jumpy.pxt64")
 
 
 def run(cart, frames, extra=()):

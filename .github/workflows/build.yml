@@ -23,6 +23,8 @@
 #   android arm64-v8a / armeabi-v7a（ndk-build，见 core/jni/）
 #   macOS 单独一个实验 job（continue-on-error，不阻塞）
 #   zig：x64/arm64 Windows + Linux x64/arm64/armhf（基线 2.17）
+#   behavior-*：真 ARM 硬件 runner（ubuntu-24.04-arm / windows-11-arm，
+#     公开仓库免费）上跑 S1–S10 快照回归 —— 行为层验证，见该 job 注释
 
 name: build
 
@@ -432,6 +434,149 @@ jobs:
           path: core/dist/${{ matrix.triple }}/*
           if-no-files-found: error
           retention-days: 30
+
+  # ------------------------------------------------- 行为回归（真 ARM runner）
+  # GitHub 给公开仓库免费提供真 ARM 硬件 runner（ubuntu-24.04-arm /
+  # windows-11-arm，2025-08 GA）。这一层跑的是「行为」而不是「编译」：
+  # 用与发版相同的 zig 工具链出 core，再在真实 aarch64 地址空间里跑
+  # S1–S10 快照回归。桌面 CI 的 x86_64 job 拿得到的固定地址、glibc 环境
+  # 都与发版目标平台不同——只有这一层能替真机拦住「地址不可复现」类
+  # bug 的逻辑面（快照逻辑错误在这里被抓，真机只验收平台差异）。
+  behavior-arm64:
+    name: behavior-linux-arm64
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      # 与 zig job 同版本同源；区别只是 tarball 取 aarch64-linux 本机版
+      # （runner 就是 ARM 硬件，zig 原生跑，无仿真）
+      - name: 安装 zig 0.17.0（aarch64-linux 本机版）
+        run: |
+          set -euo pipefail
+          trap 'echo "::error::zig 安装失败于第 $LINENO 行（exit=$?）"' ERR
+          cd "$RUNNER_TEMP"
+          ok=0
+          for base in "https://ziglang.org/download/0.17.0" \
+                      "https://pkg.machengine.org/zig"; do
+            if curl -fsSLo zig.tar.xz "$base/zig-aarch64-linux-0.17.0.tar.xz" 2>curl.err; then
+              if tar -tf zig.tar.xz >/dev/null 2>tar.err; then ok=1; break; fi
+              echo "::error::$base 返回的不是合法 tar.xz：$(file -b zig.tar.xz | cut -c1-80)"
+            else
+              echo "::error::$base 下载失败："
+              tail -3 curl.err | sed 's/^/::error::  /'
+            fi
+          done
+          [ "$ok" = 1 ] || { echo "::error::所有源都取不到 zig 0.17.0"; exit 1; }
+          listing="$(tar -tf zig.tar.xz)"
+          zigdir="${listing%%/*}"
+          tar -xJf zig.tar.xz
+          echo "$RUNNER_TEMP/$zigdir" >> "$GITHUB_PATH"
+          v="$("$RUNNER_TEMP/$zigdir/zig" version)"
+          [ "$v" = "0.17.0" ] || { echo "::error::zig 版本异常：实际 $v"; exit 1; }
+          echo "zig $v -> $RUNNER_TEMP/$zigdir"
+
+      # 与发版（release job）完全相同的构型：zig 2.17 基线 .so 在真实
+      # aarch64 上加载执行，连 glibc 向后兼容这条路也一并验证
+      - name: 编译（与发版同构型 aarch64-linux-gnu.2.17）
+        run: |
+          set -u
+          log=out/ci-behavior-arm64.log
+          mkdir -p out
+          if ! ZIG=zig tools/build_target.sh aarch64-linux-gnu.2.17 > "$log" 2>&1; then
+            tail -20 "$log" | sed 's/^/::error::behavior-arm64 /'
+            exit 1
+          fi
+          tail -3 "$log"
+
+      - name: 模块区间自测
+        run: |
+          set -u
+          log=out/modrange-arm64.log
+          if ! python3 tools/test_modrange.py \
+                 core/dist/aarch64-linux-gnu.2.17/makecode_arcade_libretro.so \
+                 > "$log" 2>&1; then
+            tail -30 "$log" | sed 's/^/::error::modrange-arm64 /'
+            exit 1
+          fi
+          tail -6 "$log"
+
+      # S1–S10 全套：测试卡带用仓库内置夹具（tools/fixtures/），core 路径
+      # 显式指向刚编出的发版构型 .so
+      - name: 快照回归 S1–S10
+        run: |
+          set -u
+          log=out/savestate-arm64.log
+          if ! python3 tools/test_savestate.py \
+                 core/dist/aarch64-linux-gnu.2.17/makecode_arcade_libretro.so \
+                 > "$log" 2>&1; then
+            tail -40 "$log" | sed 's/^/::error::savestate-arm64 /'
+            echo "::error::aarch64 快照回归失败（S1–S10，见上方 ::error:: 行）"
+            exit 1
+          fi
+          tail -12 "$log"
+
+      # 顺带交叉出 windows-arm64 的发版构型 dll，供 windows-11-arm job
+      # 在真实 Windows ARM 上实测（zig 是交叉编译器，宿主架构无关）
+      - name: 交叉编译 windows-arm64 dll
+        run: |
+          set -u
+          log=out/ci-behavior-winarm64.log
+          if ! ZIG=zig tools/build_target.sh aarch64-windows-gnu > "$log" 2>&1; then
+            tail -20 "$log" | sed 's/^/::error::behavior-winarm64-build /'
+            exit 1
+          fi
+          tail -3 "$log"
+          pip install --quiet pefile
+          python3 tools/check_pe.py core/dist/aarch64-windows-gnu/makecode_arcade_libretro.dll
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: behavior-aarch64-windows-gnu
+          path: core/dist/aarch64-windows-gnu/*
+          if-no-files-found: error
+          retention-days: 30
+
+  # 实测 windows-arm64 发版构型 dll（上一 job 交叉编出）：真实 Windows on
+  # ARM 上加载 + 跑 S1–S10。runner 上的 Python 可用性仍在演进期（
+  # setup-python 的 windows-arm64 支持较新），先标实验不阻塞，绿了再转正。
+  behavior-win-arm64:
+    name: behavior-windows-arm64 (实验)
+    runs-on: windows-11-arm
+    continue-on-error: true
+    needs: [behavior-arm64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 定位 Python
+        shell: bash
+        run: |
+          for c in python3 python py; do
+            if command -v "$c" >/dev/null 2>&1; then
+              echo "MCA_PY=$c" >> "$GITHUB_ENV"
+              "$c" -V
+              exit 0
+            fi
+          done
+          echo "::error::windows-11-arm runner 上找不到 Python（setup-python 支持到位后此 job 转正）"
+          exit 1
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: behavior-aarch64-windows-gnu
+          path: core/dist/aarch64-windows-gnu
+
+      - name: 快照回归 S1–S10
+        shell: bash
+        run: |
+          set -u
+          mkdir -p out
+          if ! "$MCA_PY" tools/test_savestate.py \
+                 core/dist/aarch64-windows-gnu/makecode_arcade_libretro.dll \
+                 > out/savestate-winarm64.log 2>&1; then
+            tail -40 out/savestate-winarm64.log | sed 's/^/::error::savestate-winarm64 /'
+            exit 1
+          fi
+          tail -12 out/savestate-winarm64.log
 
   # ------------------------------------------------------------------ macOS
   # 实验：Makefile 支持 osx，但本机没有 macOS 工具链，作者未在真机验证过
