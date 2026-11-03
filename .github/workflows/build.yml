@@ -672,7 +672,12 @@ jobs:
           rc=$?
           set -e
           # 失败日志转注解（job 日志要鉴权，注解可匿名读）
-          tail -40 armhf-suite.log | sed 's/^/::error::armhf /'
+          tail -25 armhf-suite.log | sed 's/^/::error::armhf /'
+          # 核心 trace（[snap] 拒绝原因 / [heap] 固定地址 / PANIC）——32 位分支
+          # 的行为差异只能靠它定位
+          sudo grep -hE '\[snap\]|\[heap\]|\[img\]|\[fix\]|PANIC' \
+            /opt/armhf-root/repo/out/savestate_test/makecode_arcade/mca_trace.log \
+            2>/dev/null | tail -12 | sed 's/^/::error::trace /' || true
           # [SKIP] 缺文件会 exit 0 —— CI 上必须当失败处理
           if grep -q '\[SKIP\]' armhf-suite.log; then
             echo "::error::套件被 SKIP（缺文件），CI 上不允许"
