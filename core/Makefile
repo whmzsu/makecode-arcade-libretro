@@ -77,6 +77,22 @@ ifneq (,$(findstring win,$(platform)))
    # Windows PE 不需要 -fPIC；MinGW 对 -fPIC 只会多一层间接
    CXXFLAGS := $(filter-out -fPIC,$(CXXFLAGS))
    CFLAGS   := $(filter-out -fPIC,$(CFLAGS))
+   # VM 代码用了 posix 线程（pthread_mutex/pthread_create）。zig 的 mingw
+   # 目标自带 pthread 仿真不用管；真 mingw-gcc（buildbot 的 MXE、apt 的
+   # mingw-w64）的 win32 线程模型不会自动链 winpthreads，链接时报
+   # undefined reference to pthread_mutex_lock。探测工具链里哪个库在就链哪个
+   #（-print-file-name 找不到时原样返回名字本身，据此判断）。
+   PTHREAD_A := $(shell $(CC) -print-file-name=libpthread.a 2>/dev/null)
+   ifeq ($(PTHREAD_A),libpthread.a)
+      PTHREAD_A := $(shell $(CC) -print-file-name=libwinpthread.a 2>/dev/null)
+   endif
+   ifneq ($(PTHREAD_A),)
+   ifneq ($(PTHREAD_A),libpthread.a)
+   ifneq ($(PTHREAD_A),libwinpthread.a)
+      LDLIBS += -lpthread
+   endif
+   endif
+   endif
    # 把 Windows API 基线抬到 Win7（只用 #ifndef 兜底，见该头文件注释）：
    # mingw-gcc 默认按 XP 裁 windows.h，platform.cpp 的 GetTickCount64 编不过；
    # 官方 buildbot 用的就是 mingw-gcc。
