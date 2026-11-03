@@ -122,6 +122,21 @@ python tools/sweep_carts.py out/testcarts -n 600 --press A --press-at 60 --relea
 
 `.pxt64` 不要提交进仓库：那是第三方游戏内容，清单里有 id，谁都能重建。
 
+## png_examples 里的卡带
+
+- `arcade-*.png`（4 张）：官方分享页下载的真实卡带，格式基准。
+- `community-*.png`（17 张）：由 cartconv 的 `tools/make_cart_png.py` 从分享 id
+  源码生成的卡带（payload 结构与官方一致，编码算法照抄 pxt `encodeBlobAsync`，
+  每张都用参考解码器回读校验过；封面图是核心实跑截的游戏画面）。
+
+注意两点：
+
+1. **核心不能直接运行 .png**——`retro_load_game` 只认 .pxt64 字节码，喂 .png 会
+   把文件字节当字节码执行出花屏（日志：`no bytecode. Convert first`）。.png 的
+   用途是官方模拟器拖拽导入；跑核心前先 `python tools/png2pxt64.py` 转换。
+2. **bpp=3 是上游 pxt 的坑**：官方编码器与解码器在 bpp=3 下互不一致（实测第 0
+   字节就错），真实卡带也只有 bpp 1/2/4。`make_cart_png.py` 已跳过 3。
+
 ## 还缺什么（下一步）
 
 - **音效**：桌面 600 帧样本大多没触发音效（真机抽跑已确认链路正常）。要成规模
