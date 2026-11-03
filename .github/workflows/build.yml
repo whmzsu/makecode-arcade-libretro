@@ -533,16 +533,30 @@ jobs:
       # 产物 libretro.so（LOCAL_MODULE := retro）落在 <父>/libs/<ABI>/
       - name: android-jni（runner 预装 NDK，ndk-build）
         run: |
-          set -euo pipefail
+          set -u
           ndk="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_HOME}"
-          [ -d "$ndk" ] || ndk="$(ls -d /usr/local/lib/android/ndk/* | tail -1)"
-          [ -d "$ndk" ] || { echo "::error::runner 上找不到 NDK"; exit 1; }
+          [ -d "$ndk" ] || ndk="$(ls -d /usr/local/lib/android/ndk/* 2>/dev/null | tail -1)"
+          if [ ! -d "$ndk" ]; then echo "::error::runner 上找不到 NDK"; exit 1; fi
           mkdir -p out/ndk
+          # NDK_OUT/NDK_LIBS_OUT 必须绝对路径：-C core/jni 会切目录，相对路径
+          # 会落到 core/jni/ 下面（bash -e 下 test 失败只给 exit 1，无声无息）
+          rc=0
           "$ndk/ndk-build" --no-print-directory -C core/jni \
               APP_ABI=arm64-v8a \
-              NDK_OUT=out/ndk/obj NDK_LIBS_OUT=out/ndk/libs
-          test -f out/ndk/libs/arm64-v8a/libretro.so
-          file -b out/ndk/libs/arm64-v8a/libretro.so | grep -q aarch64
+              NDK_OUT="$PWD/out/ndk/obj" NDK_LIBS_OUT="$PWD/out/ndk/libs" \
+              > out/ndk-build.log 2>&1 || rc=$?
+          if [ $rc -ne 0 ] || [ ! -f out/ndk/libs/arm64-v8a/libretro.so ]; then
+            echo "::error title=android ndk-build 失败 rc=$rc::"
+            grep -n -i "error" out/ndk-build.log | head -8 | \
+              while IFS= read -r l; do echo "::error::${l:0:250}"; done
+            tail -12 out/ndk-build.log | \
+              while IFS= read -r l; do echo "::error::tail| ${l:0:250}"; done
+            exit 1
+          fi
+          file -b out/ndk/libs/arm64-v8a/libretro.so | grep -q aarch64 || {
+            echo "::error::产物不是 aarch64"; exit 1; }
+          git status --short core/ | grep -q . && {
+            echo "::error::ndk-build 污染了源码树 core/"; git status --short core/; exit 1; } || true
 
       - uses: actions/upload-artifact@v4
         with:
