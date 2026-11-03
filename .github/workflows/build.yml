@@ -691,16 +691,10 @@ jobs:
             got=$(python3 -c "import sys,zipfile,re;d=zipfile.ZipFile(sys.argv[1]).read('makecode_arcade_libretro.info').decode();print(re.search(r'display_version = \"([^\"]+)\"',d).group(1))" "$z")
             [ "$got" = "$ver" ] || { echo "::error file=$z::.info 版本 $got 与 tag $ver 不符"; exit 1; }
             # 包里必须真有一个可加载的核心二进制：只校验版本/数量曾经放过了
-            # v0.3.1 的 Windows 包（只有 .pdb、没有 .dll），玩家装不上才发现
-            python3 - "$z" <<'PY'
-import sys, zipfile
-names = zipfile.ZipFile(sys.argv[1]).namelist()
-if not any(n in names for n in (
-        "makecode_arcade_libretro.dll",
-        "makecode_arcade_libretro.so",
-        "makecode_arcade_libretro.dylib")):
-    sys.exit(f"::error file={sys.argv[1]}::包里没有核心二进制，实际内容 {names}")
-PY
+            # v0.3.1 的 Windows 包（只有 .pdb、没有 .dll），玩家装不上才发现。
+            # 用单行 -c 而不是 heredoc：heredoc 正文顶到第 0 列会截断 YAML 块
+            python3 -c "import sys,zipfile;n=zipfile.ZipFile(sys.argv[1]).namelist();ok=[x for x in n if x in ('makecode_arcade_libretro.dll','makecode_arcade_libretro.so','makecode_arcade_libretro.dylib')];sys.exit(0 if ok else f'包里没有核心二进制，实际内容 {n}')" "$z" \
+              || { echo "::error file=$z::包里没有核心二进制"; exit 1; }
             echo "  $(basename "$z") -> $got"
           done
 
