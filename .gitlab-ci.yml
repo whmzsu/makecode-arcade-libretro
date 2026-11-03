@@ -41,17 +41,28 @@ libretro-build-windows-x64:
   extends:
     - .libretro-windows-x64-mingw-make-default
     - .core-defs
+  script:
+    - make -C ${MAKEFILE_PATH} -f ${MAKEFILE} -j${NUMPROC}
+    # 防假绿（Supermodel 教训）：platform 不匹配时 make 会静默 exit 0，
+    # 这里断言产物真的生成了
+    - test -f ${MAKEFILE_PATH}/${CORENAME}_libretro.dll
 
 # ---------------------------------------------------------------- Linux
 libretro-build-linux-x64:
   extends:
     - .libretro-linux-x64-make-default
     - .core-defs
+  script:
+    - make -C ${MAKEFILE_PATH} -f ${MAKEFILE} -j${NUMPROC}
+    - test -f ${MAKEFILE_PATH}/${CORENAME}_libretro.so
 
 libretro-build-linux-aarch64:
   extends:
     - .libretro-linux-aarch64-make-default
     - .core-defs
+  script:
+    - make -C ${MAKEFILE_PATH} -f ${MAKEFILE} -j${NUMPROC}
+    - test -f ${MAKEFILE_PATH}/${CORENAME}_libretro.so
 
 # ---------------------------------------------------------------- Android
 android-arm64-v8a:

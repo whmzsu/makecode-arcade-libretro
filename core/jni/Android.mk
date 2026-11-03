@@ -17,7 +17,10 @@ CORE_DIR   := $(abspath $(LOCAL_PATH)/..)
 PXTAPP_DIR := $(abspath $(CORE_DIR)/../runtime/pxtapp)
 
 include $(CLEAR_VARS)
-LOCAL_MODULE := makecode_arcade_libretro
+# 必须叫 retro（产出 libretro.so）：buildbot 的 android-jni 模板固定执行
+#   mv $JNI_PATH/libs/$ABI/libretro.so ${CORENAME}_libretro_android.so
+# 模块名换成别的（如 core 名）会让 mv 找不到文件、job 直接红。
+LOCAL_MODULE := retro
 LOCAL_CPP_EXTENSION := .cpp
 
 # VM 内核 + 引擎：只编这些子目录（runtime/pxtapp/main.cpp 有自己的 main()，排除）
