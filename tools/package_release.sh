@@ -100,7 +100,7 @@ license = \"MIT\"
 permissions = \"\"
 display_version = \"$VERSION\"
 supports_no_game = \"false\"
-notes = \"Unofficial core: not affiliated with or endorsed by Microsoft. Plays ONLY .pxt64 bytecode images - the file browser lists .pxt64 files only. MakeCode Arcade .png cartridges contain source code only, NOT a playable game: convert them FIRST with cartconv (see Releases) or tools/png2pxt64.py. Buttons are remappable under Quick Menu > Controls (Start = in-game menu, Select = reset); the core exposes no options.\""
+notes = \"Unofficial core: not affiliated with or endorsed by Microsoft. Plays ONLY .pxt64 bytecode images - the file browser lists .pxt64 files only. MakeCode Arcade .png cartridges contain source code only, NOT a playable game: convert them FIRST with cartconv (github.com/whmzsu/makecode-arcade-cartconv). Buttons are remappable under Quick Menu > Controls (Start = in-game menu, Select = reset); the core exposes no options.\""
 
 ok=0; skipped=0
 for t in "${TARGETS[@]}"; do
@@ -153,7 +153,7 @@ MakeCode Arcade — libretro core ($plat)
   .pxt64  转换后的 VM 字节码镜像，核心只认这个格式（加载内容里也只列出它）
   .png    MakeCode Arcade 保存的卡带，里面只有源码、不是游戏本身，
           核心不接受这个格式——必须先用 cartconv 转换成 .pxt64
-          （cartconv 便携包见 Releases；或 tools/png2pxt64.py）
+          （cartconv 便携包见 makecode-arcade-cartconv 仓库的 Releases）
 
 功能边界：
   本核心不做即时存档 / 回退（Savestate / Rewind）——RetroArch 的
@@ -206,7 +206,7 @@ MakeCode Arcade — libretro core ($plat)
   .pxt64  转换后的 VM 字节码镜像，核心只认这个格式（加载内容里也只列出它）
   .png    MakeCode Arcade 保存的卡带，里面只有源码、不是游戏本身，
           核心不接受这个格式——必须先用 cartconv 转换成 .pxt64
-          （cartconv 便携包见 Releases；或 tools/png2pxt64.py）
+          （cartconv 便携包见 makecode-arcade-cartconv 仓库的 Releases）
 
 功能边界：
   本核心不做即时存档 / 回退（Savestate / Rewind）——RetroArch 的

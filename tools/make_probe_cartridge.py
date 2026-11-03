@@ -22,7 +22,15 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
-import png2pxt64 as P  # noqa: E402  复用 pxt 调用环境（PXT_FORCE_LOCAL / docker 空壳）
+# png2pxt64 与 pxt 编译链（vm-build/node_modules）已拆到并列仓库
+# makecode_arcade_cartconv；从这里导入以复用 pxt 调用环境
+# （PXT_FORCE_LOCAL / docker 空壳）。可用 MCA_CONV_REPO 覆盖仓库位置。
+CORE_ROOT = os.path.dirname(HERE)
+CONV_TOOLS = os.environ.get("MCA_CONV_REPO") or os.path.join(
+    os.path.dirname(CORE_ROOT), "makecode_arcade_cartconv", "tools")
+sys.path.insert(0, CONV_TOOLS)
+
+import png2pxt64 as P  # noqa: E402
 
 PROBE_TS = """// 按键探针：每个按键把屏幕背景刷成不同颜色。
 // 测试端抓末帧比对颜色即可断言"物理键 → MakeCode 按钮"的映射。
@@ -151,14 +159,14 @@ def main():
         kind, ts, js, default = "audio", AUDIO_TS, PXT_JSON, "audio_probe.pxt64"
     else:
         kind, ts, js, default = "probe", PROBE_TS, PXT_JSON, "probe.pxt64"
-    out = argv[0] if argv else os.path.join(P.ROOT, "out", "pxt64", default)
+    out = argv[0] if argv else os.path.join(CORE_ROOT, "out", "pxt64", default)
     if not os.path.isfile(P.PXT_JS):
         raise SystemExit(f"pxt core not found: {P.PXT_JS}\n先运行 tools/vm-build/setup_toolchain.sh")
 
     src = os.path.join(P.TARGET, "proj_ping")
     proj = os.path.join(P.TARGET, "proj_" + ("audio_probe" if kind == "audio" else kind))
     if not os.path.isdir(os.path.join(src, "pxt_modules")):
-        raise SystemExit(f"{src}/pxt_modules 不存在：先跑一次 png2pxt64.py 把依赖装上")
+        raise SystemExit(f"{src}/pxt_modules 不存在：先在 makecode_arcade_cartconv 里跑一次转换把依赖装上")
 
     if not os.path.isdir(os.path.join(proj, "pxt_modules")):
         print(f"[1/3] 从 proj_ping 复制依赖缓存 -> {proj}")

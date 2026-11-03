@@ -60,15 +60,12 @@ makecode_arcade/
 │   ├── build_matrix.sh     发版矩阵（7 主流目标）/ --all 全架构
 │   ├── package_release.sh  打包发行 zip（core + .info + 说明）
 │   ├── inspect_binary.py   产物自检（架构/libc 基线/依赖/retro_* 导出，纯标准库）
-│   ├── png2pxt64.py        卡带(.png)→字节码(.pxt64) 全自动转换（调 pxt 工具链）
-│   ├── make_probe_cartridge.py  探针卡带生成器（按键/生命周期回归用）
+│   ├── make_probe_cartridge.py  探针卡带生成器（按键/生命周期回归用，调并列仓库的 pxt 工具链）
 │   ├── test_buttons.py     按键映射回归（16 用例）
 │   ├── test_lifecycle.py   生命周期回归（换游戏/卸载/重置后音频）
 │   ├── libretro_host.py    假前端宿主 + 描述符静态自检（--dry）
 │   ├── extract_png_meta.py 独立 PNG 卡带解码验证工具（纯 Python 标准库）
-│   ├── make_test_cartridge.py  合成测试卡带生成器（编解码回环自测）
-│   ├── vm-build/           pxt 工具链依赖清单（package.json）与 VM 构建脚本
-│   └── cartconv/           独立卡带转换器（Node.js，玩家用，详见其 README）
+│   └── make_test_cartridge.py  合成测试卡带生成器（编解码回环自测）
 ├── png_examples/           真实卡带样本（ping / jumpy / cube-land / falling-duck / destroy-the-castle）
 └── test_cartridge.png      合成卡带样本（自测通过）
 ```
@@ -82,7 +79,7 @@ makecode_arcade/
 | M2 | vendor pxt C++ 运行时（screen/sprite/引擎）独立构建 | ✅ pxtapp vendored 到 runtime/pxtapp（33 TU 游戏无关，已验证 ping/jumpy/cube-land 共用同一二进制） |
 | M3 | pxt VM 字节码解释器接入，跑通第一个游戏 | ✅ **三款游戏全通**：vm_smoke（官方 ABI 直调）+ libretro 假前端路径（RGB565/按键沿/音频） |
 | M4 | 输入 / 音频合成 / 60fps 帧模型完整化 | ✅ 宿主接口全部打通：按键描述符/分键重绑、音频合成与峰值回归、帧驱动虚拟时钟（前端一圈一帧，快进=前端多取帧）、panic 横幅、存档目录对接（trace/数据走 `GET_SAVE_DIRECTORY`）、panic 自愈见 `test_lifecycle`。**v0.3.0 范围收敛：不做即时存档 / rewind（`retro_serialize*` 为 stub，前端自动禁用），核心只做官方模拟器同等的基本功能** |
-| M5 | 离线转换工具（PNG→bytecode）+ 游戏兼容性测试集 | ✅ tools/png2pxt64.py 全自动转换，三卡带实测通过 |
+| M5 | 离线转换工具（PNG→bytecode）+ 游戏兼容性测试集 | ✅ 已拆分到独立仓库 [makecode-arcade-cartconv](https://github.com/whmzsu/makecode-arcade-cartconv)（cartconv 便携包 + png2pxt64.py 参照实现），三卡带实测通过 |
 | M6 | 交叉编译（掌机/桌面/移动）+ 性能验证 | ✅ **7 个主流目标全通并出 zip**（Windows x64/arm64、Linux x64/arm64/armhf、Android arm64/armv7）；✅ **RK3566 + ArkOS 真机验收通过**（v0.2.1，用户反馈运行正常、完全无卡顿；帧率数值待量化）；✅ **Android arm64 验收通过**（v0.2.7，功能与 Linux aarch64 一致） |
 
 ## 环境要求与快速开始
@@ -93,11 +90,12 @@ makecode_arcade/
 | GNU make | 用 `core/Makefile` 构建（或官方 CI） | Windows 的 Git Bash 不带 make；可用 NDK 自带的 `prebuilt/windows-x86_64/bin/make.exe`，或直接用 `tools/build_core.sh`（不依赖 make） |
 | zig ≥ 0.17 | 编译 core（唯一编译依赖） | `zig cc`/`zig c++` 当编译驱动。默认找 `<项目父目录>/common tools/zig/`，也可用环境变量 `ZIG` 指定可执行文件路径 |
 | Python 3 | 测试与打包脚本 | 只用标准库，无需 pip 装包 |
-| node + npm | 转换卡带（png2pxt64 / cartconv） | 首次使用先 `cd tools/vm-build && npm install`（锁文件锁定 pxt-arcade@4.2.1 + pxt-core@13.2.1；node_modules 不入库） |
+| node + npm | 转换卡带（在 **makecode-arcade-cartconv** 仓库，见下行） | 依赖清单在其 `vm-build/`（锁文件锁定 pxt-arcade@4.2.1 + pxt-core@13.2.1；node_modules 不入库） |
 | Android NDK | 仅交叉编译 Android 目标 | r27c 验证过。`ANDROID_NDK_HOME` 环境变量，或放 `<项目父目录>/common tools/android-ndk-r27c` |
 
-即：**只想编译 core 跑测试** → zig 就够；**想转换自己的卡带** → 另装 node
-（或直接用 cartconv 便携包，见下）；**只想玩** → 下 release zip + 转好的 .pxt64，
+即：**只想编译 core 跑测试** → zig 就够；**想转换自己的卡带** → 用
+[makecode-arcade-cartconv](https://github.com/whmzsu/makecode-arcade-cartconv)
+便携包（免安装）；**只想玩** → 下 release zip + 转好的 .pxt64，
 什么都不用装。
 
 ## 构建工具链
@@ -145,36 +143,21 @@ Android 走 NDK 的 `ndk-build`（官方 CI 同一条路径）：
 tools/build_core.sh   # DLL + core_test + vm_smoke + cart_smoke
 ```
 
-### 卡带转换（给玩家用）
+### 卡带转换（已拆分为独立项目）
 
-```bash
-tools/cartconv/package_cartconv.sh   # 打免安装便携包（约 85MB）
-```
+卡带转换器 **cartconv**（`.png` 卡带 → `.pxt64` 字节码，Node.js，玩家用）与
+pxt 编译链已拆分到独立仓库：
+**https://github.com/whmzsu/makecode-arcade-cartconv**
 
-产物 `dist/cartconv/makecode-cartconv-<ver>-windows-x64.zip`：自带 node 运行时和
-pxt 编译链，玩家解压后把 `.png` 拖到 `cartconv.exe` 上即可，单个/多个/整个
-目录都支持。`.png` 卡带里只有源码，必须现场编译成 `.pxt64`，所以这一步绕不开。
-当前版本 **1.1.0**，压缩包 83 MB。
+- 免安装便携包（自带 node 运行时 + pxt 编译链，约 85MB）在其 Releases 下载，
+  解压后把 `.png` 拖到 `cartconv.exe` 上即可（单个 / 多选 / 整个目录）。
+- 非 Windows 源码直跑：`node cartconv.js game.png`（先在仓库内 `npm install`）。
+- 单张约 10 秒。支持范围、预检拦截（社区扩展 / 二进制资源 / 版本）、
+  实现细节与踩坑，见该仓库 README。
 
-| 场景 | 命令 |
-|---|---|
-| 拖拽 | 把 `.png` 或文件夹拖到 `cartconv.exe` |
-| 单张 | `cartconv.exe game.png` |
-| 批量 | `cartconv.exe carts\ -o out\` |
-| 非 Windows（源码直跑） | `node tools/cartconv/cartconv.js game.png`（需先完成上面的 `npm install`；首次运行自动准备编译环境，约 30 秒） |
-
-单张约 10 秒（旧脚本 29 秒）。实现细节与踩坑见 `tools/cartconv/README.md`。
-
-**支持范围**：已在 4 张真实卡带上验证（bpp=1/2、blocks/TS、含中文、带 animation /
-color-coded-tilemap 依赖）。工具在编译前会预检，遇到转不了的情况直接说明原因，
-不会产出坏文件：
-
-| 情况 | 表现 |
-|---|---|
-| 依赖社区扩展 `gh:user/repo` | 编译前拦下（离线无法下载） |
-| 源码含二进制资源 | 编译前拦下（当前只支持纯文本工程） |
-| 本地没有的官方扩展 | `install` 后核对，报出缺哪个 |
-| 卡带比编译器新 | 警告但继续编译 |
+本仓库保留 `tools/extract_png_meta.py`（.png 卡带格式解析的纯 Python 参照实现）
+供测试使用；本仓库的探针/测试卡带生成器（`make_probe_cartridge.py` 等）会自动
+从并列目录 `../makecode_arcade_cartconv` 找 pxt 工具链。
 
 ### 交叉编译与发版
 
@@ -214,11 +197,11 @@ python tools/inspect_binary.py                 # 架构 + libc 基线 + 依赖 +
 细节与坑（glibc 基线、Android NDK、32 位 MIPS、大端字节序）见
 **docs/CROSS-COMPILE.md**。
 
-pxt 工具链（png2pxt64.py 和 cartconv 转换卡带都依赖）：node + npm。
-首次使用先安装依赖：
+pxt 工具链（本仓库探针/测试卡带生成依赖）：node + npm。依赖清单与安装说明
+在并列仓库 **makecode-arcade-cartconv** 的 `vm-build/` 下：
 
 ```bash
-cd tools/vm-build && npm install
+cd ../makecode_arcade_cartconv/vm-build && npm install
 ```
 
 ## 持续集成（GitHub Actions）
@@ -322,7 +305,9 @@ functions.json 逐字节一致）。
 
 > **核心只运行 `.pxt64` 字节码，文件浏览器也只列出 `.pxt64`。** `.png` 卡带里
 > 只有**源码**（meta + source），不是可直接运行的游戏——**必须先用 cartconv
-> 转换成 `.pxt64`**（见上文「卡带转换」）。核心不接受 `.png` 作为加载内容。
+> 转换成 `.pxt64`**（见
+> [makecode-arcade-cartconv](https://github.com/whmzsu/makecode-arcade-cartconv)）。
+> 核心不接受 `.png` 作为加载内容。
 
 1. 取 `core/dist/release/makecode_arcade_<platform>.zip`，**先解压**，把其中的
    core 二进制放进 RetroArch 的「核心」目录、`makecode_arcade_libretro.info`
@@ -402,5 +387,6 @@ functions.json 逐字节一致）。
 本项目以 [MIT](LICENSE) 许可发布。vendored 组件沿用其原始许可：
 `core/libretro.h`、`core/third_party/miniz/`、`runtime/pxtapp/`（Microsoft pxt
 运行时）为 MIT，`core/third_party/lzma/`（LzmaDec）为公有领域——来源与出处
-详见 `runtime/VENDORING.md`。`tools/cartconv/` 依赖的 pxt 工具链经
-`npm install` 获取，同为 Microsoft MIT 许可。
+详见 `runtime/VENDORING.md`。卡带转换器及其 pxt 工具链在
+[makecode-arcade-cartconv](https://github.com/whmzsu/makecode-arcade-cartconv)
+仓库，pxt 依赖经 `npm install` 获取，同为 Microsoft MIT 许可。
