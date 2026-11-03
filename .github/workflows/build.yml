@@ -628,7 +628,10 @@ jobs:
             exit 1
           fi
           tail -3 "$log"
-          file core/dist/arm-linux-gnueabihf.2.17/makecode_arcade_libretro.so
+          # file 对缺失文件可能返回 0，不能依赖它兜底，硬断言产物存在
+          so=core/dist/arm-linux-gnueabihf.2.17/makecode_arcade_libretro.so
+          [ -f "$so" ] || { echo "::error::armhf 产物缺失 $so"; tail -30 "$log" | sed 's/^/::error::  /'; exit 1; }
+          file "$so"
 
       # 用 armhf rootfs 而不是宿主 multiarch：python3 的 /usr/bin 解释器路径
       # 两架构互斥，multiarch 共装会撞文件；独立 rootfs 无此问题
@@ -647,20 +650,32 @@ jobs:
 
       - name: 快照回归 S1–S10（32 位 .so 在 armhf 用户态）
         run: |
-          set -u
+          set -euo pipefail
           R=/opt/armhf-root/repo
+          so=core/dist/arm-linux-gnueabihf.2.17/makecode_arcade_libretro.so
+          [ -f "$so" ] || { echo "::error::宿主侧产物缺失 $so"; exit 1; }
           sudo mkdir -p "$R"
           sudo cp -r core/dist tools "$R/"
+          # 复制结果硬断言：SKIP 假绿已经坑过一轮
+          [ -f "/opt/armhf-root/repo/$so" ] || {
+            echo "::error::chroot 内产物缺失 /repo/$so"
+            sudo find /opt/armhf-root/repo -maxdepth 4 | head -30 | sed 's/^/::error::  /'
+            exit 1
+          }
           set +e
           # 注意 chroot 内路径是 /repo（宿主的 /opt/armhf-root/repo），别传宿主路径
           sudo chroot /opt/armhf-root env PYTHONUTF8=1 \
-            python3 /repo/tools/test_savestate.py \
-            /repo/core/dist/arm-linux-gnueabihf.2.17/makecode_arcade_libretro.so \
+            python3 /repo/tools/test_savestate.py /repo/$so \
             > armhf-suite.log 2>&1
           rc=$?
           set -e
           # 失败日志转注解（job 日志要鉴权，注解可匿名读）
           tail -40 armhf-suite.log | sed 's/^/::error::armhf /'
+          # [SKIP] 缺文件会 exit 0 —— CI 上必须当失败处理
+          if grep -q '\[SKIP\]' armhf-suite.log; then
+            echo "::error::套件被 SKIP（缺文件），CI 上不允许"
+            exit 1
+          fi
           exit $rc
 
   # ------------------------------------------- 独立前端交叉验证（miniretro）
@@ -728,9 +743,9 @@ jobs:
           set -e
           n=$(find out/mr -name '*.png' | wc -l)
           last=$(tail -3 miniretro.log | tr '\n' '|' | cut -c1-220)
-          echo "::error::miniretro rc=$rc pngs=$n last3: $last"
-          [ "$rc" -eq 0 ] || exit 1
-          [ "$n" -ge 2 ] || { echo "::error::900 帧只产出 $n 帧画面"; exit 1; }
+          [ "$rc" -ne 0 ] && { echo "::error::miniretro rc=$rc last3: $last"; exit 1; }
+          [ "$n" -ge 2 ] || { echo "::error::900 帧只产出 $n 帧画面 last3: $last"; exit 1; }
+          echo "miniretro 冒烟通过：rc=0 pngs=$n"
 
   # ------------------------------------------------------------------ macOS
   # 实验：Makefile 支持 osx，但本机没有 macOS 工具链，作者未在真机验证过
