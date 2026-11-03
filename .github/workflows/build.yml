@@ -675,9 +675,9 @@ jobs:
           {
             grep -E 'serialize|unserialize|pause failed|快照已存|恢复快照|-> OK|\[FAIL\]' \
               armhf-suite.log | tail -6
-            sudo grep -hE '\[snap\]|\[heap\]|\[fix\]|PANIC' \
-              /opt/armhf-root/repo/out/savestate_test/makecode_arcade/mca_trace.log \
-              2>/dev/null | tail -3 || true
+            sudo sh -c 'for f in $(find /opt/armhf-root/repo -name mca_trace.log 2>/dev/null); do
+              grep -hE "\[snap\]|\[heap\]|\[fix\]|PANIC" "$f" | tail -3
+            done' || true
           } | sed 's/^/::error::armhf /'
           # [SKIP] 缺文件会 exit 0 —— CI 上必须当失败处理
           if grep -q '\[SKIP\]' armhf-suite.log; then
