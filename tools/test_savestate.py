@@ -98,6 +98,14 @@ def compare_after_load(hA, hB, loadAt, offset, last):
             if k in hB and (k + offset) in hA and hB[k] != hA[k + offset]]
 
 
+def save_load_lines(out, limit=6):
+    """从 host 输出里抽存/取相关的诊断行（CI 上失败时唯一的信息来源）。"""
+    keys = ("快照已存", "恢复快照", "retro_serialize", "retro_unserialize",
+            "pause failed", "PANIC", "panic", "vm thread")
+    return [ln.strip() for ln in out.splitlines()
+            if any(k in ln for k in keys)][:limit]
+
+
 def rewrite_module_base(src, dst, delta):
     """把快照改写成"在基址 modBase-delta 上存"的等价物（模拟动态加载器换地址）。
 
@@ -179,6 +187,8 @@ def main():
     else:
         print(f"   [FAIL] 存取={'OK' if okSave else '失败'}，不重合帧数={len(bad)}"
               + (f"，例如 {bad[:3]}" if bad else ""))
+        for ln in save_load_lines(outS2):
+            print(f"      | {ln}")
         fails.append("S2 收敛")
     # 对照：同样按键、不读档的整跑末帧必须与"无按键"跑不同。
     hC = run(PING, 360, [])[0]
@@ -207,6 +217,8 @@ def main():
         print(f"   OK  拒绝且存活：{hE}")
     else:
         print("   [FAIL] 应拒绝且游戏应继续正常")
+        for ln in save_load_lines(outE):
+            print(f"      | {ln}")
         fails.append("S4 垃圾")
 
     print("== S5 跨进程：A 存档 -> 退出 -> B 加载 -> 与原时间线逐帧重合")
@@ -233,6 +245,8 @@ def main():
     else:
         print(f"   [FAIL] 存={'OK' if okSave else '失败'} 取={'OK' if okLoad else '失败'}"
               f" 退出码={rcB} 不重合帧数={len(bad)}" + (f"，例如 {bad[:3]}" if bad else ""))
+        for ln in save_load_lines(outA) + save_load_lines(outB):
+            print(f"      | {ln}")
         fails.append("S5 跨进程")
 
     print("== S6 跨基址：同一快照把\"保存时的模块基址\"挪走 -> 必须照样重合")
