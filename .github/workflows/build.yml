@@ -721,15 +721,15 @@ jobs:
             --rom tools/fixtures/ping.pxt64 \
             --output out/mr/ping \
             --system out/mr-system \
-            --frames 900 --dump-frames-every 300 > miniretro.log 2>&1
+            --frames 900 --dump-frames-every 300 --dump-frames 300 600 900 \
+            > miniretro.log 2>&1
           rc=$?
           set -e
-          tail -40 miniretro.log | sed 's/^/::error::miniretro /'
-          echo "== 产出画面 =="
-          ls -l out/mr/ | head -10
           n=$(find out/mr -name '*.png' | wc -l)
-          [ "$rc" -eq 0 ] || { echo "::error::miniretro 退出码 $rc"; exit 1; }
-          [ "$n" -ge 2 ] || { echo "::error::miniretro 900 帧只产出 $n 帧画面"; exit 1; }
+          last=$(tail -3 miniretro.log | tr '\n' '|' | cut -c1-220)
+          echo "::error::miniretro rc=$rc pngs=$n last3: $last"
+          [ "$rc" -eq 0 ] || exit 1
+          [ "$n" -ge 2 ] || { echo "::error::900 帧只产出 $n 帧画面"; exit 1; }
 
   # ------------------------------------------------------------------ macOS
   # 实验：Makefile 支持 osx，但本机没有 macOS 工具链，作者未在真机验证过
