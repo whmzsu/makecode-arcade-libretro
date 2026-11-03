@@ -655,17 +655,19 @@ jobs:
           so=core/dist/arm-linux-gnueabihf.2.17/makecode_arcade_libretro.so
           [ -f "$so" ] || { echo "::error::宿主侧产物缺失 $so"; exit 1; }
           sudo mkdir -p "$R"
+          # cp -r core/dist tools -> 按_basename_落位：$R/dist + $R/tools
+          # （此前按 $R/core/dist 断言，假绿两轮才暴露）
           sudo cp -r core/dist tools "$R/"
-          # 复制结果硬断言：SKIP 假绿已经坑过一轮
-          [ -f "/opt/armhf-root/repo/$so" ] || {
-            echo "::error::chroot 内产物缺失 /repo/$so"
-            sudo find /opt/armhf-root/repo -maxdepth 4 | head -30 | sed 's/^/::error::  /'
+          inrepo="dist/arm-linux-gnueabihf.2.17/makecode_arcade_libretro.so"
+          [ -f "/opt/armhf-root/repo/$inrepo" ] || {
+            echo "::error::chroot 内产物缺失 /repo/$inrepo"
+            sudo find /opt/armhf-root/repo -maxdepth 4 | head -20 | sed 's/^/::error::  /'
             exit 1
           }
           set +e
           # 注意 chroot 内路径是 /repo（宿主的 /opt/armhf-root/repo），别传宿主路径
           sudo chroot /opt/armhf-root env PYTHONUTF8=1 \
-            python3 /repo/tools/test_savestate.py /repo/$so \
+            python3 /repo/tools/test_savestate.py /repo/$inrepo \
             > armhf-suite.log 2>&1
           rc=$?
           set -e
