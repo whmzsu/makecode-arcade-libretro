@@ -43,6 +43,12 @@ HOST = os.path.join(HERE, "libretro_host.py")
 # 套件不能共用同一个存档文件（否则互相覆盖，失败是假的）。
 OUT = os.environ.get("MCA_TEST_OUT") or os.path.join(ROOT, "out", "savestate_test")
 
+# Windows 控制台默认 cp1252/GBK：场景名含中文时 print 直接 UnicodeEncodeError
+# （windows-11-arm CI runner 上实踩）。测试输出本就不进管道协议，统一 UTF-8。
+if os.name == "nt" and hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 if len(sys.argv) > 1:
     CORE = sys.argv[1]
 elif os.name == "nt":

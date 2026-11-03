@@ -544,6 +544,10 @@ jobs:
     runs-on: windows-11-arm
     continue-on-error: true
     needs: [behavior-arm64]
+    # PYTHONUTF8：宿主 subprocess（libretro_host.py）的输出解码也统一 UTF-8，
+    # 否则 text=True 用 cp1252 解码中文输出会炸在测试脚本的读取侧
+    env:
+      PYTHONUTF8: '1'
     steps:
       - uses: actions/checkout@v4
 
