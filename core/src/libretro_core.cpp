@@ -57,24 +57,18 @@ static retro_input_state_t g_input_state = nullptr;
 static retro_log_printf_t g_log = nullptr;
 static bool g_pixel_format_set = false;
 // 版本号只在这里出现一次：.info 打包脚本和运行时横幅都读它
-static const char* const kCoreVersion = "0.2.15";
+static const char* const kCoreVersion = "0.3.0";
 
 static unsigned g_frame = 0;
 static bool g_game_loaded = false;
 
 // ---- 快进 / 慢放 ---------------------------------------------------------
 //
-// RetroArch 快进 = 前端以远超 60fps 的频率调 retro_run。本核心的画面与音频
-// 都是拉动式，消费越快产出越快，但游戏的节拍挂在 VM 虚拟时钟上（forever
-// 循环 20ms 一个 tick、pause 等 wakeTime），刻度不变就永远 1x 跑。
-// MCA v0.2.10：快进 / 慢放不再需要核心做任何事。
-//
-// 虚拟时钟是"帧驱动"的：前端每取一帧，VM 才推进一圈（1/60 秒虚拟时间）。
-// 于是快进 = 前端用更高频率调 retro_run（RetroArch 的 fast-forward 本来就
-// 是这么实现的），慢放 = 前端降低取帧频率，游戏速度自动跟随，音频也是
-// 拉动式所以一起变速。旧版在这里把 VM 时钟调成 4 倍速的做法已废弃
-//（pxt_set_time_scale 保留为兼容接口，是 no-op）—— 缩放时间步长会让一层
-// 循环跳过多个 20ms 周期，forever 丢 tick，确定性随之崩掉。
+// 本核心不做快进 / 慢放（v0.3.0 范围收敛：只做官方模拟器同等的基本功能）。
+// RetroArch 的快进 = 前端以更高频率调 retro_run，本核心的画面与音频都是
+// 拉动式，取帧越快产出越快；游戏的节拍挂在 VM 虚拟时钟上（forever 循环
+// 20ms 一个 tick、pause 等 wakeTime），刻度不变就永远 1x 跑——所以快进
+// 只会加快取帧、不会加快游戏时间，慢放由前端降低取帧频率自然得到。
 
 // ---- 输入配置 -----------------------------------------------------------
 //
@@ -340,64 +334,17 @@ void retro_set_controller_port_device(unsigned port, unsigned device) {
 
 // ---- 存档快照（retro_serialize / rewind / runahead）------------------------
 //
-// v0.2.11 起支持**跨会话**恢复：存一档 → 退出 RetroArch（或崩溃）→ 重开同
-// 一个游戏 → 加载 → 从存档那一刻继续玩，画面与原时间线逐帧一致。
-//
-// 做法是让"地址可复现"：GC 堆钉在 GC_BASE、卡带镜像钉在 GC_BASE+1MB、VM 单例
-// 走固定 bump 区（见 runtime/pxtapp/mca_fixed.h），剩下的三类不可复现指针
-// （fiber / event / 指向 core 自身代码的回调）在恢复时逐个重定位。快照还带
-// 卡带字节数 + FNV 指纹，"拿别的游戏的档恢复"会被拒绝（否则堆会被当成另一
-// 套布局解释，恢复后几帧内必崩）。
-//
-// 拒绝恢复一律返回 false 并记一行日志 —— 前端只表现为"这次读档没生效"，
-// 游戏照常继续，绝不会把前端带崩。
+// v0.3.0 起核心不做存档/加载（范围收敛：只做官方模拟器同等的基
+// 本功能，见 release notes）。三个符号是 libretro ABI 必导出的
+// （RetroArch 逐个 dlsym，见文件尾部 static_assert），所以保留符号、
+// 实现改为 stub：serialize_size 恒为 0 时前端会自动禁用
+// 存档 / 回退 / run-ahead。
 
-size_t retro_serialize_size(void) { return pxt_state_max_size(); }
+size_t retro_serialize_size(void) { return 0; } // 0 = 前端禁用存档/rewind/runahead
 
-bool retro_serialize(void* data, size_t size) {
-    if (!data || size < pxt_state_max_size() || !g_game_loaded) {
-        log_printf(RETRO_LOG_ERROR, "[MCA] serialize rejected: data=%p size=%zu need=%u loaded=%d\n",
-                   data, size, pxt_state_max_size(), (int)g_game_loaded);
-        return false;
-    }
-    int pr = pxt_state_pause();
-    if (pr != 0) {
-        pxt_state_resume(); // 失败也要清标志（resume 对未暂停是 no-op）
-        log_printf(RETRO_LOG_ERROR, "[MCA] serialize: pause failed %d\n", pr);
-        return false;
-    }
-    int used = pxt_state_save(data, (unsigned)size);
-    pxt_state_resume();
-    if (used < 0) {
-        log_printf(RETRO_LOG_ERROR, "[MCA] serialize failed: %d\n", used);
-        return false;
-    }
-    return true;
-}
+bool retro_serialize(void*, size_t) { return false; }
 
-bool retro_unserialize(const void* data, size_t size) {
-    if (!data || !g_game_loaded)
-        return false;
-    int pr = pxt_state_pause();
-    if (pr != 0) {
-        pxt_state_resume();
-        log_printf(RETRO_LOG_ERROR, "[MCA] unserialize: pause failed %d\n", pr);
-        return false;
-    }
-    int rc = pxt_state_load(data, (unsigned)size);
-    pxt_state_resume();
-    if (rc != 0) {
-        const char* why = "";
-        if (rc == -10)
-            why = "（快照不属于当前卡带——换了游戏或换了核心版本）";
-        else if (rc == -13)
-            why = "（本平台不支持跨会话读档，只能在同一次运行内用）";
-        log_printf(RETRO_LOG_ERROR, "[MCA] unserialize failed: %d%s\n", rc, why);
-        return false;
-    }
-    g_last_panic = 0; // 快照里的 panic 状态已随状态恢复，横幅判定重新对齐
-    return true;
-}
+bool retro_unserialize(const void*, size_t) { return false; }
 
 void retro_cheat_reset(void) {}
 void retro_cheat_set(unsigned, bool, const char*) {}

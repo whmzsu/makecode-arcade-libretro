@@ -12,14 +12,6 @@ DLLEXPORT void pxt_audio_shutdown() {
     dac = NULL;
 }
 
-// MCA：快照访问器（dac 指向 VM 堆，堆回绕恢复后必须一起写回）
-DLLEXPORT void *mcaSnapDac() {
-    return (void *)dac;
-}
-DLLEXPORT void mcaUnsnapDac(void *p) {
-    dac = (ExtDAC *)p;
-}
-
 DLLEXPORT void pxt_get_audio_samples(int16_t *buf, unsigned numSamples) {
     // 离线（重启间隙）时前端也照样来要样本 —— 直接静音，别碰已释放的混音器
     if (!pxt_vm_online() || !dac) {

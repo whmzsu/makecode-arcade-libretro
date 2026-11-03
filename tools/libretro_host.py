@@ -57,7 +57,6 @@ ENV_GET_LOG_INTERFACE = 27
 ENV_GET_SAVE_DIRECTORY = 31
 ENV_SET_CONTROLLER_INFO = 35
 ENV_GET_INPUT_BITMASKS = 51 | 0x10000        # | RETRO_ENVIRONMENT_EXPERIMENTAL
-ENV_GET_FASTFORWARDING = 49 | 0x10000        # | RETRO_ENVIRONMENT_EXPERIMENTAL
 
 PIXEL_FORMAT_0RGB1555 = 0
 PIXEL_FORMAT_XRGB8888 = 1
@@ -161,7 +160,6 @@ LOG_PREFIX = {LOG_ERROR: "[E]", LOG_WARN: "[W]", LOG_INFO: "[I]", LOG_DEBUG: "[D
 
 OPTIONS = {}             # 核心选项当前值（key -> value）
 BITMASK = False          # GET_INPUT_BITMASKS 的回答
-FASTFORWARD = False      # GET_FASTFORWARDING 的回答（--fastforward 打开）
 HELD = set()             # 当前按住的按键 id
 
 
@@ -225,10 +223,6 @@ def env_cb(cmd, data):
     if cmd == ENV_GET_INPUT_BITMASKS:
         say(f"  [host] GET_INPUT_BITMASKS -> {BITMASK}")
         return BITMASK
-
-    if cmd == ENV_GET_FASTFORWARDING:
-        ctypes.cast(data, ctypes.POINTER(ctypes.c_ubyte))[0] = 1 if FASTFORWARD else 0
-        return True
 
     if cmd == ENV_SET_INPUT_DESCRIPTORS:
         arr = ctypes.cast(data, ctypes.POINTER(retro_input_descriptor))
@@ -349,15 +343,12 @@ def input_state_cb(port, device, index, id_):
 
 def parse_args(argv):
     """把 --opt k=v / --press=A 这类选项摘出来，返回剩余位置参数。"""
-    global BITMASK, FASTFORWARD
+    global BITMASK
     pos = []
     cfg = {"bmp": None, "press": None, "press_at": 4, "release": None, "dry": False,
            "seq": None, "switch": None, "dlclose": False, "data_dir": None,
            "turbo": False,
-           "save_state_at": {},   # {帧号: 路径}
-           "load_state_at": {},   # {帧号: 路径}
-           "hash_every": 0,       # >0：每 N 帧输出一次画面哈希
-           "stall_before_load": 0}  # >0：读档前先不拉帧等这么多毫秒（模拟前端菜单）
+           "hash_every": 0}       # >0：每 N 帧输出一次画面哈希
     for a in argv:
         if a.startswith("--bmp="):
             cfg["bmp"] = a.split("=", 1)[1]
@@ -378,18 +369,8 @@ def parse_args(argv):
             cfg["release"] = int(a.split("=", 1)[1])
         elif a == "--bitmask":
             BITMASK = True
-        elif a == "--fastforward":
-            FASTFORWARD = True                     # 对核心回答"正在快进"
         elif a == "--turbo":
-            cfg["turbo"] = True                    # 帧循环不 sleep（测快进用）
-        elif a.startswith("--save-state-at="):
-            frm, path = a.split("=", 1)[1].split(":", 1)
-            cfg["save_state_at"][int(frm)] = path
-        elif a.startswith("--load-state-at="):
-            frm, path = a.split("=", 1)[1].split(":", 1)
-            cfg["load_state_at"][int(frm)] = path
-        elif a.startswith("--stall-before-load="):
-            cfg["stall_before_load"] = int(a.split("=", 1)[1])   # 毫秒：模拟前端开着菜单
+            cfg["turbo"] = True                    # 帧循环不 sleep（快速跑完用）
         elif a.startswith("--hash-every="):
             cfg["hash_every"] = max(1, int(a.split("=", 1)[1]))
         elif a.startswith("--switch="):
@@ -593,35 +574,6 @@ def main():
                 HELD.discard(press_id)
                 say(f"   [host] frame {i}: 松开 {cfg['press']}")
             lib.retro_run()
-            # MCA：帧号精确触发的快照存/取（确定性验证用）
-            if hasattr(lib, "retro_serialize_size"):
-                if i in cfg["save_state_at"]:
-                    sz = lib.retro_serialize_size()
-                    buf = (ctypes.c_char * sz)()
-                    ok = lib.retro_serialize(buf, sz)
-                    if ok:
-                        with open(cfg["save_state_at"][i], "wb") as fh:
-                            fh.write(bytes(buf))
-                        say(f"   [host] frame {i}: 快照已存 -> "
-                            f"{cfg['save_state_at'][i]}（{sz} 字节容量）")
-                    else:
-                        say(f"   [host] frame {i}: [FAIL] retro_serialize 失败")
-                if i in cfg["load_state_at"]:
-                    with open(cfg["load_state_at"][i], "rb") as fh:
-                        data = fh.read()
-                    # --stall-before-load：读档前先"合上菜单前"的那段空转。
-                    # RetroArch 在菜单里不调 retro_run，VM 这时不在跑帧，
-                    # 与桌面测试"帧帧不断"的时序完全不同。
-                    stall = cfg.get("stall_before_load", 0)
-                    if stall:
-                        say(f"   [host] frame {i}: 模拟菜单 {stall}ms 不拉帧")
-                        time.sleep(stall / 1000.0)
-                    sz = lib.retro_serialize_size()
-                    buf = (ctypes.c_char * sz)()
-                    ctypes.memmove(buf, data[:sz], min(len(data), sz))
-                    ok = lib.retro_unserialize(buf, sz)
-                    say(f"   [host] frame {i}: 恢复快照 "
-                        f"{cfg['load_state_at'][i]} -> {'OK' if ok else '[FAIL]'}")
             if (i + 1) % 30 == 0:
                 say(f"   [{tag}] frame {i + 1}: video={stats['video_frames']} "
                     f"audio_frames={stats['audio_frames']} "

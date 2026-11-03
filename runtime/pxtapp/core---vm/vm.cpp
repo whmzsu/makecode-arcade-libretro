@@ -604,31 +604,9 @@ void exec_loop(FiberContext *ctx) {
     ctx->img->execLock = 1;
     auto opcodes = ctx->img->opcodes;
     setjmp(ctx->loopjmp);
-    unsigned pauseCheck = 0;
     while (ctx->pc) {
         if (panicCode)
             break;
-        // MCA v0.2.12：快照暂停的响应点。
-        //
-        // 主循环顶那个检查点只覆盖"帧边界"——fiber 里只要有段不调 pause 的
-        // 循环（游戏初始化、紧凑的 CPU 循环），VM 就要一直跑到它自然让出为
-        // 止。桌面上这段通常是几十毫秒，真机 ARM 慢一个数量级，实测能超过
-        // 宿主 2 秒的暂停预算，表现为加载存档失败 `pause failed -2`。
-        // 这里每 2048 条指令读一次请求标志（volatile 读，热路径开销 <1%），
-        // 命中就把"下一条指令"存进 resumePC 并结束本次 exec_loop，调度器回到
-        // 主循环顶后会看到请求并进入暂停。
-        //
-        // 不能在这里调 sleep_ms()/pause()：那些函数作用于 currentFiber，而
-        // 执行到本函数的 ctx 未必就是 currentFiber（fiber 创建路径会改它），
-        // 那样会把**别的** fiber 的 pc 清掉 —— 实测直接段错误。
-        if (++pauseCheck >= 2048) {
-            pauseCheck = 0;
-            if (mca_pause_pending()) {
-                ctx->resumePC = ctx->pc;
-                ctx->pc = NULL;
-                break;
-            }
-        }
         uint16_t opcode = *ctx->pc++;
         TRACE("0x%x: %04x %d", (uint8_t *)ctx->pc - 2 - (uint8_t *)ctx->img->dataStart, opcode,
               (int)(vmImg->stackTop - ctx->sp));

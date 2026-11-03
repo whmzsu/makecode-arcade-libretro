@@ -50,26 +50,6 @@ int pxt_vm_poll_exit();   // 返回 1 表示 VM 线程已退出（读后自动�
 int pxt_vm_stop();
 int pxt_vm_running();     // VM 线程是否仍在运行
 
-// MCA PATCH 10：VM 时钟刻度（快进/慢放基础）。100 = 实时；快进时核心侧
-// 传 400（4 倍速）。游戏节拍（forever 循环 / pause）全挂在 VM 虚拟时钟上，
-// 刻度调高后同样的墙钟时间里虚拟时间流得更快。
-void pxt_set_time_scale(int percent);
-
-// —— MCA：retro_serialize 快照（v1：同会话内恢复，见 mca_state.h）——
-//
-//   pxt_state_pause()  阻塞到 VM 线程到达安全点（0=ok，<0 失败）
-//   pxt_state_resume() 解除暂停（必须与 pause 成对；失败后也要调）
-//   pxt_state_save()   把全部 VM 状态写进 buf，返回字节数（<0 失败）
-//   pxt_state_load()   从 buf 恢复，0=ok；地址不匹配（换游戏/重启过）= -10
-//
-// 核心侧按 pxt_state_max_size() 分配固定缓冲：retro_serialize_size 必须
-// 恒定，RetroArch 的 rewind 环形缓冲按它一次性分配。
-unsigned pxt_state_max_size();
-int pxt_state_pause();
-void pxt_state_resume();
-int pxt_state_save(void* buf, unsigned cap);
-int pxt_state_load(const void* buf, unsigned size);
-
 } // extern "C"
 
 namespace mca {
@@ -127,7 +107,7 @@ int vm_panic_code();                                // 0 正常；见 M3-VM-HOST
 
 // —— v0.2.13：卡带身份（C++ 链接，pxt 命名空间，定义在 runtime/pxtapp/core---vm/vmload.cpp）——
 // 装载时的**原始**镜像字节数 + FNV-1a 指纹（vm_patch_image 之前算，与 ASLR /
-// 模块基址无关）。启动横幅会打印它，存档跨会话靠它挡"换了卡带"。
+// 模块基址无关）。启动横幅会打印它，用于日志诊断（哪次运行跑的是哪张卡带）。
 // 注意：必须放在上面的 extern "C" 之外，否则会变成 C 链接、与定义对不上。
 namespace pxt {
 uint32_t mca_image_bytes();

@@ -23,8 +23,8 @@
 #   android arm64-v8a / armeabi-v7a（ndk-build，见 core/jni/）
 #   macOS 单独一个实验 job（continue-on-error，不阻塞）
 #   zig：x64/arm64 Windows + Linux x64/arm64/armhf（基线 2.17）
-#   behavior-*：真 ARM 硬件 runner（ubuntu-24.04-arm / windows-11-arm，
-#     公开仓库免费）上跑 S1–S10 快照回归 —— 行为层验证，见该 job 注释
+#   behavior-miniretro：真 aarch64 硬件 runner（ubuntu-24.04-arm，公开仓库
+#     免费）上用第三方前端 miniretro 跑 900 帧冒烟 —— 行为层验证
 
 name: build
 
@@ -407,27 +407,6 @@ jobs:
               ;;
           esac
 
-      # 模块区间是跨会话存档的地基，而 Linux 上它来自 /proc/self/maps 的文本解析
-      # （Windows 走 VirtualQuery，桌面回归覆盖不到）。v0.2.14 的真机事故就是这段
-      # 解析错了：g_modBase 恒 0 = 跨会话读档全被拒。这里在本机架构上真跑一次自测，
-      # 交叉目标跑不了（aarch64/armhf 不能在这个 runner 上执行）。
-      - name: 模块区间自测（maps 解析 + 真实区间非零）
-        if: matrix.triple == 'x86_64-linux-gnu.2.17'
-        run: |
-          set -u
-          # 失败原因要能匿名读（job 日志要鉴权），所以把尾部转成注解。
-          log=out/modrange.log
-          mkdir -p out
-          echo "python3: $(python3 -V 2>&1) / LANG=${LANG:-unset}"
-          if ! python3 tools/test_modrange.py \
-                 core/dist/x86_64-linux-gnu.2.17/makecode_arcade_libretro.so \
-                 > "$log" 2>&1; then
-            tail -30 "$log" | sed 's/^/::error::modrange /'
-            echo "::error::模块区间自测失败（见上方 ::error:: 行）"
-            exit 1
-          fi
-          tail -8 "$log"
-
       - uses: actions/upload-artifact@v4
         with:
           name: zig-${{ matrix.triple }}
@@ -435,267 +414,18 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-  # ------------------------------------------------- 行为回归（真 ARM runner）
-  # GitHub 给公开仓库免费提供真 ARM 硬件 runner（ubuntu-24.04-arm /
-  # windows-11-arm，2025-08 GA）。这一层跑的是「行为」而不是「编译」：
-  # 用与发版相同的 zig 工具链出 core，再在真实 aarch64 地址空间里跑
-  # S1–S10 快照回归。桌面 CI 的 x86_64 job 拿得到的固定地址、glibc 环境
-  # 都与发版目标平台不同——只有这一层能替真机拦住「地址不可复现」类
-  # bug 的逻辑面（快照逻辑错误在这里被抓，真机只验收平台差异）。
-  behavior-arm64:
-    name: behavior-linux-arm64
-    runs-on: ubuntu-24.04-arm
-    steps:
-      - uses: actions/checkout@v4
 
-      # 与 zig job 同版本同源；区别只是 tarball 取 aarch64-linux 本机版
-      # （runner 就是 ARM 硬件，zig 原生跑，无仿真）
-      - name: 安装 zig 0.17.0（aarch64-linux 本机版）
-        run: |
-          set -euo pipefail
-          trap 'echo "::error::zig 安装失败于第 $LINENO 行（exit=$?）"' ERR
-          cd "$RUNNER_TEMP"
-          ok=0
-          for base in "https://ziglang.org/download/0.17.0" \
-                      "https://pkg.machengine.org/zig"; do
-            if curl -fsSLo zig.tar.xz "$base/zig-aarch64-linux-0.17.0.tar.xz" 2>curl.err; then
-              if tar -tf zig.tar.xz >/dev/null 2>tar.err; then ok=1; break; fi
-              echo "::error::$base 返回的不是合法 tar.xz：$(file -b zig.tar.xz | cut -c1-80)"
-            else
-              echo "::error::$base 下载失败："
-              tail -3 curl.err | sed 's/^/::error::  /'
-            fi
-          done
-          [ "$ok" = 1 ] || { echo "::error::所有源都取不到 zig 0.17.0"; exit 1; }
-          listing="$(tar -tf zig.tar.xz)"
-          zigdir="${listing%%/*}"
-          tar -xJf zig.tar.xz
-          echo "$RUNNER_TEMP/$zigdir" >> "$GITHUB_PATH"
-          v="$("$RUNNER_TEMP/$zigdir/zig" version)"
-          [ "$v" = "0.17.0" ] || { echo "::error::zig 版本异常：实际 $v"; exit 1; }
-          echo "zig $v -> $RUNNER_TEMP/$zigdir"
 
-      # 与发版（release job）完全相同的构型：zig 2.17 基线 .so 在真实
-      # aarch64 上加载执行，连 glibc 向后兼容这条路也一并验证
-      - name: 编译（与发版同构型 aarch64-linux-gnu.2.17）
-        run: |
-          set -u
-          log=out/ci-behavior-arm64.log
-          mkdir -p out
-          if ! ZIG=zig tools/build_target.sh aarch64-linux-gnu.2.17 > "$log" 2>&1; then
-            tail -20 "$log" | sed 's/^/::error::behavior-arm64 /'
-            exit 1
-          fi
-          tail -3 "$log"
-
-      - name: 模块区间自测
-        run: |
-          set -u
-          log=out/modrange-arm64.log
-          if ! python3 tools/test_modrange.py \
-                 core/dist/aarch64-linux-gnu.2.17/makecode_arcade_libretro.so \
-                 > "$log" 2>&1; then
-            tail -30 "$log" | sed 's/^/::error::modrange-arm64 /'
-            exit 1
-          fi
-          tail -6 "$log"
-
-      # S1–S10 全套：测试卡带用仓库内置夹具（tools/fixtures/），core 路径
-      # 显式指向刚编出的发版构型 .so
-      - name: 快照回归 S1–S10
-        run: |
-          set -u
-          log=out/savestate-arm64.log
-          if ! python3 tools/test_savestate.py \
-                 core/dist/aarch64-linux-gnu.2.17/makecode_arcade_libretro.so \
-                 > "$log" 2>&1; then
-            tail -40 "$log" | sed 's/^/::error::savestate-arm64 /'
-            echo "::error::aarch64 快照回归失败（S1–S10，见上方 ::error:: 行）"
-            exit 1
-          fi
-          tail -12 "$log"
-
-      # 顺带交叉出 windows-arm64 的发版构型 dll，供 windows-11-arm job
-      # 在真实 Windows ARM 上实测（zig 是交叉编译器，宿主架构无关）
-      - name: 交叉编译 windows-arm64 dll
-        run: |
-          set -u
-          log=out/ci-behavior-winarm64.log
-          if ! ZIG=zig tools/build_target.sh aarch64-windows-gnu > "$log" 2>&1; then
-            tail -20 "$log" | sed 's/^/::error::behavior-winarm64-build /'
-            exit 1
-          fi
-          tail -3 "$log"
-          pip install --quiet pefile
-          python3 tools/check_pe.py core/dist/aarch64-windows-gnu/makecode_arcade_libretro.dll
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: behavior-aarch64-windows-gnu
-          path: core/dist/aarch64-windows-gnu/*
-          if-no-files-found: error
-          retention-days: 30
-
-  # 实测 windows-arm64 发版构型 dll（上一 job 交叉编出）：真实 Windows on
-  # ARM 上加载 + 跑 S1–S10。runner 上的 Python 可用性仍在演进期（
-  # setup-python 的 windows-arm64 支持较新），先标实验不阻塞，绿了再转正。
-  behavior-win-arm64:
-    name: behavior-windows-arm64 (实验)
-    runs-on: windows-11-arm
-    continue-on-error: true
-    needs: [behavior-arm64]
-    # PYTHONUTF8：宿主 subprocess（libretro_host.py）的输出解码也统一 UTF-8，
-    # 否则 text=True 用 cp1252 解码中文输出会炸在测试脚本的读取侧
-    env:
-      PYTHONUTF8: '1'
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: 定位 Python
-        shell: bash
-        run: |
-          for c in python3 python py; do
-            if command -v "$c" >/dev/null 2>&1; then
-              echo "MCA_PY=$c" >> "$GITHUB_ENV"
-              "$c" -V
-              exit 0
-            fi
-          done
-          echo "::error::windows-11-arm runner 上找不到 Python（setup-python 支持到位后此 job 转正）"
-          exit 1
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: behavior-aarch64-windows-gnu
-          path: core/dist/aarch64-windows-gnu
-
-      - name: 快照回归 S1–S10
-        shell: bash
-        run: |
-          set -u
-          mkdir -p out
-          if ! "$MCA_PY" tools/test_savestate.py \
-                 core/dist/aarch64-windows-gnu/makecode_arcade_libretro.dll \
-                 > out/savestate-winarm64.log 2>&1; then
-            tail -40 out/savestate-winarm64.log | sed 's/^/::error::savestate-winarm64 /'
-            exit 1
-          fi
-          tail -12 out/savestate-winarm64.log
-
-  # ------------------------------------------------ 行为回归（32 位分支）
-  # armhf 是与 64 位完全不同的堆映射分支（GC_BASE 0x20000000 / TValue 宽度
-  # / 快照布局），v0.2.15 的候选基址修复在这一支上从未验证过——这是当前
-  # 最大的行为验证空白。GitHub 没有 32 位 ARM runner，所以在 aarch64 真硬件
-  # 上用 qemu-user binfmt + armhf rootfs 跑（比 x86 上 qemu 全交叉快得多，
-  # 且宿主内核就是 aarch64，与目标掌机同架构族）。
-  # 标实验：rootfs 搭建与 qemu 下套件耗时均未在本仓库跑过，绿了再转正。
-  behavior-linux-armhf:
-    name: behavior-linux-armhf (实验)
-    runs-on: ubuntu-24.04-arm
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: 安装 zig 0.17.0（aarch64-linux 本机版）
-        run: |
-          set -euo pipefail
-          trap 'echo "::error::zig 安装失败于第 $LINENO 行（exit=$?）"' ERR
-          cd "$RUNNER_TEMP"
-          ok=0
-          for base in "https://ziglang.org/download/0.17.0" \
-                      "https://pkg.machengine.org/zig"; do
-            if curl -fsSLo zig.tar.xz "$base/zig-aarch64-linux-0.17.0.tar.xz" 2>curl.err; then
-              if tar -tf zig.tar.xz >/dev/null 2>tar.err; then ok=1; break; fi
-              echo "::error::$base 返回的不是合法 tar.xz：$(file -b zig.tar.xz | cut -c1-80)"
-            else
-              echo "::error::$base 下载失败："
-              tail -3 curl.err | sed 's/^/::error::  /'
-            fi
-          done
-          [ "$ok" = 1 ] || { echo "::error::所有源都取不到 zig 0.17.0"; exit 1; }
-          listing="$(tar -tf zig.tar.xz)"
-          zigdir="${listing%%/*}"
-          tar -xJf zig.tar.xz
-          echo "$RUNNER_TEMP/$zigdir" >> "$GITHUB_PATH"
-
-      - name: 编译 armhf（与发版同构型 arm-linux-gnueabihf.2.17）
-        run: |
-          set -u
-          log=out/ci-behavior-armhf.log
-          mkdir -p out
-          if ! ZIG=zig tools/build_target.sh arm-linux-gnueabihf.2.17 > "$log" 2>&1; then
-            tail -20 "$log" | sed 's/^/::error::behavior-armhf-build /'
-            exit 1
-          fi
-          tail -3 "$log"
-          # file 对缺失文件可能返回 0，不能依赖它兜底，硬断言产物存在
-          so=core/dist/arm-linux-gnueabihf.2.17/makecode_arcade_libretro.so
-          [ -f "$so" ] || { echo "::error::armhf 产物缺失 $so"; tail -30 "$log" | sed 's/^/::error::  /'; exit 1; }
-          file "$so"
-
-      # 用 armhf rootfs 而不是宿主 multiarch：python3 的 /usr/bin 解释器路径
-      # 两架构互斥，multiarch 共装会撞文件；独立 rootfs 无此问题
-      - name: 搭建 armhf rootfs（qemu-user binfmt + debootstrap）
-        run: |
-          set -euo pipefail
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends \
-            debootstrap qemu-user-static
-          sudo debootstrap --arch=armhf --variant=minbase \
-            --include=python3 noble /opt/armhf-root \
-            http://ports.ubuntu.com/ubuntu-ports
-          sudo mount -t proc proc /opt/armhf-root/proc
-          echo "== rootfs 内 python =="
-          sudo chroot /opt/armhf-root python3 -V
-
-      - name: 快照回归 S1–S10（32 位 .so 在 armhf 用户态）
-        run: |
-          set -euo pipefail
-          R=/opt/armhf-root/repo
-          so=core/dist/arm-linux-gnueabihf.2.17/makecode_arcade_libretro.so
-          [ -f "$so" ] || { echo "::error::宿主侧产物缺失 $so"; exit 1; }
-          sudo mkdir -p "$R"
-          # cp -r core/dist tools -> 按_basename_落位：$R/dist + $R/tools
-          # （此前按 $R/core/dist 断言，假绿两轮才暴露）
-          sudo cp -r core/dist tools "$R/"
-          inrepo="dist/arm-linux-gnueabihf.2.17/makecode_arcade_libretro.so"
-          [ -f "/opt/armhf-root/repo/$inrepo" ] || {
-            echo "::error::chroot 内产物缺失 /repo/$inrepo"
-            sudo find /opt/armhf-root/repo -maxdepth 4 | head -20 | sed 's/^/::error::  /'
-            exit 1
-          }
-          set +e
-          # 注意 chroot 内路径是 /repo（宿主的 /opt/armhf-root/repo），别传宿主路径
-          sudo chroot /opt/armhf-root env PYTHONUTF8=1 \
-            python3 /repo/tools/test_savestate.py /repo/$inrepo \
-            > armhf-suite.log 2>&1
-          rc=$?
-          set -e
-          # 失败诊断：只抓关键标记行（注解上限 10 条/job，不能多）
-          {
-            grep -E 'serialize|unserialize|pause failed|快照已存|恢复快照|-> OK|\[FAIL\]' \
-              armhf-suite.log | tail -6
-            sudo sh -c 'for f in $(find /opt/armhf-root/repo -name mca_trace.log 2>/dev/null); do
-              grep -hE "\[snap\]|\[heap\]|\[fix\]|PANIC" "$f" | tail -3
-            done' || true
-          } | sed 's/^/::error::armhf /'
-          # [SKIP] 缺文件会 exit 0 —— CI 上必须当失败处理
-          if grep -q '\[SKIP\]' armhf-suite.log; then
-            echo "::error::套件被 SKIP（缺文件），CI 上不允许"
-            exit 1
-          fi
-          exit $rc
 
   # ------------------------------------------- 独立前端交叉验证（miniretro）
   # miniretro（davidgfnet/miniretro）是第三方极简 CLI libretro 前端，专为
   # 自动化测试 core 设计。价值：自研 libretro_host.py 对 libretro API 的
   # 实现方式单一，偶然容忍的 core 端 API 误用（回调时序/像素格式假设等）
   # 换一个独立前端实现就可能暴露——相当于给 core 做第二次「前端方言」体检。
-  # 标实验：miniretro 的 CLI 细节与卡带加载路径未验证过，绿了再固化用例。
+  # 在真实 aarch64 runner 上跑，与发版同构型。
   behavior-miniretro:
-    name: behavior-miniretro (实验)
+    name: behavior-miniretro
     runs-on: ubuntu-24.04-arm
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 

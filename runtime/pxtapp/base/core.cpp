@@ -15,16 +15,6 @@ PXT_DEF_STRING(emptyString, "")
 
 static HandlerBinding *handlerBindings;
 
-// MCA v0.2.11：快照恢复时，绑定上的待处理事件指针指向旧 Event 地址。
-// Event 每次运行都是 new 出来的（地址不可复现），必须逐个改到新地址，
-// 否则下一个事件派发就会解引用已释放内存。
-void mcaFixupHandlerPending(void *(*mapFn)(void *)) {
-    for (auto p = handlerBindings; p; p = p->next) {
-        if (p->pending)
-            p->pending = (struct Event *)mapFn((void *)p->pending);
-    }
-}
-
 HandlerBinding *nextBinding(HandlerBinding *curr, int source, int value) {
     for (auto p = curr; p; p = p->next) {
         // DEVICE_ID_ANY == DEVICE_EXT_ANY == 0
@@ -338,12 +328,6 @@ Buffer mkBuffer(const void *data, int len) {
 }
 
 static unsigned random_value = 0xC0DA1;
-
-// MCA：随机状态进出快照。LFSR 的当前值就是"随机序列的位置"，
-// 不进快照的话存档恢复后随机序列会从别处继续 —— rewind / 存档就不是
-// 精确回放了（见 scheduler.cpp 的 McaSchedState）。
-unsigned mcaGetRandomState() { return random_value; }
-void mcaSetRandomState(unsigned v) { random_value = v; }
 
 //%
 void seedRandom(unsigned seed) {

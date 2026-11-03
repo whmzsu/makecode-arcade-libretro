@@ -155,11 +155,11 @@ MakeCode Arcade — libretro core ($plat)
           核心不接受这个格式——必须先用 cartconv 转换成 .pxt64
           （cartconv 便携包见 Releases；或 tools/png2pxt64.py）
 
-即时存档：
-  RetroArch 的「保存状态」/「金手指→回退」都能用。v0.2.11 起存档可以跨会话：
-  存一档 → 退出 RetroArch（甚至崩溃）→ 重开同一个游戏 → 加载 → 从存档那一刻
-  接着玩，画面与原时间线逐帧一致。换游戏后加载旧档会被拒绝（日志 -10），
-  游戏照常继续，不会崩前端。核心版本变了的旧档同样拒绝——升级核心后请重存。
+功能边界：
+  本核心不做即时存档 / 回退（Savestate / Rewind）——RetroArch 的
+  「保存状态」「金手指→回退」对本核心不可用（v0.3.0 起明确移除，
+  只做官方模拟器同等的基本功能）。「重启游戏」（SELECT 键或前端重启）
+  可用来重新开始当前游戏。
 
 排查：
   加载游戏后 RetroArch 日志里会打印
@@ -208,10 +208,11 @@ MakeCode Arcade — libretro core ($plat)
           核心不接受这个格式——必须先用 cartconv 转换成 .pxt64
           （cartconv 便携包见 Releases；或 tools/png2pxt64.py）
 
-即时存档：
-  RetroArch 的「保存状态」/「回退」都能用。v0.2.11 起存档可以跨会话：
-  存一档 → 退出 RetroArch → 重开同一个游戏 → 加载 → 接着玩，画面与原时间线
-  逐帧一致。换游戏后加载旧档会被拒绝（日志 -10），游戏照常继续。
+功能边界：
+  本核心不做即时存档 / 回退（Savestate / Rewind）——RetroArch 的
+  「保存状态」「金手指→回退」对本核心不可用（v0.3.0 起明确移除，
+  只做官方模拟器同等的基本功能）。「重启游戏」（SELECT 键或前端重启）
+  可用来重新开始当前游戏。
 
 排查：
   加载游戏后 RetroArch 日志里会打印

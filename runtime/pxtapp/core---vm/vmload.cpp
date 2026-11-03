@@ -1,5 +1,4 @@
 #include "pxt.h"
-#include "mca_fixed.h"
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -26,21 +25,12 @@ void mcaTrace(const char *fmt, ...);
 
 VMImage *vmImg;
 
-// MCA v0.2.11：卡带镜像也钉在固定地址。
-//
-// img->dataStart 直接指向这块缓冲，而 GC 堆里的字符串字面量、函数引用、
-// VTable 指针全是指向它的绝对地址 —— 镜像换地址就等于所有对象内容失效。
-// 和 GC 堆同理：拿不到固定地址就退回普通分配（游戏照跑，跨会话存档退化）。
-static uint8_t *g_imgBuf = NULL;
-
-// MCA v0.2.13：卡带指纹必须算在**未打补丁**的原始镜像字节上。
+// 卡带指纹：算在**未打补丁**的原始镜像字节上。
 //
 // vm_patch_image() 会把 vtable 指针和内核函数指针（都指向 core 自己的模块）
-// 就地写回镜像。Linux/Android 的 .so 走 ASLR，换个进程这些地址就变 —— 之前
-// 指纹是拿 patch 之后的 dataStart..dataEnd 现算的，于是"同一个卡带、换个
-// 进程"得到不同指纹，跨会话读档被当成"换了卡带"直接拒绝（-10）。Windows 的
-// DLL 基址固定，所以桌面回归一直没暴露这条。真机日志：
-//   [snap] 拒绝恢复：卡带不同（快照 181608 字节/1064f705，当前 181608 字节/e2483410）
+// 就地写回镜像。Linux/Android 的 .so 走 ASLR，换个进程这些地址就变 ——
+// 指纹必须拿 patch 之前的 dataStart..dataEnd 现算，同一张卡带才恒定。
+// 启动横幅会打印它（core 的日志里能看到"哪次运行跑的是哪张卡带"）。
 static uint32_t g_imgHash;
 static uint32_t g_imgBytes;
 
@@ -54,34 +44,11 @@ static uint32_t mcaFnv1a(const uint8_t *b, uint32_t n) {
 uint32_t mca_image_hash() { return g_imgHash; }
 uint32_t mca_image_bytes() { return g_imgBytes; }
 
-static uint8_t *mcaImageBuffer(unsigned len) {
-    if (!g_imgBuf) {
-        g_imgBuf = (uint8_t *)mcaFixedMap((unsigned long long)(uintptr_t)GC_BASE + MCA_IMG_OFFSET,
-                                         MCA_IMG_MAX_BYTES);
-        if (g_imgBuf)
-            mcaTrace("[img] 镜像缓冲固定在 %p（%u 字节上限）", (void *)g_imgBuf,
-                     (unsigned)MCA_IMG_MAX_BYTES);
-        else
-            mcaTrace("[img] 取不到固定镜像地址（GC_BASE+1MB），跨会话快照将不可用");
-    }
-    if (g_imgBuf && len <= MCA_IMG_MAX_BYTES)
-        return g_imgBuf;
-    return NULL;
-}
-
 static void vmStartCore(uint8_t *data, unsigned len) {
-    // 先拷进固定缓冲再解析：loadVMImage 会把 data 指针直接存进 img->dataStart，
-    // 之后所有代码都按这个地址引用镜像内容。
-    if (data != g_imgBuf) {
-        uint8_t *fixed = mcaImageBuffer(len);
-        if (fixed) {
-            memcpy(fixed, data, len);
-            data = fixed;
-        }
-    }
-
-    // 指纹取 patch 之前的原始字节（理由见 g_imgHash 的说明）。放在这里而不是
-    // 装载完之后：vm_patch_image 下面就会改写 data。
+    // 调用方（vmStartFile 或 vm_host 的 start_vm_from_orig）传入的必须是
+    // malloc 的新拷贝：loadVMImage 会把 data 指针直接存进 img->dataStart，
+    // unloadVMImage 会 free 它；且 vm_patch_image 会就地改写内容。
+    // 指纹取 patch 之前的原始字节，放在这里而不是装载完之后。
     g_imgBytes = len;
     g_imgHash = mcaFnv1a(data, len);
 
@@ -133,10 +100,7 @@ static void vmStartFile(const char *fn) {
     fseek(f, 0, SEEK_END);
     auto len = (unsigned)ftell(f);
     fseek(f, 0, SEEK_SET);
-    // 优先直接读进固定缓冲（省一次拷贝，且地址从一开始就钉住）
-    auto data = mcaImageBuffer(len);
-    if (!data)
-        data = (uint8_t *)malloc(len + 16);
+    auto data = (uint8_t *)malloc(len + 16);
     fread(data, len, 1, f);
     fclose(f);
 

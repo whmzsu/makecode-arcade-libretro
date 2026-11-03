@@ -9,8 +9,7 @@
 #undef min
 #undef max
 
-#include <new>          // placement new（单例落在固定区）
-#include "mca_fixed.h"  // mcaFixedBump：单例的固定地址分配
+#include <new>
 
 #define NOLOG(...)                                                                                 \
     do {                                                                                           \
@@ -136,11 +135,8 @@ void sleep_us(uint64_t us);
 void releaseFiber();
 uint64_t current_time_us();
 int current_time_ms();
-// MCA v0.2.12：宿主是否在请求快照暂停。解释器每 2048 条指令查一次就够
-// （fiber 里若有长循环不调 pause，光靠主循环顶的检查点会等不到）。
-int mca_pause_pending();
-// MCA v0.2.13：卡带身份（装载时的原始镜像字节数 + FNV-1a 指纹，patch 之前算）。
-// 定义在 vmload.cpp，快照存档/校验用。
+// 卡带身份（装载时的原始镜像字节数 + FNV-1a 指纹，patch 之前算）。
+// 定义在 vmload.cpp，启动横幅打印，用于日志诊断。
 uint32_t mca_image_bytes();
 uint32_t mca_image_hash();
 void initRuntime();
@@ -614,28 +610,6 @@ class LLSegment {
     unsigned getLength() { return length; };
     unsigned getCapacity() { return size; }
     TValue *getData() { return data; }
-
-    // MCA：快照恢复。
-    //   d != NULL：同会话恢复，data 指针原样写回（内容随后搬运）
-    //   d == NULL：跨会话恢复 —— 原地址在新进程里已不属于我们，按容量
-    //              重新分配，内容由调用方按 len 填入
-    void mcaRestore(void *d, unsigned len, unsigned cap) {
-        if (d) {
-            data = (TValue *)d;
-        } else {
-            // 容量字段不总是可靠（实测 gcRoots 会出现 size=0 / length=74：
-            // LLSegment 的 size 只在扩容路径更新），按两者的较大值分配，
-            // 否则 data 是空指针、紧接着按 len 拷内容就直接段错误。
-            unsigned n = cap > len ? cap : len;
-            if (data)
-                xfree(data);
-            data = n ? (TValue *)xmalloc(n * sizeof(TValue)) : nullptr;
-            size = n;
-        }
-        length = len;
-        if (d)
-            size = cap;
-    }
 };
 
 // A ref-counted collection of either primitive or ref-counted objects (String, Image,
@@ -1283,23 +1257,7 @@ bool removeElement(RefCollection *c, TValue x);
 
 #define JOIN(a, b) a##b
 /// Defines getClassName() function to fetch the singleton
-// MCA：单例构造。优先落在固定区（见 mca_fixed.h），拿不到就普通 new。
-template <typename T> T *mcaNewSingleton() {
-    void *p = mcaFixedBump(sizeof(T));
-    return p ? new (p) T() : new T();
-}
-
-// MCA：单例的快照访问器（SINGLETON 展开时自动生成）。
-//
-// v0.2.11 起单例落在固定区（mcaFixedBump），不再是 new 出来的普通堆对象：
-// 快照里存着这些指针，堆内对象也引用它们，跨会话恢复时地址必须可复现。
-// 拿不到固定区时退回普通 new —— 游戏照跑，只是跨会话存档会退化。
-// PXTEXT "C"：生成 C 链接符号，调度器的快照协调器按名声明即可调用
-#define MCA_SNAP_ACCESSOR(ClassName)                                                               \
-    PXTEXT "C" void *JOIN(mca_snap_, ClassName)() { return (void *)JOIN(inst, ClassName); }        \
-    PXTEXT "C" void JOIN(mca_unsnap_, ClassName)(void *p) { JOIN(inst, ClassName) = (ClassName *)p; }
-
-#define MCA_SINGLETON_NEW(ClassName) mcaNewSingleton<ClassName>()
+#define MCA_SINGLETON_NEW(ClassName) new ClassName()
 
 #define SINGLETON(ClassName)                                                                       \
     static ClassName *JOIN(inst, ClassName);                                                       \
@@ -1307,8 +1265,7 @@ template <typename T> T *mcaNewSingleton() {
         if (!JOIN(inst, ClassName))                                                                \
             JOIN(inst, ClassName) = MCA_SINGLETON_NEW(ClassName);                                  \
         return JOIN(inst, ClassName);                                                              \
-    }                                                                                              \
-    MCA_SNAP_ACCESSOR(ClassName)
+    }
 
 /// Defines getClassName() function to fetch the singleton if PIN present
 #define SINGLETON_IF_PIN(ClassName, pin)                                                           \

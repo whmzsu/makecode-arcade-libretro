@@ -1,5 +1,4 @@
 #include "pxtbase.h"
-#include "mca_state.h"
 
 #ifndef GC_BLOCK_SIZE
 #define GC_BLOCK_SIZE (1024 * 16)
@@ -232,73 +231,6 @@ LLSegment workQueue; // (ab)used by consString making
 static GCBlock *firstBlock;
 static RefBlock *firstFree;
 static uint8_t *midPtr;
-
-// ===== MCA：retro_serialize 快照钩子（见 mca_state.h）=====
-// 只搬静态变量的值；LLSegment 的缓冲内容由调用方（scheduler.cpp）按
-// len * sizeof(TValue) 单独搬运。安全点约束见结构注释。
-//
-// 堆基址按分支取值：
-//   64 位/MinGW：gcBase（malloc 的 1MB 缓冲；platform.h 的 64 位分支已声明，
-//               注意它在 extern "C" 块里，符号不带 mangle —— 这里不要再声明
-//               一遍 C++ 版的，否则链接出 undefined symbol）
-//   32 位      ：GC_BASE 固定地址（堆是按页 mmap 的连续区，没有 gcBase
-//               变量，platform.h 的 32 位分支也不声明它）
-// 两个分支统一从 gcBase/GC_BASE 抽象出"堆基址"，snapshot 按
-// [基址, 基址+heapUsed) 搬运堆内容。
-#if defined(PXT64) || defined(__MINGW32__)
-#define MCA_GC_HEAP_BASE() (gcBase)
-#else
-#define MCA_GC_HEAP_BASE() ((void *)GC_BASE)
-#endif
-
-void mcaGcGetState(McaGcState *s) {
-    memset(s, 0, sizeof(*s));
-    s->gcBase = MCA_GC_HEAP_BASE();
-    // gcAllocPtr 的本体在 scheduler.cpp（切块游标），由协调器自己填
-    s->firstBlock = firstBlock;
-    s->firstFree = firstFree;
-    s->midPtr = midPtr;
-    s->inGC = inGC;
-    s->globals = globals;
-    s->pendingArrays = pendingArrays;
-    s->gcRootsData = gcRoots.getData();
-    s->gcRootsLen = gcRoots.getLength();
-    s->gcRootsSize = 0; // size 私有；恢复用不到（长度即所需）
-    s->workQueueData = workQueue.getData();
-    s->workQueueLen = workQueue.getLength();
-    s->workQueueSize = 0;
-    memcpy(s->stats, &gcStats, sizeof(s->stats));
-}
-
-void mcaGcSetState(const McaGcState *s) {
-#if defined(PXT64) || defined(__MINGW32__)
-    gcBase = (uint8_t *)s->gcBase;
-#endif
-    // gcAllocPtr 由协调器写回（本文件不可见）
-    firstBlock = (GCBlock *)s->firstBlock;
-    firstFree = (RefBlock *)s->firstFree;
-    midPtr = (uint8_t *)s->midPtr;
-    inGC = s->inGC;
-    globals = (TValue *)s->globals;
-    pendingArrays = (PendingArray *)s->pendingArrays;
-    // LLSegment 的缓冲是 system malloc 出来的，跨会话地址不可复现：
-    // 指针相同（同会话）就原地复用；不同（新进程）就按容量重建，
-    // 内容随后由调度器按 len 填入。之前无条件写回旧指针，跨会话恢复
-    // 就是往别人的内存里写 —— 真机上表现为加载存档时崩掉 RetroArch。
-    if ((void *)gcRoots.getData() == s->gcRootsData)
-        gcRoots.mcaRestore(s->gcRootsData, s->gcRootsLen, s->gcRootsSize);
-    else
-        gcRoots.mcaRestore(nullptr, s->gcRootsLen, s->gcRootsSize);
-    if ((void *)workQueue.getData() == s->workQueueData)
-        workQueue.mcaRestore(s->workQueueData, s->workQueueLen, s->workQueueSize);
-    else
-        workQueue.mcaRestore(nullptr, s->workQueueLen, s->workQueueSize);
-    memcpy(&gcStats, s->stats, sizeof(s->stats));
-}
-
-// 快照恢复时调度器要把缓冲内容读回来，但 LLSegment 是文件内静态
-void *mcaGcRootsData() { return gcRoots.getData(); }
-void *mcaGcWorkQueueData() { return workQueue.getData(); }
 
 static bool inGCArea(void *ptr) {
     for (auto block = firstBlock; block; block = block->next) {
