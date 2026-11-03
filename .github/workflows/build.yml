@@ -510,17 +510,22 @@ jobs:
           set -u
           sudo apt-get update -qq
           sudo apt-get install -y -qq gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 > /dev/null
+          mkdir -p out   # runner 上没有 out/，日志重定向必须先建目录
           # make 输出落文件：失败时错误行容易被缓冲挤出 tail，必须重定向再 grep
-          if ! make -C core -f Makefile platform=win64 \
-                  CC=x86_64-w64-mingw32-gcc CXX=x86_64-w64-mingw32-g++ \
-                  -j"$(nproc)" > out/win64-build.log 2>&1; then
-            echo "::error title=win64 make 失败::关键错误行："
-            grep -n "error" out/win64-build.log | head -8 | sed 's/^/::error::  /'
-            tail -5 out/win64-build.log | sed 's/^/::error::tail| /'
+          make -C core -f Makefile platform=win64 \
+               CC=x86_64-w64-mingw32-gcc CXX=x86_64-w64-mingw32-g++ \
+               -j"$(nproc)" > out/win64-build.log 2>&1
+          rc=$?
+          if [ $rc -ne 0 ] || [ ! -f core/makecode_arcade_libretro.dll ]; then
+            echo "::error title=win64 make 失败 rc=$rc::"
+            grep -n "error" out/win64-build.log | head -8 | \
+              while IFS= read -r l; do echo "::error::${l:0:250}"; done
+            tail -12 out/win64-build.log | \
+              while IFS= read -r l; do echo "::error::tail| ${l:0:250}"; done
             exit 1
           fi
-          test -f core/makecode_arcade_libretro.dll
-          file -b core/makecode_arcade_libretro.dll | grep -q PE32
+          file -b core/makecode_arcade_libretro.dll | grep -q PE32 || {
+            echo "::error::产物不是 PE32"; exit 1; }
 
       # 模板语义：ndk-build -C <jni目录>，项目路径自动探测为父目录，
       # 产物 libretro.so（LOCAL_MODULE := retro）落在 <父>/libs/<ABI>/
