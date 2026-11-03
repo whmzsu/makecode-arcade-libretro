@@ -103,16 +103,25 @@ esac
 PIC=(-fPIC)
 case "$TAG" in *windows*) PIC=() ;; esac
 
+# 栈展开信息（.pdata/.xdata）：
+#   * mingw-w64 的 setjmp/longjmp 在 x86_64 上走 SEH（RtlUnwindEx），
+#     逐帧回退必须有 .pdata，否则 longjmp 自己就崩（0xC0000005 / STATUS_BAD_STACK）。
+#     VM 的 try/catch（FiberContext::loopjmp）和 panic 回弹点都依赖它，
+#     所以 Windows 目标必须开 -funwind-tables。
+#   * 其它平台用不到，保持 -fno-unwind-tables 省体积。
+UNWIND=(-fno-unwind-tables)
+case "$TAG" in *windows*) UNWIND=(-funwind-tables -fasynchronous-unwind-tables) ;; esac
+
 CXXFLAGS=(
   "${TARGET_FLAGS[@]}" "${PIC[@]}" "${WIN_BASELINE[@]}"
   -std=c++11
-  -fno-rtti -fno-exceptions -fno-unwind-tables
+  -fno-rtti -fno-exceptions "${UNWIND[@]}"
   -fwrapv -fno-threadsafe-statics -fno-strict-aliasing
   -ffunction-sections -O2
   -I"$PXTAPP"
   -Wno-unused-parameter -Wno-unused-private-field -Wno-vla-cxx-extension
 )
-CFLAGS=("${TARGET_FLAGS[@]}" "${PIC[@]}" "${WIN_BASELINE[@]}" -O2)
+CFLAGS=("${TARGET_FLAGS[@]}" "${PIC[@]}" "${WIN_BASELINE[@]}" -O2 "${UNWIND[@]}")
 INC=(-I"$CORE/src" -I"$CORE/third_party/miniz" -I"$CORE/third_party/lzma")
 
 needs_build() { [ ! -f "$2" ] || [ "$1" -nt "$2" ]; }

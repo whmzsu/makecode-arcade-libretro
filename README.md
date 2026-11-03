@@ -361,6 +361,11 @@ functions.json 逐字节一致）。
 - **panic 显示化**：VM 崩溃（panic）时画面顶部会出现红底白字的
   `VM PANIC <code>` 横幅，重启成功后自动消失；详情仍同步进 RetroArch 日志
   （`[MCA-VM] panic code N`）。真机上不用翻日志就能对上故障码。
+- **panic 不带崩前端**（v0.3.2）：panic 之后 VM 线程回弹到主循环做完整
+  清理并退出，前端自动重启（最多 3 次，仍失败则停机显示横幅）——RetroArch
+  本体始终存活。触发 panic 的多半是游戏自身 bug（如把 undefined 当数组用）；
+  曾几何时这类卡带会把整个前端进程带崩（Windows 0xC0000005），另有一条
+  JS try/catch 的异常回跳链在 mingw 上崩（STATUS_BAD_STACK），均已修复。
 
 ## 按键
 

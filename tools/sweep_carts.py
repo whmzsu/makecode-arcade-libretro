@@ -14,7 +14,9 @@
   static    独立画面 < 3（多半停在标题/菜单，或 VM 卡住不出帧）
   blank     非黑峰值 < 1%（黑屏）
   short     实际帧数 < 请求帧数（VM 提前退出/崩溃）
-  crash     宿主进程非零退出或打印 panic
+  panic     VM 打了 panic 但宿主进程活着、统计行照常（v0.3.2 起 panic 不再带崩
+            前端；这种卡带通常是游戏自身的 bug，值得单独看是谁踩的）
+  crash     宿主进程非零退出（真的崩了），或没有统计行
 """
 
 from __future__ import annotations
@@ -84,13 +86,17 @@ def run_one(core: str, cart: str, frames: int, press: str | None,
         "nonblack_pct": m[3] if m else 0,
         "hash": (re.search(r"FINAL-FRAME-HASH (\w+)", out) or [None, None])[1],
     }
-    if proc.returncode != 0 or CRASH_RE.search(out):
+    if proc.returncode != 0:
         row["verdict"] = "crash"
-        row["note"] = (CRASH_RE.search(out).group(0) if CRASH_RE.search(out) else
-                       f"exit {proc.returncode}")
+        row["note"] = f"宿主退出码 {proc.returncode:#x}"
     elif not m:
         row["verdict"] = "crash"
         row["note"] = "没有统计行（宿主中途退出）"
+    elif CRASH_RE.search(out):
+        # VM 打了 panic 但宿主活下来了 —— 与"把前端带崩"是两件事，分开计。
+        pm = re.search(r"PANIC (\d+)", out)
+        row["verdict"] = "panic"
+        row["note"] = (f"VM panic {pm.group(1)}，宿主存活" if pm else "VM panic，宿主存活")
     elif row["frames"] < frames:
         row["verdict"] = "short"
         row["note"] = f"{row['frames']}/{frames} 帧"

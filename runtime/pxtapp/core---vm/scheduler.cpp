@@ -10,6 +10,7 @@
 #include <sys/types.h>
 #include <errno.h>
 #include <stdarg.h>
+#include <setjmp.h> // v0.3.2：panic 回弹点（mcaPanicUnwind）
 
 #ifndef PXT_ESP32
 // __MINGW32__ is defined on both mingw32 and mingw64
@@ -82,6 +83,45 @@ volatile int mcaVmExited = 0;
 // 就能立刻拿到第 1 圈的画面，帧号与圈号从第一帧起严格对齐。
 volatile int mcaMainLoopLive = 0;
 static volatile int mcaRestartDone = 0;
+
+// MCA v0.3.2（本项目）：panic 回弹点 —— panic 之后**不能 return**。
+//
+// 上游 pxt 的约定是 target_panic()/soft_panic() 不返回（ESP32 上就是
+// abort()），VM 里的 C++ 代码全部按这个约定写，例如：
+//     if (!isPointer(obj)) failedCast(obj);      // 内部 soft_panic()
+//     auto vt = getVTable((RefObject *)obj);     // obj 是 undefined(0)，直接解引用
+// v0.2.14 为了"panic 后干净重启"把 panic 改成"置标志就返回、由主循环收尾"，
+// 于是这些调用方会带着非法值继续往下跑：实测 Strawberry Slam 在
+// asRefCollection() 上踩 PANIC 980（把 undefined 当数组），返回后数组操作码
+// 拿 NULL 解引用，整个进程 0xC0000005 挂掉 —— RetroArch 跟着一起死。
+//
+// 所以 panic 之后必须离开当前栈。用 setjmp/longjmp 弹回 mainRunLoop 的帧，
+// 那里本来就有 `if (panicCode)` 分支做 cleanup + 正常线程退出
+// （mcaVmExited 置位、前端据此重启）。跨过的 C++ 帧不含需要析构的对象
+// （运行库按 -fno-exceptions 编译），VM 内部本来也用同一套机制
+// （restoreVMExceptionState）。
+// 注意：mingw-w64 的 longjmp 在 x86_64 上走 SEH（RtlUnwindEx），需要
+// .pdata 才能逐帧回退 —— Windows 目标因此打开了 -funwind-tables
+//（见 tools/build_target.sh；不开的话 longjmp 自己就 0xC0000005 崩，
+// 连带 VM 的 try/catch 也是 STATUS_BAD_STACK）。
+static jmp_buf mcaPanicJmp;
+static volatile int mcaPanicJmpArmed;
+
+// 弹回主循环。返回 0 = 当前没有可用的回弹点（不在主循环里，例如 initRuntime
+// 阶段），调用方沿用旧逻辑。
+static int mcaPanicUnwind() {
+    if (!mcaPanicJmpArmed)
+        return 0;
+    mcaPanicJmpArmed = 0; // 只能用一次
+    longjmp(mcaPanicJmp, 1);
+    return 0; // 不会到这里
+}
+
+// 离开主循环前必须撤掉回弹点：longjmp 到一个已经返回的栈帧是未定义行为。
+static void mcaLeaveMainLoop() {
+    mcaPanicJmpArmed = 0;
+    mcaMainLoopLive = 0;
+}
 
 // MCA PATCH 6（本项目）：重启路径埋点。
 //
@@ -263,6 +303,10 @@ extern "C" void target_panic(int error_code) {
         // 不 pthread_exit、不 while(1)：调用方拿到控制权后自行返回。
     } else if (mcaMainLoopLive) {
         mcaTrace("[vm] panic in vm thread -> unwind to main loop (no pthread_exit)");
+        // v0.3.2：**必须离开当前栈**，不能 return —— 调用方会拿非法值继续跑
+        // （见 mcaPanicUnwind 上面的说明）。
+        if (!mcaPanicUnwind())
+            systemReset();
     } else {
         systemReset();
     }
@@ -296,6 +340,9 @@ void soft_panic(int errorCode) {
             pxt_vm_request_reset();
     } else if (mcaMainLoopLive) {
         mcaTrace("[vm] soft_panic in vm thread -> unwind to main loop (no pthread_exit)");
+        // 同 target_panic（1)(2)(3)；v0.3.2 起此处不再返回给调用方。
+        if (!mcaPanicUnwind())
+            systemReset();
     } else {
         systemReset();
     }
@@ -601,6 +648,16 @@ static void hostRestartCleanup();
 static void mainRunLoop() {
     FiberContext *f = NULL;
     mcaMainLoopLive = 1;
+    // v0.3.2：装好 panic 回弹点。从这一刻起，VM 线程里任何更深的 panic
+    // （target_panic/soft_panic 的第 (2) 条分支）都会 longjmp 回到这里，
+    // 由循环顶的 `if (panicCode)` 分支统一收尾，而不是 return 回调用方
+    // 让它继续解引用非法值（见 mcaPanicUnwind 上面的说明）。
+    if (setjmp(mcaPanicJmp) == 0) {
+        mcaPanicJmpArmed = 1;
+    } else {
+        mcaTrace("[vm] panic %d unwound to main loop frame", panicCode);
+        // 局部变量 f 在 longjmp 后不可信，这里不再使用；下面的 panic 分支直接返回。
+    }
     for (;;) {
         // MCA v0.2.14：panic 后从这里收尾退出。
         //
@@ -612,7 +669,7 @@ static void mainRunLoop() {
         if (panicCode) {
             mcaTrace("[vm] panic %d seen at main loop -> cleanup and exit", panicCode);
             hostRestartCleanup();
-            mcaMainLoopLive = 0;
+            mcaLeaveMainLoop();
             return;
         }
         // MCA PATCH 5：宿主请求重启 → 退出主循环，交给 initRuntime 末尾的
@@ -627,7 +684,7 @@ static void mainRunLoop() {
                      (unsigned long long)(g_virtTimeNum / 3000));
             hostRestartCleanup();
             mcaTrace("[vm] cleanup returned, leaving main loop");
-            mcaMainLoopLive = 0;
+            mcaLeaveMainLoop();
             return;   // initRuntime 看到 mcaRestartDone 就不再 systemReset()
         }
         // 一圈一帧：等前端请求下一帧再推进。
@@ -687,7 +744,7 @@ static void mainRunLoop() {
                 mcaTrace("[vm] panic %d after exec_loop -> cleanup and exit", panicCode);
                 f = NULL;
                 hostRestartCleanup();
-                mcaMainLoopLive = 0;
+                mcaLeaveMainLoop();
                 return;
             }
             auto n = f->next;
@@ -991,7 +1048,7 @@ static void hostRestartCleanup() {
 // 进程不崩也不退出"。凡是线程要自己死掉，都必须先把"我死了"写清楚。
 static void vmThreadExitNow(const char *why) {
     mcaTrace("[vm] %s -> thread exit (marked)", why);
-    mcaMainLoopLive = 0;
+    mcaLeaveMainLoop();
     pxt_vm_set_online(0);
     mcaVmExited = 1; // 宿主（vm_poll_restart）据此 join 并用原始镜像重新启动
     pthread_exit(NULL);

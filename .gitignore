@@ -19,6 +19,8 @@ core/tests/*.exe
 # ---- 测试 / 生成输出 ----
 out/
 *.ts
+# 例外：测试样本源码（见 docs/TEST-CORPUS.md）
+!tools/fixtures/*.ts
 !refs/*.ts
 tools/fakebin/
 tools/cartconv/fakebin/

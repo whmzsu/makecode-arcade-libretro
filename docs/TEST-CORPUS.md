@@ -93,6 +93,10 @@ failed type check for 0000000000000000 @0000000000000000
 结论：这是游戏的逻辑 bug，核心的处置是对的（panic 而不是踩内存）。这类卡带
 留在语料里的意义是盯住"崩溃路径"本身。
 
+v0.3.2 起这条路径的判定升级为：panic 之后**宿主进程必须活着**（前端不被带
+崩），自动重启最多 3 次然后停机；`sweep_carts.py` 把它单列为 `panic`，
+与真崩（`crash`，宿主非零退出）区分。
+
 ### 2. Asphodel follows directions 编不出来（合理排除）
 
 ```
@@ -144,6 +148,9 @@ python tools/sweep_carts.py out/testcarts -n 600 --press A --press-at 60 --relea
 - **长跑**：没有跑过 5 分钟以上，帧循环里的缓慢泄漏看不出来。
 - **堆上限**：最大的镜像才 382KB，离 1MB VM 堆还远。缺一个故意吃满堆的样本，
   用来验证 `soft_panic` 横幅 + 自动重启这条降级路径。
+- **异常路径样本已补**：`tools/fixtures/trycatch-main.ts`（throw→catch），
+  覆盖 VM 的 op_try / longjmp 回跳链——v0.3.2 之前它在 mingw 上会把宿主
+  带崩（STATUS_BAD_STACK），修复后必须保持不崩。
 - **真机批量**：只抽了 5 张，剩下的 15 张还没在 RK3566 / RK3326 上跑过；两台
   都还没做"跑满 20 张 + 记录帧率"的完整表。
 - **CI 化**：`sweep_carts.py` 目前是本地脚本。若把 5 张 smoke 卡带放进 CI

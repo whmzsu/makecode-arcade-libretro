@@ -659,7 +659,7 @@ load 跑 700/1600 帧均正常，无法本地复现），随固定基址稳定�
 - Blocky_Boss_Battle：正常节拍 48.8 fps 实际出帧、音频峰值 1264（有声）。
 - Strawberry_Slam：固定第 5133 tick `PANIC 980`，与 RG353M / R36S / 桌面一致。
 
-### 顺带发现（**未修，待定**）
+### 顺带发现（已于 v0.3.2 修复，见下一节）
 
 上面这个 PANIC 980 之后**进程直接崩了**（Windows 退出码 `0xC0000005`
 访问违例；两台掌机上同样在 panic 输出后立刻中断，没有收尾统计）。也就是说
@@ -677,3 +677,82 @@ load 跑 700/1600 帧均正常，无法本地复现），随固定基址稳定�
 **VM 镜像校验阶段**，不在 fiber 里；而 v0.2.14 的"panic 后从 mainRunLoop
 收尾退出"补丁是按 fiber 内 panic 设计的。非 fiber 路径走 `target_panic` →
 `systemReset()` 时，VM 状态正处于半执行态，收尾可能用到已释放/未初始化的结构。
+
+## 2026-11-03（v0.3.2）：panic 带崩前端 —— 已修 + 三机统一实测
+
+### 修复
+
+上一节记的"未修"问题定位并修掉了，同时发现并修掉一个同类隐患：
+
+1. **panic 后进程崩溃**（0xC0000005）。根因不是 verify 阶段（上一节的怀疑
+   方向错了）：panic 发生在 fiber 内的 `asRefCollection()`——游戏把 undefined
+   当数组用。上游 pxt 的约定是 `soft_panic()` **不返回**（ESP32 上直接 abort），
+   VM 里的 C++ 全按这个约定写：`if (!isPointer(v)) failedCast(v);` 之后紧跟
+   `getVTable((RefObject*)v)`。v0.2.14 把 panic 改成"置标志就返回"之后，这些
+   调用方拿着 NULL/undefined 继续解引用，进程当场挂掉，RetroArch 跟着死。
+   修法：panic 之后**不许 return**——在 mainRunLoop 装 `setjmp` 回弹点，
+   `soft_panic`/`target_panic` 在 VM 线程上直接 `longjmp` 过去，由循环顶的
+   `if (panicCode)` 分支做原有的 cleanup + 正常线程退出（前端自动重启）。
+2. **VM 的 try/catch 同样带崩前端**（0xC0000028 STATUS_BAD_STACK）。同一根
+   子的另一半：mingw-w64 的 `longjmp` 在 x86_64 上走 SEH（RtlUnwindEx），
+   逐帧回退必须有 .pdata，而本工程按 `-fno-unwind-tables` 编译——`longjmp`
+   自己就崩。修法：Windows 目标打开 `-funwind-tables
+   -fasynchronous-unwind-tables`（体积 +22KB），panic 回弹点与 VM 异常回跳
+   （FiberContext::loopjmp）共用这套机制，恢复标准 `setjmp/longjmp` 写法。
+
+验证（桌面 win64 + 三台真机）：
+
+- Strawberry_Slam 6000 帧：panic 980 → 自动重启 ×3 → 到上限后放弃，**进程
+  退出码 0**，前端继续出帧直到 unload。trace 完整走完 cleanup 0/6→6/6。
+- 新增异常样本（`tools/fixtures/trycatch-main.ts` 编译的 trythrow.pxt64）：
+  throw → catch → 继续跑，600 帧正常出画面。
+- 20 张语料全量回归：19 ok + 1 panic（数值与修复前逐张一致，无行为变化）。
+
+### 三台真机对照（同一构建 aarch64 v0.3.2，2026-11-03 晚）
+
+| 项 | RG353M | R36S | RG353V |
+|---|---|---|---|
+| SoC | RK3566 4×A55 @2.0GHz | RK3326 4×A35 @1.3GHz | RK3566 4×A55 @1.8GHz |
+| RAM | 2GB | 918MB | 963MB |
+| 系统 | Ubuntu 19.10 / kernel 4.19.172 / glibc 2.30 | Debian 13 / kernel 4.4.189 / glibc 2.41 | Ubuntu 19.10 / kernel 4.19.172 / glibc 2.30 |
+| Python（跑宿主脚本用） | 3.7.5 | 3.13.5 | 3.7.5 |
+| SSH 别名 | `ssh rg353m`（192.168.1.130） | `ssh r36s`（192.168.1.53） | `ssh rg353v`（192.168.1.77） |
+| 核心目录 | `~/.config/retroarch/cores/` | 同左 | 同左 |
+| 游戏目录 | `~/makecode/`（20 张 .pxt64） | 同左 | 同左 |
+| 旧核心备份 | `*.bak-0.2.15`、`*.bak-0.3.1` | `*.bak-0.3.1` | `*.bak-0.3.1` |
+
+性能（`--turbo` 满速 1200 帧、墙钟计时；同口径同卡带，可直接横向比）：
+
+| 卡带 | RG353M | R36S | RG353V |
+|---|---|---|---|
+| ping（最轻） | 284 fps（4.7×） | 150 fps（2.5×） | 300 fps（5.0×） |
+| Blocky_Boss_Battle（中） | 203 fps（3.4×） | 92 fps（1.5×） | 211 fps（3.5×） |
+| arcade-cube-land（最重） | 146 fps（2.4×） | **65 fps（1.08×）** | 150 fps（2.5×） |
+
+（括号 = 相对 60fps 的余量。R36S 跑 cubeland 依然只有 1.08 倍余量，是全系列
+下限；其余组合余量 1.5× 以上。）
+
+60fps 节拍下（宿主脚本 16ms 节拍，宿主本身有 Python 开销，节拍略低于 60）：
+
+| 指标 | RG353M | R36S | RG353V |
+|---|---|---|---|
+| ping 实际节拍 / 单核占用 | 49.5 fps / ~26% | 38.9 fps / ~42% | 48.6 fps / ~27% |
+| Blocky 实际节拍 / 单核占用 | 50.1 fps / ~35% | 39.2 fps / ~54% | 49.4 fps / ~37% |
+| 峰值 RSS（turbo 采样） | 11.7–12.9 MB | 14.3–18.6 MB | 11.5–12.9 MB |
+
+功能回归（三台一致）：
+
+| 项 | 结果 |
+|---|---|
+| ping 600 帧 | 295 独立画面，正常 |
+| Strawberry_Slam 6000 帧 | panic 980 后自动重启 ×3，宿主存活（exit 0） |
+| trythrow（异常样本）600 帧 | 39 独立画面，throw/catch 路径正常 |
+| 音频 | Blocky_Boss_Battle 有声（此前 RG353V 实测峰值 1264） |
+
+### 口径备注（避免再踩）
+
+- "游戏真实帧率 ≈ N fps"是 VM 出帧率（受游戏自身逻辑限制），**不是**设备
+  性能；横向比较一律用 `--turbo` 的墙钟吞吐。
+- "实际节拍"受 Python 宿主的 16ms sleep 粒度影响（≈50 fps 封顶），不等于
+  RetroArch 实机帧率；只用来确认"没掉到远低于节拍"。
+- R36S 的 RSS 偏高是 kernel 4.4 的统计口径差异，不代表多吃 6MB。
