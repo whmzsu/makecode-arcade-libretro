@@ -77,6 +77,21 @@ def run(cart, frames, extra=()):
            "--data-dir", OUT] + list(extra)
     r = subprocess.run(cmd, capture_output=True, text=True, cwd=ROOT)
     out = (r.stdout or "") + (r.stderr or "")
+    # core trace（mca_trace.log）每个进程启动都截断重建——不在这里收进 out，
+    # 前一个场景的 [snap]/[fix] 现场就永久丢了（CI 上无日志可查，armhf 排障
+    # 时踩过）。路径用 glob：--data-dir 在 host 里没生效时也能找到。
+    import glob
+    for tf in glob.glob(os.path.join(ROOT, "out", "**", "mca_trace.log"),
+                        recursive=True):
+        try:
+            with open(tf, encoding="utf-8", errors="replace") as fh:
+                for ln in fh:
+                    if any(k in ln for k in ("[snap]", "[fix]", "[heap]",
+                                             "[img]", "PANIC", "panic",
+                                             "reject")):
+                        out += "[trace] " + ln
+        except OSError:
+            pass
     hashes = re.findall(r"FINAL-FRAME-HASH ([0-9a-f]{32})", out)
     return (hashes[-1] if hashes else None), out, r.returncode
 
@@ -101,7 +116,8 @@ def compare_after_load(hA, hB, loadAt, offset, last):
 def save_load_lines(out, limit=6):
     """从 host 输出里抽存/取相关的诊断行（CI 上失败时唯一的信息来源）。"""
     keys = ("快照已存", "恢复快照", "retro_serialize", "retro_unserialize",
-            "pause failed", "PANIC", "panic", "vm thread")
+            "pause failed", "pause reject", "PANIC", "panic", "vm thread",
+            "[trace]")
     return [ln.strip() for ln in out.splitlines()
             if any(k in ln for k in keys)][:limit]
 
