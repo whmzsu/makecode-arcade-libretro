@@ -119,26 +119,44 @@ static unsigned long long mcaChooseBase() {
     if (tried)
         return base;
     tried = 1;
-    // 候选顺序：**先试原有的 0x2000000000（Windows/本机原本就钉在这里、行为不变），
-    // 失败再依次试更低和更高的候选**。低地址（512MB 起）通常空闲、且不受 ASLR 影响，
-    // 命中率高；更高的候选作为最后的兜底。同一台设备/固件下第一个"整体能占住"的
-    // 地址是确定的，于是跨进程一致 → 跨会话恢复成立。
-    static const unsigned long long cands[] = {
-        0x2000000000ULL, // 原有基址：Windows/本机/支持的设备尽量不动它
-        0x20000000ULL,  0x40000000ULL,  0x80000000ULL,  0x100000000ULL,
-        0x200000000ULL,  0x400000000ULL, 0x800000000ULL,
-        0x4000000000ULL, 0x8000000000ULL,
-    };
+    // 候选顺序：**先试原有的 GC_BASE（Windows/本机原本就钉在这里、行为不变），
+    // 失败再依次试更低和更高的候选**。低地址（512MB 起）通常空闲、且不受 ASLR
+    // 影响，命中率高；更高的候选作为最后的兜底。同一台设备/固件下第一个
+    // "整体能占住"的地址是确定的，于是跨进程一致 → 跨会话恢复成立。
+    //
+    // v0.2.15 armhf 事故：候选表最初按 64 位地址写死，32 位下 (uintptr_t)0x2000000000
+    // 截断成 0，mcaTryMapRaw 失败返回的 NULL 恰好 == (void*)(uintptr_t)候选 → 误判
+    // "成功"，base 变成 32 位装不下的值，堆/镜像/单例全部退化。所以候选必须按
+    // 位宽裁剪（地址必须能完整装进 uintptr_t），且 NULL 永远不算成功。
+    unsigned long long cands[10];
+    size_t ncand = 0;
+#if defined(GC_BASE) && GC_BASE != 0
+    cands[ncand++] = (unsigned long long)(uintptr_t)GC_BASE; // 原有基址优先
+#endif
+    cands[ncand++] = 0x20000000ULL;
+    cands[ncand++] = 0x40000000ULL;
+    cands[ncand++] = 0x80000000ULL;
+#if UINTPTR_MAX > 0xFFFFFFFFull
+    cands[ncand++] = 0x100000000ULL;
+    cands[ncand++] = 0x200000000ULL;
+    cands[ncand++] = 0x400000000ULL;
+    cands[ncand++] = 0x800000000ULL;
+    cands[ncand++] = 0x2000000000ULL; // 64 位下保持原位次兜底
+    cands[ncand++] = 0x8000000000ULL;
+#endif
+    const uintptr_t addrMax = (uintptr_t)-1;
     size_t total = MCA_HEAP_BYTES + MCA_IMG_MAX_BYTES + MCA_SINGLETON_MAX_BYTES;
-    // MCA_SIM_FALLBACK：本地仿真"原基址 0x2000000000 拿不到"的设备场景。
+    // MCA_SIM_FALLBACK：本地仿真"原基址拿不到"的设备场景。
     // 设了就跳过候选 #0，强制走更低/更高的兜底地址，验证 fallback 路径下
     // 跨进程基址仍然确定（快照才能跨会话恢复）。生产默认不跳。
     static int skipFirst = -1;
     if (skipFirst < 0)
         skipFirst = getenv("MCA_SIM_FALLBACK") ? 1 : 0;
-    for (size_t i = (size_t)skipFirst; i < sizeof(cands) / sizeof(cands[0]); ++i) {
+    for (size_t i = (size_t)skipFirst; i < ncand; ++i) {
+        if (cands[i] > addrMax)
+            continue; // 装不进本进程地址空间的候选直接跳过
         void *p = mcaTryMapRaw(cands[i], total); // 探测整段是否空闲
-        if (p == (void *)(uintptr_t)cands[i]) {
+        if (p && p == (void *)(uintptr_t)cands[i]) {
             mcaUnmapRaw(p, total); // 仅探测；真正映射在后面分块进行
             base = cands[i];
             mcaTrace("[fix] 固定基址选定 %p（候选 #%zu，整体 %zu 字节）",
