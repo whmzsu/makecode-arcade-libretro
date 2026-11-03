@@ -639,3 +639,41 @@ load 跑 700/1600 帧均正常，无法本地复现），随固定基址稳定�
 里都不再有 32 位目标，`core/jni/Application.mk` 只列 `arm64-v8a`。核心侧也
 不加任何运行时判断（既然不再产出 32 位构建，判断就是死代码）。除非上游把
 `vm_patch_image` 的 `"TODO: NumberBoxes"` 补完，否则 32 位前端一律不支持。
+
+## 2026-11-03（第三台）：RG353V 全新安装
+
+| 项 | 值 |
+|---|---|
+| 硬件 | RG353V，RK3566（4×A55，上限 1.8GHz），963MB RAM |
+| 系统 | Ubuntu 19.10（aarch64，kernel 4.19.172），Python 3.7.5 |
+| SSH | `ssh rg353v`（192.168.1.77，ark，已装本机 ed25519 公钥） |
+| 安装位置 | 核心 `~/.config/retroarch/cores/`（与 `libretro_directory` 一致），游戏 `~/makecode/` |
+| core | `makecode_arcade_linux-arm64.zip` v0.3.1（`display_version=0.3.1`，aarch64） |
+| 结果 | 全新部署成功，20 张 `.pxt64` 已推送 |
+
+### 实测
+
+- 满速吞吐（ping，2000 帧）：RG353V **347 fps** / RG353M **341 fps** —— 两台
+  RK3566 同级。注意别拿宿主打印的"游戏真实帧率 ≈ 178 fps"和挂在总帧/耗时上
+  的数（347）直接比，这是两个口径，我第一轮就比错了。
+- Blocky_Boss_Battle：正常节拍 48.8 fps 实际出帧、音频峰值 1264（有声）。
+- Strawberry_Slam：固定第 5133 tick `PANIC 980`，与 RG353M / R36S / 桌面一致。
+
+### 顺带发现（**未修，待定**）
+
+上面这个 PANIC 980 之后**进程直接崩了**（Windows 退出码 `0xC0000005`
+访问违例；两台掌机上同样在 panic 输出后立刻中断，没有收尾统计）。也就是说
+"panic 只是画个横幅然后自动重启"这条降级路径对 980 这条路径**没有生效**。
+
+已排除的：
+
+- 不是 `drawPanic` 的锅——它是空实现（`runtime/pxtapp/core---vm/platform.cpp`
+  里的 `// TODO`）。
+- 不是 `dmesg_flush`——`LOG_TO_FILE` 未定义时它是空函数；日志里那行
+  `errno=2 No such file or directory` 只是之前遗留在 errno 里的值。
+- 不是设备相关——桌面、RG353M、RG353V 崩在同一个位置。
+
+怀疑方向：这个 panic 来自 `verify.cpp` 的 `failed type check`，也就是
+**VM 镜像校验阶段**，不在 fiber 里；而 v0.2.14 的"panic 后从 mainRunLoop
+收尾退出"补丁是按 fiber 内 panic 设计的。非 fiber 路径走 `target_panic` →
+`systemReset()` 时，VM 状态正处于半执行态，收尾可能用到已释放/未初始化的结构。
