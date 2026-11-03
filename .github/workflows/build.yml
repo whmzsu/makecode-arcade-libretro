@@ -582,6 +582,139 @@ jobs:
           fi
           tail -12 out/savestate-winarm64.log
 
+  # ------------------------------------------------ 行为回归（32 位分支）
+  # armhf 是与 64 位完全不同的堆映射分支（GC_BASE 0x20000000 / TValue 宽度
+  # / 快照布局），v0.2.15 的候选基址修复在这一支上从未验证过——这是当前
+  # 最大的行为验证空白。GitHub 没有 32 位 ARM runner，所以在 aarch64 真硬件
+  # 上用 qemu-user binfmt + armhf rootfs 跑（比 x86 上 qemu 全交叉快得多，
+  # 且宿主内核就是 aarch64，与目标掌机同架构族）。
+  # 标实验：rootfs 搭建与 qemu 下套件耗时均未在本仓库跑过，绿了再转正。
+  behavior-linux-armhf:
+    name: behavior-linux-armhf (实验)
+    runs-on: ubuntu-24.04-arm
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 zig 0.17.0（aarch64-linux 本机版）
+        run: |
+          set -euo pipefail
+          trap 'echo "::error::zig 安装失败于第 $LINENO 行（exit=$?）"' ERR
+          cd "$RUNNER_TEMP"
+          ok=0
+          for base in "https://ziglang.org/download/0.17.0" \
+                      "https://pkg.machengine.org/zig"; do
+            if curl -fsSLo zig.tar.xz "$base/zig-aarch64-linux-0.17.0.tar.xz" 2>curl.err; then
+              if tar -tf zig.tar.xz >/dev/null 2>tar.err; then ok=1; break; fi
+              echo "::error::$base 返回的不是合法 tar.xz：$(file -b zig.tar.xz | cut -c1-80)"
+            else
+              echo "::error::$base 下载失败："
+              tail -3 curl.err | sed 's/^/::error::  /'
+            fi
+          done
+          [ "$ok" = 1 ] || { echo "::error::所有源都取不到 zig 0.17.0"; exit 1; }
+          listing="$(tar -tf zig.tar.xz)"
+          zigdir="${listing%%/*}"
+          tar -xJf zig.tar.xz
+          echo "$RUNNER_TEMP/$zigdir" >> "$GITHUB_PATH"
+
+      - name: 编译 armhf（与发版同构型 arm-linux-gnueabihf.2.17）
+        run: |
+          set -u
+          log=out/ci-behavior-armhf.log
+          mkdir -p out
+          if ! ZIG=zig tools/build_target.sh arm-linux-gnueabihf.2.17 > "$log" 2>&1; then
+            tail -20 "$log" | sed 's/^/::error::behavior-armhf-build /'
+            exit 1
+          fi
+          tail -3 "$log"
+          file core/dist/arm-linux-gnueabihf.2.17/makecode_arcade_libretro.so
+
+      # 用 armhf rootfs 而不是宿主 multiarch：python3 的 /usr/bin 解释器路径
+      # 两架构互斥，multiarch 共装会撞文件；独立 rootfs 无此问题
+      - name: 搭建 armhf rootfs（qemu-user binfmt + debootstrap）
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            debootstrap qemu-user-static
+          sudo debootstrap --arch=armhf --variant=minbase \
+            --include=python3 noble /opt/armhf-root \
+            http://ports.ubuntu.com/ubuntu-ports
+          sudo mount -t proc proc /opt/armhf-root/proc
+          echo "== rootfs 内 python =="
+          sudo chroot /opt/armhf-root python3 -V
+
+      - name: 快照回归 S1–S10（32 位 .so 在 armhf 用户态）
+        run: |
+          set -euo pipefail
+          R=/opt/armhf-root/repo
+          sudo mkdir -p "$R"
+          sudo cp -r core/dist tools "$R/"
+          sudo chroot /opt/armhf-root env PYTHONUTF8=1 \
+            python3 "$R/tools/test_savestate.py" \
+            "$R/core/dist/arm-linux-gnueabihf.2.17/makecode_arcade_libretro.so"
+
+  # ------------------------------------------- 独立前端交叉验证（miniretro）
+  # miniretro（davidgfnet/miniretro）是第三方极简 CLI libretro 前端，专为
+  # 自动化测试 core 设计。价值：自研 libretro_host.py 对 libretro API 的
+  # 实现方式单一，偶然容忍的 core 端 API 误用（回调时序/像素格式假设等）
+  # 换一个独立前端实现就可能暴露——相当于给 core 做第二次「前端方言」体检。
+  # 标实验：miniretro 的 CLI 细节与卡带加载路径未验证过，绿了再固化用例。
+  behavior-miniretro:
+    name: behavior-miniretro (实验)
+    runs-on: ubuntu-24.04-arm
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 zig 0.17.0（aarch64-linux 本机版）
+        run: |
+          set -euo pipefail
+          trap 'echo "::error::zig 安装失败于第 $LINENO 行（exit=$?）"' ERR
+          cd "$RUNNER_TEMP"
+          ok=0
+          for base in "https://ziglang.org/download/0.17.0" \
+                      "https://pkg.machengine.org/zig"; do
+            if curl -fsSLo zig.tar.xz "$base/zig-aarch64-linux-0.17.0.tar.xz" 2>curl.err; then
+              if tar -tf zig.tar.xz >/dev/null 2>tar.err; then ok=1; break; fi
+              echo "::error::$base 返回的不是合法 tar.xz：$(file -b zig.tar.xz | cut -c1-80)"
+            else
+              echo "::error::$base 下载失败："
+              tail -3 curl.err | sed 's/^/::error::  /'
+            fi
+          done
+          [ "$ok" = 1 ] || { echo "::error::所有源都取不到 zig 0.17.0"; exit 1; }
+          listing="$(tar -tf zig.tar.xz)"
+          zigdir="${listing%%/*}"
+          tar -xJf zig.tar.xz
+          echo "$RUNNER_TEMP/$zigdir" >> "$GITHUB_PATH"
+
+      - name: 编译（与发版同构型）
+        run: ZIG=zig tools/build_target.sh aarch64-linux-gnu.2.17
+
+      - name: 编译 miniretro
+        run: |
+          git clone --depth 1 https://github.com/davidgfnet/miniretro
+          make -C miniretro -j"$(nproc)"
+          ./miniretro/miniretro --help 2>&1 | head -20 || true
+
+      # 跑 900 帧（15 秒游戏时长），每 300 帧落一帧画面；core 不崩、
+      # 有画面产出即算通过。作为独立前端，只做冒烟，不做逐帧比对
+      # （像素格式/时序处理与自研宿主不同，哈希不可直接比）。
+      # dump 输出目录 README 未定死，按"运行后新出现的 PNG"断言，不猜路径。
+      - name: miniretro 加载 core 跑 900 帧
+        run: |
+          touch /tmp/mr.marker
+          ./miniretro/miniretro \
+            -c core/dist/aarch64-linux-gnu.2.17/makecode_arcade_libretro.so \
+            -r tools/fixtures/ping.pxt64 \
+            -f 900 --dump-frames-every 300
+          echo "== 运行期间新产出的 PNG =="
+          n=$(find . -name '*.png' -newer /tmp/mr.marker -not -path './miniretro/*' | tee /tmp/mr.list | wc -l)
+          cat /tmp/mr.list | head -10
+          [ "$n" -ge 2 ] || { echo "::error::miniretro 900 帧只产出 $n 帧画面"; exit 1; }
+
   # ------------------------------------------------------------------ macOS
   # 实验：Makefile 支持 osx，但本机没有 macOS 工具链，作者未在真机验证过
   # 加载/音频；先只做"编得过"的观察，红了不算回归失败（continue-on-error）
