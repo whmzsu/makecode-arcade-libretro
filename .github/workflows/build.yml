@@ -652,9 +652,10 @@ jobs:
           sudo mkdir -p "$R"
           sudo cp -r core/dist tools "$R/"
           set +e
+          # 注意 chroot 内路径是 /repo（宿主的 /opt/armhf-root/repo），别传宿主路径
           sudo chroot /opt/armhf-root env PYTHONUTF8=1 \
-            python3 "$R/tools/test_savestate.py" \
-            "$R/core/dist/arm-linux-gnueabihf.2.17/makecode_arcade_libretro.so" \
+            python3 /repo/tools/test_savestate.py \
+            /repo/core/dist/arm-linux-gnueabihf.2.17/makecode_arcade_libretro.so \
             > armhf-suite.log 2>&1
           rc=$?
           set -e
@@ -712,18 +713,21 @@ jobs:
       # dump 输出目录 README 未定死，按"运行后新出现的 PNG"断言，不猜路径。
       - name: miniretro 加载 core 跑 900 帧
         run: |
-          touch /tmp/mr.marker
+          mkdir -p out/mr out/mr-system
           set +e
+          # 必需参数：--core --rom --output（帧转储前缀）--system（system 目录）
           ./miniretro/miniretro \
-            -c core/dist/aarch64-linux-gnu.2.17/makecode_arcade_libretro.so \
-            -r tools/fixtures/ping.pxt64 \
-            -f 900 --dump-frames-every 300 > miniretro.log 2>&1
+            --core core/dist/aarch64-linux-gnu.2.17/makecode_arcade_libretro.so \
+            --rom tools/fixtures/ping.pxt64 \
+            --output out/mr/ping \
+            --system out/mr-system \
+            --frames 900 --dump-frames-every 300 > miniretro.log 2>&1
           rc=$?
           set -e
-          cat miniretro.log | tail -40 | sed 's/^/::error::miniretro /'
-          echo "== 运行期间新产出的 PNG =="
-          find . -name '*.png' -newer /tmp/mr.marker -not -path './miniretro/*' | head -10
-          n=$(find . -name '*.png' -newer /tmp/mr.marker -not -path './miniretro/*' | wc -l)
+          tail -40 miniretro.log | sed 's/^/::error::miniretro /'
+          echo "== 产出画面 =="
+          ls -l out/mr/ | head -10
+          n=$(find out/mr -name '*.png' | wc -l)
           [ "$rc" -eq 0 ] || { echo "::error::miniretro 退出码 $rc"; exit 1; }
           [ "$n" -ge 2 ] || { echo "::error::miniretro 900 帧只产出 $n 帧画面"; exit 1; }
 
