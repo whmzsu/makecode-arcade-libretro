@@ -50,3 +50,8 @@ mca_trace.log
 
 # pxt 扩展转换缓存（下载的社区扩展源码，不入仓库）
 .cache_ext/
+
+# 第三方游戏卡带本体（第三方内容，不入库；用 tools/fetch_shared.py 按 id 重建）
+pxt64_collections/
+*.pxt64
+!tools/fixtures/*.pxt64
