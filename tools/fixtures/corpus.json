@@ -8,7 +8,7 @@
     "known_bad": "已知会崩，用来确认\"崩溃行为本身\"没变坏（不是要它通过）"
   },
   "games": [
-    {"name": "ping", "id": null, "png": "png_examples/arcade-ping.png", "tier": "smoke", "expect": "ok", "why": "最小基准：单精灵 + 球拍，改动后最先看它"},
+    {"name": "ping", "id": null, "png": "png_examples/arcade-ping.png", "tier": "smoke", "expect": "ok", "why": "最小基准：单精灵 + 球拍，改动后最先看它。游戏自身在 tick 41683 PANIC 980（cast-from-undefined，桌面 win64 与三台 aarch64 真机同 tick 同末帧 hash，周期 ≈41683 tick），600 帧冒烟到不了；长跑时 panic 属预期，核心应画横幅+重启×3+停机且宿主存活"},
     {"name": "arcade-falling-duck", "id": null, "png": "png_examples/arcade-falling-duck.png", "tier": "smoke", "expect": "ok", "why": "真实 .png 卡带路径（cartconv 转换），粒子 + 计时器"},
     {"name": "arcade-jumpy-platformer", "id": null, "png": "png_examples/arcade-jumpy-platformer.png", "tier": "smoke", "expect": "ok", "why": "平台跳跃：瓦片地图 + 物理 + 相机滚动"},
     {"name": "arcade-cube-land", "id": null, "png": "png_examples/arcade-cube-land.png", "tier": "smoke", "expect": "ok", "why": "下限机型压力样本（RK3326 上唯一余量接近 1 的场景）"},
