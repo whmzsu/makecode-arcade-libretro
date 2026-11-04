@@ -1,0 +1,13 @@
+2026-11-04 参与性能对照的 8 台设备（核心 md5 均为 5a295ebf…，5,169,256 字节，v0.3.2 发布版）
+
+别名       IP              主机名    型号              SoC
+rg353m     192.168.1.130   rg353m    Anbernic RG353M   RK3566 @1.99GHz / 1.97GB
+rg353v     192.168.1.77    rg353v    Anbernic RG353V   RK3566 @1.80GHz / 963MB
+rk2023     192.168.1.17    rk2023    Powkiddy RK2023   RK3566 @1.99GHz / 964MB
+rgb30a     192.168.1.26    rgb30     Powkiddy RGB30    RK3566 @1.99GHz / 964MB
+rgb30b     192.168.1.85    rgb30     Powkiddy RGB30    RK3566 @1.99GHz / 964MB
+rgb30c     192.168.1.101   rgb30     Powkiddy RGB30    RK3566 @1.99GHz / 964MB
+rg351mpa   192.168.1.31    rg351mp   Anbernic RG351MP  RK3326 @1.512GHz / 965MB
+rg351mpb   192.168.1.137   rg351mp   Anbernic RG351MP  RK3326 @1.512GHz / 965MB
+
+（r36s 192.168.1.53 当时 Wi-Fi 掉线，未参与；其 RK3326@1.3GHz 数据见 DEVICE-TEST 旧章节）
