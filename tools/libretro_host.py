@@ -19,6 +19,8 @@ dlopen 加载 .dll/.so 再逐符号调用"这条真实路径 —— 而真机上
   --dlclose             结束前 dlclose 核心库（模拟前端关闭游戏/退出，测卸载崩溃）
   --release=N           第 N 帧松开
   --bitmask             让 GET_INPUT_BITMASKS 返回 true（走位掩码轮询路径）
+  --random-input=S[:N]  模拟玩家乱按：seed=S，每 N 帧（默认 18）重抽一次按键
+                        （方向盘与 ABXY/LR 分两组抽，可出现斜向、双键同按）
   --dry                 只加载、发环境、读描述符，不跑帧循环
 
 行为尽量贴近 RetroArch：
@@ -32,6 +34,7 @@ dlopen 加载 .dll/.so 再逐符号调用"这条真实路径 —— 而真机上
 
 import ctypes
 import os
+import random
 import struct
 import sys
 import time
@@ -73,6 +76,10 @@ JOYPAD = {
 }
 JOYPAD_NAMES = {v: k for k, v in JOYPAD.items()}
 ID_JOYPAD_MASK = 256
+
+# --random-input 用的键集合：方向盘与动作键分开抽，能凑出"斜向 + A/B 同按"这类组合
+RANDOM_DIRS = [JOYPAD["LEFT"], JOYPAD["RIGHT"], JOYPAD["UP"], JOYPAD["DOWN"]]
+RANDOM_ACTIONS = [JOYPAD["A"], JOYPAD["B"], JOYPAD["X"], JOYPAD["Y"], JOYPAD["L"], JOYPAD["R"]]
 
 # RetroArch 的 runloop_init_libretro_symbols() 逐个解析这 25 个符号
 REQUIRED = [
@@ -348,6 +355,7 @@ def parse_args(argv):
     cfg = {"bmp": None, "press": None, "press_at": 4, "release": None, "dry": False,
            "seq": None, "switch": None, "dlclose": False, "data_dir": None,
            "turbo": False,
+           "random_input": None, "random_interval": 18,
            "hash_every": 0}       # >0：每 N 帧输出一次画面哈希
     for a in argv:
         if a.startswith("--bmp="):
@@ -373,6 +381,12 @@ def parse_args(argv):
             cfg["turbo"] = True                    # 帧循环不 sleep（快速跑完用）
         elif a.startswith("--hash-every="):
             cfg["hash_every"] = max(1, int(a.split("=", 1)[1]))
+        elif a.startswith("--random-input="):
+            # --random-input=SEED 或 SEED:间隔帧（默认 18）：模拟玩家乱按
+            v = a.split("=", 1)[1]
+            seed, _, iv = v.partition(":")
+            cfg["random_input"] = int(seed)
+            cfg["random_interval"] = max(1, int(iv)) if iv else 18
         elif a.startswith("--switch="):
             cfg["switch"] = a.split("=", 1)[1]     # 换游戏：第二张卡带路径
         elif a == "--dlclose":
@@ -556,7 +570,23 @@ def main():
 
     def run_frames(n, tag):
         t_start = time.time()
+        rng = None
+        if cfg.get("random_input") is not None:
+            rng = random.Random(cfg["random_input"])
+            say(f"== 9b. 随机输入：seed={cfg['random_input']}，"
+                f"每 {cfg['random_interval']} 帧换一次（方向盘 + ABXY/LR）")
         for i in range(n):
+            # 随机按键：模拟玩家乱按（先于 press/seq 生效，两者可叠加）
+            if rng is not None and i % cfg["random_interval"] == 0:
+                HELD.clear()
+                if rng.random() < 0.55:
+                    HELD.add(rng.choice(RANDOM_DIRS))
+                    if rng.random() < 0.25:
+                        HELD.add(rng.choice(RANDOM_DIRS))
+                if rng.random() < 0.45:
+                    HELD.add(rng.choice(RANDOM_ACTIONS))
+                    if rng.random() < 0.25:
+                        HELD.add(rng.choice(RANDOM_ACTIONS))
             if press_id is not None:
                 pf = {int(x) for x in str(cfg["press_at"]).split(",")}
                 if i in pf:
@@ -599,6 +629,8 @@ def main():
         f"画面非黑峰值 {stats['nonblack']}%, audio={stats['audio_frames']} 采样帧, "
         f"音频峰值 {stats['audio_peak']}（有声采样帧 {stats['audio_loud']}）, "
         f"{frames / dt:.1f} fps 实际节拍")
+    if cfg.get("random_input") is not None:
+        say(f"   随机输入 seed={cfg['random_input']}，每 {cfg['random_interval']} 帧换向")
     if cfg["bmp"] and stats["last_frame"]:
         write_bmp565(cfg["bmp"], stats["last_frame"])
     if stats["last_frame"]:
