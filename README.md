@@ -1,5 +1,7 @@
 # MakeCode Arcade libretro Core（路线 B）
 
+[English](README_EN.md) | 简体中文
+
 [![build](https://github.com/whmzsu/makecode-arcade-libretro/actions/workflows/build.yml/badge.svg)](https://github.com/whmzsu/makecode-arcade-libretro/actions/workflows/build.yml)
 
 把 MakeCode Arcade 游戏作为"卡带"在 RetroArch 中运行，主线技术路线为
