@@ -46,8 +46,10 @@ jobs:
           rc=$?
           cat "$out"
           if [ "$rc" -ne 0 ]; then
-            echo "::error::诊断构建失败（rc=$rc）"
-            tail -25 "$out" | cut -c1-300 | sed 's/^/::error::  /'
+            # 注解有 10 条上限，逐行发会被截断到只剩开头。这里把整段尾部
+            # 压成一条多行注解（%0A 会被 GitHub 还原成换行）。
+            msg=$(tail -40 "$out" | cut -c1-400 | sed -e 's/%/%25/g' -e ':a;N;$!ba;s/\n/%0A/g')
+            echo "::error::诊断构建失败（rc=$rc）%0A$msg"
             exit 1
           fi
 

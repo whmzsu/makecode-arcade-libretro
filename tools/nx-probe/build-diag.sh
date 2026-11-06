@@ -40,7 +40,6 @@ echo "==================== 构建 probe.nro ===================="
 if aarch64-none-elf-gcc \
         -O2 -Wall \
         -march=armv8-a -mtune=cortex-a57 -mtp=soft -fPIE \
-        -mcpu=cortex-a57+crc+fp+simd \
         -D__SWITCH__=1 -D_GNU_SOURCE \
         -DBUILD_LIBNX_VER="\"$LIBNX_VER\"" \
         -I"$DEVKITPRO/libnx/include" -I"$PORTLIBS/include" \
