@@ -29,8 +29,6 @@ on:
       - "core/third_party/**"
       - "runtime/**"
       - "tools/core.info.in"
-    tags:
-      - "core-v*"
 
 concurrency:
   group: nx-${{ github.ref }}
@@ -152,22 +150,7 @@ jobs:
           [ -n "$VERSION" ] || { echo "::error::读不到 kCoreVersion"; exit 1; }
           sed "s|@VERSION@|$VERSION|" tools/core.info.in > /tmp/pkg/makecode_arcade_libretro.info
           grep -E 'display_(name|version)' /tmp/pkg/makecode_arcade_libretro.info
-          cd /tmp/pkg
-          cat > 安装说明.txt <<'EOF'
-MakeCode Arcade —— Nintendo Switch（RetroArch NX）
-=================================================
-
-1. 把 makecode_arcade_libretro_libnx.nro 和 makecode_arcade_libretro.info
-   一起拷到 SD 卡：sdmc:/retroarch/cores/
-2. 卡带（*.pxt64）随便放，例如 sdmc:/roms/makecode/
-3. 在 hbmenu 里启动这个 NRO（它自带 RetroArch 前端），
-   加载 core 后打开卡带即可。
-
-注意：Switch 没有 dlopen，所以每个 core 都是一个独立 NRO（官方同样是这个形态，
-在线更新器里下载的 core 就是一个个 .nro）。更新 core = 换掉这个 NRO。
-建议以 title takeover 方式启动（按住 R 点任意游戏进 hbmenu），
-可获得完整内存；applet 模式（相册入口）也能跑，但内存只有 448MB。
-EOF
+          cp tools/nx-install-notes.txt /tmp/pkg/安装说明.txt
           zip -q -r makecode_arcade_switch.zip core makecode_arcade_libretro.info 安装说明.txt
           ls -l makecode_arcade_switch.zip
 
