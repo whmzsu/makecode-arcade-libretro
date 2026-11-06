@@ -277,12 +277,16 @@ int   g_nx_boot_tries = 0;
 void nxBoot(const char* fmt, ...) {
     if (!g_nx_boot) {
         if (g_nx_boot_tries >= 4) return;   // 反复失败就别每帧重试了
-        // 第一次尝试截断重建（否则会把上一次会话的内容当成这次的结果）；
-        // 后续重试用追加，避免把已经写下的行冲掉。
-        const char* mode = (g_nx_boot_tries == 0) ? "w" : "a";
+        // 一律用 "w"：只有上一次 fopen 真的失败（g_nx_boot 仍为 nullptr）才会
+        // 走到这里，也就是说这一轮之前没有写过任何字节，截断不会冲掉本次内容。
+        // 反过来用 "a" 有风险：上一轮会话留下的旧日志会被当成本次的进度。
         ++g_nx_boot_tries;
-        g_nx_boot = std::fopen("sdmc:/switch/mca_boot.log", mode);
+        g_nx_boot = std::fopen("sdmc:/switch/mca_boot.log", "w");
         if (!g_nx_boot) return;
+        // 记一行"文件已开"，用来区分"ctor 跑过但当时文件系统还没挂上"
+        // 与"ctor 根本没执行"——这两种情况都表现为缺 [boot] ctor 这一行。
+        std::fputs("[boot] log opened\n", g_nx_boot);
+        std::fflush(g_nx_boot);
     }
     char buf[256];
     va_list ap;

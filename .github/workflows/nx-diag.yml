@@ -107,27 +107,46 @@ jobs:
           path: pkg
 
       - name: 挂到固定 tag nx-diag
+        # 发布失败不该让整条诊断链变红：文件还在 run 的 artifact 里，
+        # 顶多是"要登录才能下"。所以这里只 warning 不 error，并且把
+        # pkg 里的真实内容全打出来，便于下次一眼看出为什么没发出去。
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -uo pipefail
-          ls -l pkg || true
+          echo "=== pkg 内容 ==="
+          find pkg -type f -printf '%s\t%p\n' 2>/dev/null | sort -k2 || ls -la pkg
+
           TAG=nx-diag
           TITLE="nx-diag - 排查用探针（不是发版）"
-          # 说明放独立文件：多行文本写进 run: | 里一旦顶到第 0 列就会截断 YAML
           NOTES=tools/nx-probe/diag-notes.md
-          [ -f "$NOTES" ] || { echo "缺少 $NOTES"; exit 1; }
-          # 对比构建失败时 pkg 里可能只有一部分文件，甚至为空；空目录下
-          # pkg/* 不会被展开，gh 会收到字面量 "pkg/*" 而报错，所以先判空。
-          have=$(find pkg -maxdepth 1 -type f -name '*.nro' | head -1)
-          if [ -z "$have" ]; then
-            echo "!! pkg 里没有任何 .nro，跳过发布"
-            exit 1
+          if [ ! -f "$NOTES" ]; then echo "::warning::缺少 $NOTES"; exit 0; fi
+
+          # 不假设 download-artifact 的落地层级：递归找 .nro，有几个发几个。
+          mapfile -t NROS < <(find pkg -type f -name '*.nro')
+          if [ "${#NROS[@]}" -eq 0 ]; then
+            echo "::warning::pkg 里没有任何 .nro，跳过发布（artifact 仍在本次 run 上）"
+            exit 0
           fi
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" pkg/* --clobber
-            gh release edit "$TAG" --title "$TITLE" --notes-file "$NOTES"
-          else
-            gh release create "$TAG" pkg/* --title "$TITLE" --notes-file "$NOTES" --prerelease
+          echo "将发布 ${#NROS[@]} 个 NRO"
+          printf '  %s\n' "${NROS[@]}"
+
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --title "$TITLE" --notes-file "$NOTES" --prerelease \
+              || { echo "::warning::创建 release 失败"; exit 0; }
           fi
-          gh release view "$TAG" --json assets --jq '.assets[] | "  " + .name + "  " + (.size|tostring) + " B"'
+
+          rc=0
+          for f in "${NROS[@]}"; do
+            if gh release upload "$TAG" "$f" --clobber; then
+              echo "  上传 OK: $(basename "$f")"
+            else
+              echo "::warning::上传失败: $f"
+              rc=1
+            fi
+          done
+          gh release edit "$TAG" --title "$TITLE" --notes-file "$NOTES" || true
+          gh release view "$TAG" --json assets \
+            --jq '.assets[] | "  " + .name + "  " + (.size|tostring) + " B"' || true
+          exit $rc
