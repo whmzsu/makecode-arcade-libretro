@@ -140,32 +140,54 @@ jobs:
       - name: 拉 RetroArch 源码
         env:
           REF: ${{ github.event.inputs.retroarch_ref || 'v1.22.2' }}
+          GIT_TERMINAL_PROMPT: "0"
         run: |
-          set -euo pipefail
-          git clone --depth 1 --branch "$REF" --recursive \
-            https://github.com/libretro/RetroArch.git /tmp/ra
-          cd /tmp/ra && git log --oneline -1
+          set +e
+          out=$(mktemp)
+          (
+            set -u
+            echo "ref=$REF"
+            command -v git >/dev/null || { apt-get update -qq && apt-get install -y -qq git; }
+            rm -rf /tmp/ra
+            git clone --depth 1 --branch "$REF" --recursive \
+              https://github.com/libretro/RetroArch.git /tmp/ra || exit 1
+            cd /tmp/ra && git log --oneline -1
+            ls Makefile.libnx version.all >/dev/null || { echo "源码里没有 Makefile.libnx"; exit 1; }
+          ) > "$out" 2>&1
+          rc=$?
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::拉源码失败（rc=$rc）"
+            tail -25 "$out" | cut -c1-300 | sed 's/^/::error::  /'
+            exit 1
+          fi
+          tail -5 "$out"
 
       - name: 链出 NRO
         run: |
-          set -u
-          export PATH="${DEVKITPRO:-/opt/devkitpro}/devkitA64/bin:${DEVKITPRO:-/opt/devkitpro}/tools/bin:$PATH"
-          cd /tmp/ra
-          # 官方约定：core 静态库必须以 libretro_libnx.a 的名字出现在源码根目录，
-          # Makefile.libnx 会把它直接加进链接输入（OFILES += libretro_libnx.a）
-          cp /tmp/nx-core/makecode_arcade_libretro_libnx.a libretro_libnx.a
-          log=/tmp/nx-nro.log
-          if ! make -f Makefile.libnx -j"$(nproc)" > "$log" 2>&1; then
-            echo "::error::NRO 链接失败"
-            grep -E 'undefined reference|cannot find|error:|Error [0-9]|No rule' "$log" \
-              | head -20 | sed 's/^/::error::  /'
-            tail -15 "$log" | sed 's/^/::error::  /'
+          set +e
+          out=$(mktemp)
+          (
+            set -u
+            export PATH="${DEVKITPRO:-/opt/devkitpro}/devkitA64/bin:${DEVKITPRO:-/opt/devkitpro}/tools/bin:$PATH"
+            cd /tmp/ra || exit 1
+            # 官方约定：core 静态库必须以 libretro_libnx.a 的名字出现在源码根目录，
+            # Makefile.libnx 会把它直接加进链接输入（OFILES += libretro_libnx.a）
+            cp /tmp/nx-core/makecode_arcade_libretro_libnx.a libretro_libnx.a || exit 1
+            make -f Makefile.libnx -j"$(nproc)" || exit 1
+            ls -l retroarch_switch.nro || exit 1
+            mkdir -p /tmp/pkg/core
+            cp retroarch_switch.nro /tmp/pkg/core/makecode_arcade_libretro_libnx.nro
+          ) > "$out" 2>&1
+          rc=$?
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::NRO 构建/链接失败（rc=$rc）"
+            grep -E 'undefined reference|cannot find|error:|Error [0-9]|No rule|No such file' "$out" \
+              | head -20 | cut -c1-300 | sed 's/^/::error::  /'
+            echo "::error::日志尾部（滤掉超长编译命令行）："
+            awk 'length($0) < 300' "$out" | tail -20 | cut -c1-300 | sed 's/^/::error::  /'
             exit 1
           fi
-          ls -l retroarch_switch.nro
-          # 打包：NRO + .info + 安装说明
-          mkdir -p /tmp/pkg/core
-          cp retroarch_switch.nro /tmp/pkg/core/makecode_arcade_libretro_libnx.nro
+          ls -l /tmp/pkg/core/
 
       - name: 打 zip（含 .info 与说明）
         run: |
