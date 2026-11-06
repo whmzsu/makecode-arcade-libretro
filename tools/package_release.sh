@@ -85,19 +85,11 @@ VERSION="$(sed -n 's/.*kCoreVersion = "\([^"]*\)".*/\1/p' \
            "$PROJ/core/src/libretro_core.cpp" | head -1)"
 [ -z "$VERSION" ] && VERSION="0.0.0"
 
-INFO_META="display_name = \"MakeCode Arcade (unofficial)\"
-authors = \"whmzsu and contributors\"
-supported_extensions = \"pxt64\"
-corename = \"MakeCode Arcade\"
-manufacturer = \"Microsoft\"
-categories = \"Game engine\"
-systemname = \"MakeCode Arcade\"
-systemid = \"makecode_arcade\"
-license = \"MIT\"
-permissions = \"\"
-display_version = \"$VERSION\"
-supports_no_game = \"false\"
-notes = \"Unofficial core: not affiliated with or endorsed by Microsoft. 64-BIT FRONTENDS ONLY: cartridge images are PXT64-only (the official pxt compiler has no 32-bit output and the runtime's PXT32 image patching is an unimplemented upstream TODO), so 32-bit builds can load but cannot run anything. Plays ONLY .pxt64 bytecode images - the file browser lists .pxt64 files only. MakeCode Arcade .png cartridges contain source code only, NOT a playable game: convert them FIRST with cartconv (github.com/whmzsu/makecode-arcade-cartconv). Buttons are remappable under Quick Menu > Controls (Start = in-game menu, Select = reset); the core exposes no options.\""
+# .info 模板：display_version 用 @VERSION@ 占位，CI 的 NX 打包（.github/
+# workflows/nx.yml）也读同一份，避免版本号在两处各写一遍而漂移。
+INFO_TMPL="$PROJ/tools/core.info.in"
+[ -f "$INFO_TMPL" ] || { echo "缺少 $INFO_TMPL" >&2; exit 1; }
+INFO_META="$(sed "s|@VERSION@|$VERSION|" "$INFO_TMPL")"
 
 # 只在"可加载的核心二进制"里挑，绝不靠 glob 顺序。
 # 血泪教训（v0.3.0/v0.3.1 的 Windows 包）：`compgen -G ... | head -1` 在 CI 的

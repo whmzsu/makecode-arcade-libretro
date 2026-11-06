@@ -1,0 +1,179 @@
+# NX（Nintendo Switch）构建
+#
+# Switch 没有 dlopen：core 只能编成静态库，由 RetroArch 的 Makefile.libnx
+# 连同前端一起链成 retroarch_switch.nro（一个 NRO 内含且仅含一个 core）。
+# 因此这条线是两级构建：
+#   core-libnx  make -C core platform=libnx        -> makecode_arcade_libretro_libnx.a
+#   nro         把 .a 改名 libretro_libnx.a 放进 RetroArch 源码，make -f Makefile.libnx
+#
+# 与主 build.yml 分开：NRO 要拉 RetroArch 源码 + 装一堆 portlibs，耗时十几分钟，
+# 不适合每次 push 都跑。这里用 workflow_dispatch（手动）+ core-v* tag 触发。
+name: NX (Switch)
+
+on:
+  workflow_dispatch:
+    inputs:
+      retroarch_ref:
+        description: "RetroArch tag/branch（留空用默认值）"
+        required: false
+        default: "v1.22.2"
+  push:
+    branches:
+      - main
+    # 只在 core 侧或本 workflow 变动时跑（NRO 全量构建要十几分钟，
+    # 不适合像 build.yml 那样每次 push 都跑）
+    paths:
+      - ".github/workflows/nx.yml"
+      - "core/Makefile"
+      - "core/src/**"
+      - "core/third_party/**"
+      - "runtime/**"
+      - "tools/core.info.in"
+    tags:
+      - "core-v*"
+
+concurrency:
+  group: nx-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ------------------------------------------------------------ 静态库
+  core-libnx:
+    name: core (.a / devkitA64)
+    runs-on: ubuntu-24.04
+    container:
+      image: devkitpro/devkita64:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 编译静态库
+        run: |
+          set -u
+          echo "DEVKITPRO=${DEVKITPRO:-<unset>}"
+          log=/tmp/nx-build.log
+          if ! make -C core platform=libnx -j"$(nproc)" > "$log" 2>&1; then
+            first=$(grep -n -m1 'error:' "$log" | cut -d: -f1 || true)
+            if [ -n "${first:-}" ]; then
+              sed -n "$((first > 6 ? first - 6 : 1)),$((first + 4))p" "$log" | sed 's/^/::error::nx /'
+            fi
+            grep -E 'error:|Error [0-9]|No such file' "$log" | head -15 | sed 's/^/::error::  /'
+            exit 1
+          fi
+          tail -3 "$log"
+          ls -l core/makecode_arcade_libretro_libnx.a
+
+      - name: 校验 .a（架构 + retro_* 全局符号）
+        run: |
+          set -euo pipefail
+          a=core/makecode_arcade_libretro_libnx.a
+          obj=$(aarch64-none-elf-ar t "$a" | head -1)
+          echo "首个成员: $obj"
+          mkdir -p /tmp/probe && cd /tmp/probe
+          aarch64-none-elf-ar x "$GITHUB_WORKSPACE/$a" "$obj"
+          aarch64-none-elf-readelf -h "$obj" | grep -E 'Class:|Machine:'
+          aarch64-none-elf-readelf -h "$obj" | grep -q 'AArch64' || { echo "::error::不是 AArch64 对象"; exit 1; }
+          cd "$GITHUB_WORKSPACE"
+          n=$(aarch64-none-elf-nm --defined-only -g "$a" | grep -cE ' T retro_' || true)
+          echo "导出的 retro_* 全局符号: $n 个"
+          [ "$n" -ge 20 ] || { echo "::error::retro_* 符号不足（$n）"; exit 1; }
+          for s in retro_init retro_run retro_load_game retro_set_environment; do
+            aarch64-none-elf-nm --defined-only -g "$a" | grep -qE " T $s\$" \
+              || { echo "::error::缺 $s"; exit 1; }
+          done
+
+      - name: 上传 .a
+        uses: actions/upload-artifact@v4
+        with:
+          name: nx-core-libnx
+          path: core/makecode_arcade_libretro_libnx.a
+          if-no-files-found: error
+
+  # ------------------------------------------------------------ NRO 打包
+  nro:
+    name: NRO (RetroArch + core)
+    needs: core-libnx
+    runs-on: ubuntu-24.04
+    container:
+      image: devkitpro/devkita64:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 取回静态库
+        uses: actions/download-artifact@v4
+        with:
+          name: nx-core-libnx
+          path: /tmp/nx-core
+
+      - name: 装 portlibs（RetroArch NX 的链接依赖）
+        run: |
+          set -u
+          dkp-pacman -S --noconfirm --needed \
+            switch-ffmpeg switch-libvpx switch-opus switch-libpng \
+            switch-zlib switch-bzip2 switch-liblzma switch-libexpat \
+            switch-mesa switch-libdrm_nouveau 2>&1 | tail -5
+          # 镜像里不一定有 zip（打包用）
+          command -v zip >/dev/null || { apt-get update -qq && apt-get install -y -qq zip; }
+
+      - name: 拉 RetroArch 源码
+        env:
+          REF: ${{ github.event.inputs.retroarch_ref || 'v1.22.2' }}
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch "$REF" --recursive \
+            https://github.com/libretro/RetroArch.git /tmp/ra
+          cd /tmp/ra && git log --oneline -1
+
+      - name: 链出 NRO
+        run: |
+          set -u
+          cd /tmp/ra
+          # 官方约定：core 静态库必须以 libretro_libnx.a 的名字出现在源码根目录，
+          # Makefile.libnx 会把它直接加进链接输入（OFILES += libretro_libnx.a）
+          cp /tmp/nx-core/makecode_arcade_libretro_libnx.a libretro_libnx.a
+          log=/tmp/nx-nro.log
+          if ! make -f Makefile.libnx -j"$(nproc)" > "$log" 2>&1; then
+            echo "::error::NRO 链接失败"
+            grep -E 'undefined reference|cannot find|error:|Error [0-9]|No rule' "$log" \
+              | head -20 | sed 's/^/::error::  /'
+            tail -15 "$log" | sed 's/^/::error::  /'
+            exit 1
+          fi
+          ls -l retroarch_switch.nro
+          # 打包：NRO + .info + 安装说明
+          mkdir -p /tmp/pkg/core
+          cp retroarch_switch.nro /tmp/pkg/core/makecode_arcade_libretro_libnx.nro
+
+      - name: 打 zip（含 .info 与说明）
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+          # .info 与发版包用同一份模板，版本号取自源码 kCoreVersion（单点）
+          VERSION="$(sed -n 's/.*kCoreVersion = "\([^"]*\)".*/\1/p' core/src/libretro_core.cpp | head -1)"
+          [ -n "$VERSION" ] || { echo "::error::读不到 kCoreVersion"; exit 1; }
+          sed "s|@VERSION@|$VERSION|" tools/core.info.in > /tmp/pkg/makecode_arcade_libretro.info
+          grep -E 'display_(name|version)' /tmp/pkg/makecode_arcade_libretro.info
+          cd /tmp/pkg
+          cat > 安装说明.txt <<'EOF'
+MakeCode Arcade —— Nintendo Switch（RetroArch NX）
+=================================================
+
+1. 把 makecode_arcade_libretro_libnx.nro 和 makecode_arcade_libretro.info
+   一起拷到 SD 卡：sdmc:/retroarch/cores/
+2. 卡带（*.pxt64）随便放，例如 sdmc:/roms/makecode/
+3. 在 hbmenu 里启动这个 NRO（它自带 RetroArch 前端），
+   加载 core 后打开卡带即可。
+
+注意：Switch 没有 dlopen，所以每个 core 都是一个独立 NRO（官方同样是这个形态，
+在线更新器里下载的 core 就是一个个 .nro）。更新 core = 换掉这个 NRO。
+建议以 title takeover 方式启动（按住 R 点任意游戏进 hbmenu），
+可获得完整内存；applet 模式（相册入口）也能跑，但内存只有 448MB。
+EOF
+          zip -q -r makecode_arcade_switch.zip core makecode_arcade_libretro.info 安装说明.txt
+          ls -l makecode_arcade_switch.zip
+
+      - name: 上传 zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: nx-switch-nro
+          path: /tmp/pkg/makecode_arcade_switch.zip
+          if-no-files-found: error

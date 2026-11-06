@@ -12,6 +12,8 @@
 #   win / win64         MinGW（.dll）
 #   osx / osx-arm64     macOS（.dylib）
 #   android             需配合 NDK 工具链（CI 走 jni/，见 core/jni/Android.mk）
+#   libnx               Nintendo Switch 裸机（devkitA64 + libnx），产**静态库**
+#                       ——Switch 没有 dlopen，core 是 .a 链进 RetroArch NRO
 #
 # 用法示例：
 #   make                                   本机构建
@@ -71,7 +73,27 @@ INCFLAGS := -I$(CORE_DIR)/src -I$(CORE_DIR)/third_party/miniz \
             -I$(CORE_DIR)/third_party/lzma -I$(PXTAPP_DIR)
 
 # ---------------------------------------------------------------- 目标形态
-ifneq (,$(findstring win,$(platform)))
+ifneq (,$(findstring libnx,$(platform)))
+   # Nintendo Switch：裸机 aarch64（newlib + libnx），没有动态链接。
+   # 产物是静态库，由 RetroArch 的 Makefile.libnx 连同自身一起链进
+   # retroarch_switch.nro（官方把 core 改名 libretro_libnx.a 放源码根目录）。
+   # 编译参数与 RetroArch 的 ARCH 保持一致，否则对象与前端 ABI/指令集不匹配。
+   STATIC_LINKING := 1
+   TARGET  := $(CORE_DIR)/$(TARGET_NAME)_libnx.a
+   ifeq ($(DEVKITPRO),)
+      $(error platform=libnx 需要 DEVKITPRO：devkitPro 装好后 source /etc/profile.d/devkit-env.sh（或 docker 用 devkitpro/devkita64 镜像）)
+   endif
+   # 显式指定工具链：CI/本地 shell 里若导出了 CC=zig 之类会污染构建
+   CC  := $(DEVKITPRO)/devkitA64/bin/aarch64-none-elf-gcc
+   CXX := $(DEVKITPRO)/devkitA64/bin/aarch64-none-elf-g++
+   AR  := $(DEVKITPRO)/devkitA64/bin/aarch64-none-elf-ar
+   NX_ARCH := -march=armv8-a -mtune=cortex-a57 -mtp=soft -fPIE -mcpu=cortex-a57+crc+fp+simd
+   # 裸机没有 -fPIC 共享对象概念，PIE 才是 NRO 的正确模型
+   CXXFLAGS := $(filter-out -fPIC,$(CXXFLAGS)) $(NX_ARCH) -fdata-sections
+   CFLAGS   := $(filter-out -fPIC,$(CFLAGS)) $(NX_ARCH) -fdata-sections
+   CXXFLAGS += -D__SWITCH__ -DHAVE_LIBNX
+   CFLAGS   += -D__SWITCH__ -DHAVE_LIBNX
+else ifneq (,$(findstring win,$(platform)))
    TARGET  := $(CORE_DIR)/$(TARGET_NAME).dll
    LDFLAGS += -shared -Wl,--export-all-symbols
    # Windows PE 不需要 -fPIC；MinGW 对 -fPIC 只会多一层间接
@@ -140,8 +162,15 @@ DEPS      := $(OBJECTS:.o=.d)
 # ---------------------------------------------------------------- 规则
 all: $(TARGET)
 
+ifeq ($(STATIC_LINKING),1)
+# 静态库：不链接，只归档（符号解析留给 RetroArch 的 NRO 链接阶段）
+$(TARGET): $(OBJECTS)
+	@rm -f $@
+	$(AR) rcs $@ $(OBJECTS)
+else
 $(TARGET): $(OBJECTS)
 	$(CXX) $(LDFLAGS) -o $@ $(OBJECTS) $(LDLIBS)
+endif
 
 $(OBJ_DIR)/vm/%.o: $(PXTAPP_DIR)/%.cpp
 	@mkdir -p $(dir $@)
