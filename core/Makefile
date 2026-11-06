@@ -91,8 +91,8 @@ ifneq (,$(findstring libnx,$(platform)))
    # 裸机没有 -fPIC 共享对象概念，PIE 才是 NRO 的正确模型
    CXXFLAGS := $(filter-out -fPIC,$(CXXFLAGS)) $(NX_ARCH) -fdata-sections
    CFLAGS   := $(filter-out -fPIC,$(CFLAGS)) $(NX_ARCH) -fdata-sections
-   CXXFLAGS += -D__SWITCH__ -DHAVE_LIBNX
-   CFLAGS   += -D__SWITCH__ -DHAVE_LIBNX
+   CXXFLAGS += -D__SWITCH__ -DHAVE_LIBNX -D_GNU_SOURCE
+   CFLAGS   += -D__SWITCH__ -DHAVE_LIBNX -D_GNU_SOURCE
 else ifneq (,$(findstring win,$(platform)))
    TARGET  := $(CORE_DIR)/$(TARGET_NAME).dll
    LDFLAGS += -shared -Wl,--export-all-symbols
