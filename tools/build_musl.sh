@@ -18,6 +18,16 @@
 
 set -euo pipefail
 
+CC="${CC:-}"
+CXX="${CXX:-}"
+if [ -z "$CC" ] || [ -z "$CXX" ]; then
+  # 自动探测两种常见 triplet：musl.cc（aarch64-linux-musl-*）与
+  # dockcross（aarch64-unknown-linux-musl-*）
+  for p in aarch64-linux-musl aarch64-unknown-linux-musl; do
+    if [ -z "$CC" ] && command -v "$p-gcc" >/dev/null 2>&1; then CC="$p-gcc"; fi
+    if [ -z "$CXX" ] && command -v "$p-g++" >/dev/null 2>&1; then CXX="$p-g++"; fi
+  done
+fi
 CC="${CC:-aarch64-linux-musl-gcc}"
 CXX="${CXX:-aarch64-linux-musl-g++}"
 
