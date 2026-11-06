@@ -655,9 +655,18 @@ jobs:
   # ------------------------------------------------------------------ macOS
   # 实验：Makefile 支持 osx，但本机没有 macOS 工具链，作者未在真机验证过
   # 加载/音频；先只做"编得过"的观察，红了不算回归失败（continue-on-error）
+  #
+  # 镜像是 macos-15（Intel x64），不是 macos-14 —— 后者已于 2026-11-02 被
+  # GitHub 整体退役，用它会得到 "The configuration 'macos-14-arm64-us-default'
+  # is not supported"，job 一秒结束、runner_name 为空、steps 为 0，看起来像
+  # 神秘失败，实际是机器借不到。
+  # 注意 continue-on-error 的副作用：这种"借不到机器"的失败不会让 run 变红，
+  # 会静默存在（本次就是退役 4 天后才被发现）。这个 job 红了要主动去看。
+  # macos-15 同样有退役周期（GitHub 只保留最近两个大版本），届时按
+  # https://github.com/actions/runner-images 的选举表迁移到 macos-latest。
   macos:
     name: macos-universal (实验)
-    runs-on: macos-14
+    runs-on: macos-15
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
