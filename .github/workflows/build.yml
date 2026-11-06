@@ -499,15 +499,16 @@ jobs:
           docker run --rm \
             -v "$PWD":/work -w /work \
             dockcross/linux-arm64-musl:latest \
-            bash -c 'echo "CC=$CC"; echo "CXX=$CXX"; tools/build_musl.sh' \
+            bash -c 'echo "triplet: ${CC:-unset}"; bash tools/build_musl.sh' \
             > "$log" 2>&1 || true
           tail -8 "$log"
-          # docker run 的退出码经 tee/重定向可能丢失，用自检输出兜底
-          grep -q "自检通过" "$log" || {
-            echo "::error::musl 构建未通过自检："
-            grep -E "error|错误|Error|not found" "$log" | head -10 | sed 's/^/::error::  /'
+          # docker run 的退出码经重定向可能丢失，用自检输出兜底；
+          # 失败时把日志尾部转成注解（公开可读，不需要鉴权下日志）
+          if ! grep -q "自检通过" "$log"; then
+            echo "::error::musl 构建未通过自检，日志尾部："
+            tail -30 "$log" | sed 's/^/::error::  /'
             exit 1
-          }
+          fi
 
       - name: 检查产物（AArch64 + 零 NEEDED + 导出符号）
         run: |
