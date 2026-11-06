@@ -163,10 +163,20 @@ DEPS      := $(OBJECTS:.o=.d)
 all: $(TARGET)
 
 ifeq ($(STATIC_LINKING),1)
-# 静态库：不链接，只归档（符号解析留给 RetroArch 的 NRO 链接阶段）
+# 静态库：不链接，只归档（符号解析留给 RetroArch 的 NRO 链接阶段）。
+# 必须先把对象拷成"路径扁平化"的唯一文件名：GNU ar 默认丢弃目录、只存基名，
+# 而 pxtapp 里 base/control.cpp 与 core---vm/control.cpp 同名，直接归档会
+# 让后一个成员静默覆盖前一个（符号就没了，链接期才炸，极难查）。
+FLAT_DIR := $(BUILD_DIR)/flat
 $(TARGET): $(OBJECTS)
-	@rm -f $@
-	$(AR) rcs $@ $(OBJECTS)
+	@rm -rf $(FLAT_DIR) $@
+	@mkdir -p $(FLAT_DIR)
+	@for o in $(OBJECTS); do cp "$$o" "$(FLAT_DIR)/$$(printf '%s' "$$o" | tr '/' '_')"; done
+	$(AR) rcs $@ $(FLAT_DIR)/*.o
+	@narm=$$($(AR) t $@ | wc -l); nobj=$(words $(OBJECTS)); \
+	 if [ "$$narm" -ne "$$nobj" ]; then \
+	   echo "归档成员数 $$narm != 对象数 $$nobj（有重名成员被覆盖）" >&2; exit 1; fi; \
+	 echo "  $$narm 个对象已归档"
 else
 $(TARGET): $(OBJECTS)
 	$(CXX) $(LDFLAGS) -o $@ $(OBJECTS) $(LDLIBS)

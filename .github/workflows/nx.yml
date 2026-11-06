@@ -50,11 +50,12 @@ jobs:
           echo "DEVKITPRO=${DEVKITPRO:-<unset>}"
           log=/tmp/nx-build.log
           if ! make -C core platform=libnx -j"$(nproc)" > "$log" 2>&1; then
-            first=$(grep -n -m1 'error:' "$log" | cut -d: -f1 || true)
-            if [ -n "${first:-}" ]; then
-              sed -n "$((first > 6 ? first - 6 : 1)),$((first + 4))p" "$log" | sed 's/^/::error::nx /'
-            fi
-            grep -E 'error:|Error [0-9]|No such file' "$log" | head -15 | sed 's/^/::error::  /'
+            echo "::error::make 返回非零"
+            # 关键行优先（截断超长的编译命令行，注解有长度限制）
+            grep -nE 'error:|Error [0-9]|undefined reference|cannot find|No such file|No rule' "$log" \
+              | head -20 | cut -c1-300 | sed 's/^/::error::  /'
+            echo "::error::日志尾部（已滤掉编译命令行）："
+            awk 'length($0) < 300' "$log" | tail -20 | cut -c1-300 | sed 's/^/::error::  /'
             exit 1
           fi
           tail -3 "$log"
@@ -62,22 +63,29 @@ jobs:
 
       - name: 校验 .a（架构 + retro_* 全局符号）
         run: |
-          set -euo pipefail
+          # 不用 set -e：每一步显式判错并转成注解（日志匿名不可读，只能靠注解看）
+          set -uo pipefail
+          fail() { echo "::error::$*"; exit 1; }
           a=core/makecode_arcade_libretro_libnx.a
-          obj=$(aarch64-none-elf-ar t "$a" | head -1)
+          [ -f "$a" ] || fail "没生成 $a"
+          obj=$(aarch64-none-elf-ar t "$a" 2>/dev/null | head -1)
+          [ -n "$obj" ] || fail "ar t 读不出成员"
           echo "首个成员: $obj"
-          mkdir -p /tmp/probe && cd /tmp/probe
-          aarch64-none-elf-ar x "$GITHUB_WORKSPACE/$a" "$obj"
-          aarch64-none-elf-readelf -h "$obj" | grep -E 'Class:|Machine:'
-          aarch64-none-elf-readelf -h "$obj" | grep -q 'AArch64' || { echo "::error::不是 AArch64 对象"; exit 1; }
-          cd "$GITHUB_WORKSPACE"
+          aarch64-none-elf-ar p "$a" "$obj" > /tmp/probe.o || fail "ar p 提取失败"
+          aarch64-none-elf-readelf -h /tmp/probe.o | grep -E 'Class:|Machine:' || fail "readelf 失败"
+          aarch64-none-elf-readelf -h /tmp/probe.o | grep -q 'AArch64' || fail "不是 AArch64 对象"
+          # 对象数 vs 成员数：防止同名对象被 ar 覆盖（会静默丢符号）
+          nobj=$(find core/build/make/libnx/obj -name '*.o' | wc -l)
+          narm=$(aarch64-none-elf-ar t "$a" | wc -l)
+          echo "对象 $nobj 个 / 归档成员 $narm 个"
+          [ "$nobj" -eq "$narm" ] || fail "归档成员数($narm)与对象数($nobj)不一致：有同名成员被覆盖"
           n=$(aarch64-none-elf-nm --defined-only -g "$a" | grep -cE ' T retro_' || true)
           echo "导出的 retro_* 全局符号: $n 个"
-          [ "$n" -ge 20 ] || { echo "::error::retro_* 符号不足（$n）"; exit 1; }
+          [ "$n" -ge 20 ] || fail "retro_* 符号不足（$n）"
           for s in retro_init retro_run retro_load_game retro_set_environment; do
-            aarch64-none-elf-nm --defined-only -g "$a" | grep -qE " T $s\$" \
-              || { echo "::error::缺 $s"; exit 1; }
+            aarch64-none-elf-nm --defined-only -g "$a" | grep -qE " T $s\$" || fail "缺 $s"
           done
+          echo "校验通过"
 
       - name: 上传 .a
         uses: actions/upload-artifact@v4
