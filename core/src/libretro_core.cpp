@@ -261,7 +261,50 @@ static void set_controller_info() {
     g_env(RETRO_ENVIRONMENT_SET_CONTROLLER_INFO, infos);
 }
 
+// ---- NX 开机 trace -------------------------------------------------------
+//
+// Switch 上既拿不到前端日志（RetroArch 的 stdout 只在 nxlink 时可见），也没有
+// gdb，真机报障往往只剩"一启动就报错"一句话。所以核心自己在最早的时机把里程碑
+// 写进 sdmc:/switch/mca_boot.log，**写一行 flush 一行** —— 进程崩在下一行之前，
+// 最后一行就是最后到达的位置。
+//
+// 只写十几次（启动 + 装载 + 首帧），不在每帧路径上，对性能没有影响。
+#if defined(__SWITCH__)
+namespace {
+FILE* g_nx_boot = nullptr;
+int   g_nx_boot_tries = 0;
+
+void nxBoot(const char* fmt, ...) {
+    if (!g_nx_boot) {
+        if (g_nx_boot_tries >= 4) return;   // 反复失败就别每帧重试了
+        // 第一次尝试截断重建（否则会把上一次会话的内容当成这次的结果）；
+        // 后续重试用追加，避免把已经写下的行冲掉。
+        const char* mode = (g_nx_boot_tries == 0) ? "w" : "a";
+        ++g_nx_boot_tries;
+        g_nx_boot = std::fopen("sdmc:/switch/mca_boot.log", mode);
+        if (!g_nx_boot) return;
+    }
+    char buf[256];
+    va_list ap;
+    va_start(ap, fmt);
+    std::vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+    std::fputs(buf, g_nx_boot);
+    std::fputc('\n', g_nx_boot);
+    std::fflush(g_nx_boot);
+}
+
+// 构造函数：只要本文件的目标文件被链进 NRO，这个函数就在 main 之前跑。
+// 日志里有这一行 = 我们的代码真的被执行了，而不只是被链进来。
+__attribute__((constructor)) void nxBootCtor(void) { nxBoot("[boot] ctor"); }
+} // namespace
+#define MCA_NX_BOOT(...) nxBoot(__VA_ARGS__)
+#else
+#define MCA_NX_BOOT(...) ((void)0)
+#endif
+
 void retro_set_environment(retro_environment_t cb) {
+    MCA_NX_BOOT("[boot] set_environment");
     g_env = cb;
     if (!g_env) return;
 
@@ -286,6 +329,7 @@ void retro_set_input_poll(retro_input_poll_t cb) { g_input_poll = cb; }
 void retro_set_input_state(retro_input_state_t cb) { g_input_state = cb; }
 
 void retro_init(void) {
+    MCA_NX_BOOT("[boot] retro_init enter");
     g_frame = 0;
     g_game_loaded = false;
 #ifdef _WIN32
@@ -294,6 +338,7 @@ void retro_init(void) {
     fflush(stderr);
 #endif
     log_printf(RETRO_LOG_INFO, "[MCA] core init (route B skeleton)\n");
+    MCA_NX_BOOT("[boot] retro_init done");
 }
 
 void retro_deinit(void) {
@@ -305,6 +350,7 @@ void retro_deinit(void) {
 unsigned retro_api_version(void) { return RETRO_API_VERSION; }
 
 void retro_get_system_info(struct retro_system_info* info) {
+    MCA_NX_BOOT("[boot] get_system_info");
     info->library_name = "MakeCode Arcade (route B)";
     info->library_version = kCoreVersion;
     info->need_fullpath = false;
@@ -399,6 +445,8 @@ bool load_pxt64(const uint8_t* data, size_t size) {
 } // namespace
 
 bool retro_load_game(const struct retro_game_info* game) {
+    MCA_NX_BOOT("[boot] load_game enter (size=%u)",
+                (unsigned)(game && game->size ? game->size : 0));
     if (!set_pixel_format_if_needed()) {
         log_printf(RETRO_LOG_WARN, "[MCA] frontend rejected RGB565\n");
     }
@@ -451,6 +499,7 @@ bool retro_load_game(const struct retro_game_info* game) {
     }
 
     if (load_pxt64(data, size)) {
+        MCA_NX_BOOT("[boot] vm started (image %u bytes)", pxt::mca_image_bytes());
         // 镜像字节数取 VM 实际拿到的长度（.pxt64 尾部还有源码映射段，比文件小）
         log_printf(RETRO_LOG_INFO, "[MCA] VM started (image %u bytes, cart %llu bytes)\n",
                    pxt::mca_image_bytes(), (unsigned long long)size);
@@ -467,6 +516,7 @@ bool retro_load_game(const struct retro_game_info* game) {
     }
 
     log_printf(RETRO_LOG_ERROR, "[MCA] failed to start VM\n");
+    MCA_NX_BOOT("[boot] vm start FAILED");
     // 启动半途失败时 VM 线程可能已经起来了（pxt_vm_start_buffer 立刻 spawn），
     // 这里必须收掉；否则前端随后 dlclose 就是"线程跑已卸载代码"的崩溃。
     vm_stop();
@@ -630,7 +680,10 @@ void render_vm_frame() {
 void retro_run(void) {
     if (g_input_poll) g_input_poll();
 
-    if (g_frame == 0) log_printf(RETRO_LOG_INFO, "[MCA] first retro_run\n");
+    if (g_frame == 0) {
+        log_printf(RETRO_LOG_INFO, "[MCA] first retro_run\n");
+        MCA_NX_BOOT("[boot] first retro_run");
+    }
 
     if (runtime_available()) {
         const unsigned jp = read_joypad_mask();

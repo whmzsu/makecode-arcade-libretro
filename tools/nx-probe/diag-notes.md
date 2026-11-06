@@ -2,29 +2,49 @@
 
 ## 怎么用
 
-两个文件都放 `sdmc:/switch/`，然后按住 `R` 点任意已装游戏进 hbmenu，依次启动。
+全部放 `sdmc:/switch/`，按住 `R` 点任意已装游戏进 hbmenu，依次启动。
 
-### 1. `probe.nro`（先跑这个）
+### 1. `probe.nro`（纯 libnx 探针）
 
-纯 libnx 控制台程序，不建线程、不链第三方库。启动后屏幕上会打印：
+控制台程序，不建线程、不链第三方库。屏幕上打印构建期 libnx 版本、固件版本、applet 模式、内存。
 
-- 构建时用的 libnx 版本
-- 你机器的固件版本
-- applet 模式（相册 = 限内存 / title takeover = 全内存）
-- 本进程的可用内存与已用内存
+- 能看见这段字 → 工具链、ABI、hbmenu 启动路径都正常
+- 也崩 → libnx 与固件的 ABI 不兼容（与我们的代码无关）
 
-**判定**：
+### 2. `ra_plain.nro`（对照一：RetroArch 本体）
 
-- 能看见这段字 → 工具链、libnx 与固件 ABI、hbmenu 启动路径都正常，问题在 RetroArch 或核心
-- 也崩了 → 与我们的代码无关，是 libnx 与固件的 ABI 不兼容
+不含任何核心（`HAVE_STATIC_DUMMY=1`）。能进菜单 = 前端在这台机器上没问题。
 
-### 2. `ra_plain.nro`（控制组）
+### 3. `ra_stubcore.nro`（对照二：RetroArch + **空核心**）
 
-RetroArch 本体，**不含**本项目的核心（`HAVE_STATIC_DUMMY=1` 构建）。
+核心是 `tools/nx-probe/stub_core.c`，只实现 libretro 入口，一行业务逻辑都没有。
 
-- 它能进菜单、我们的 NRO 不能 → 问题在核心
-- 它一样崩 → 问题在 RetroArch 前端本身（官方 1.22.x 在新固件上的已知状况）
+- **也崩** → “静态核心链接/注册”这条路本身有问题，跟我们的代码无关
+- **能进菜单** → 机制没问题，问题在我们核心的目标代码
 
-## 备注
+### 4. `mca_boot.nro`（我们的核心 + 开机 trace）
 
-`ra_plain.nro` 是"尽力而为"产物，CI 里编不出来就不会出现在这里。
+正式核心，多了开机埋点。真机上会往
+
+```
+sdmc:/switch/mca_boot.log
+```
+
+按顺序写里程碑（写一行 flush 一行，崩在下一行之前，最后一行就是最后到达的位置）：
+
+```
+[boot] ctor              我们的目标代码被加载并执行了
+[boot] set_environment   RetroArch 开始和核心握手
+[boot] get_system_info   前端读核心信息
+[boot] retro_init enter / done
+[boot] load_game enter   开始加载卡带
+[boot] vm started        VM 起来了
+[boot] first retro_run   第一帧渲染
+```
+
+把这个文件的内容发出来，就能直接定位死在哪一步。**文件不存在**本身也是结论：说明崩在我们第一行 trace 之前（加载器或进程初始化阶段）。
+
+## 附带文件
+
+- `mca_boot.symbols.txt` — 核心 NRO 的符号表。崩溃报告里的模块内偏移可以靠它对到函数名。
+- `*-build.log` — 构建日志，编不出来时看这个。

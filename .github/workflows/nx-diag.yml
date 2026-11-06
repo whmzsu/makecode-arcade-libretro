@@ -1,10 +1,12 @@
 # NX 诊断产物（只在排查"一启动就崩"时用，不参与发版）
 #
-# 产出两个 NRO，用来把故障范围切开：
-#   probe.nro     纯 libnx 控制台程序（固件 / applet 模式 / 内存）
-#   ra_plain.nro  RetroArch 本体，不带我们的核心（尽力而为）
+# 产出四个 NRO，用来把故障范围切开：
+#   probe.nro       纯 libnx 控制台程序（固件 / applet 模式 / 内存）
+#   ra_plain.nro    RetroArch 本体，不带核心（HAVE_STATIC_DUMMY=1）
+#   ra_stubcore.nro RetroArch + 空核心（只为验证静态核心这条机制）
+#   mca_boot.nro    RetroArch + 我们的核心，带开机 trace 到 sdmc:/switch/mca_boot.log
 #
-# 触发：手动 workflow_dispatch，或 push 改了 tools/nx-probe/** 与本文件。
+# 触发：手动 workflow_dispatch，或 push 改了 tools/nx-probe/**、核心源码与本文件。
 name: NX diag (probe)
 
 on:
@@ -15,6 +17,9 @@ on:
     paths:
       - "tools/nx-probe/**"
       - ".github/workflows/nx-diag.yml"
+      - "core/src/**"
+      - "core/Makefile"
+      - "runtime/**"
 
 concurrency:
   group: nx-diag-${{ github.ref }}
@@ -50,6 +55,22 @@ jobs:
             # 压成一条多行注解（%0A 会被 GitHub 还原成换行）。
             msg=$(tail -40 "$out" | cut -c1-400 | sed -e 's/%/%25/g' -e ':a;N;$!ba;s/\n/%0A/g')
             echo "::error::诊断构建失败（rc=$rc）%0A$msg"
+            exit 1
+          fi
+
+      # 对照组：ra_stubcore（空核心）与 mca_boot（我们的核心 + 开机 trace）。
+      # 这一步要编我们的静态库 + 再克隆一份 RetroArch，耗时较长，但它是
+      # "机制问题还是我们的代码问题"的唯一干净判据。
+      - name: 构建对比 NRO（空核心 / 我们的核心）
+        run: |
+          set +e
+          out=$(mktemp)
+          bash tools/nx-probe/build-bisect.sh out/nx-diag > "$out" 2>&1
+          rc=$?
+          cat "$out"
+          if [ "$rc" -ne 0 ]; then
+            msg=$(tail -40 "$out" | cut -c1-400 | sed -e 's/%/%25/g' -e ':a;N;$!ba;s/\n/%0A/g')
+            echo "::error::对比构建失败（rc=$rc）%0A$msg"
             exit 1
           fi
 
