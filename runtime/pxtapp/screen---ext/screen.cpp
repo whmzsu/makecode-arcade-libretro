@@ -69,6 +69,16 @@ void setPalette(Buffer buf) {
 static pthread_mutex_t screenMutex;
 static int numGetPixels;
 
+// NX 诊断：把"取帧尺寸对不上"这类只在真机上看得见的事写进运行期日志。
+// 黑屏的一个直接可能：WDisplay 的 CFG_DISPLAY_HEIGHT 默认 128，而核心按 120
+// 报告 —— 对不上就走下面的蓝屏分支，玩家看到的就是"一片黑"。
+#if defined(MCA_NX_DIAG)
+extern "C" void mca_nx_runlog(const char *fmt, ...) __attribute__((weak));
+#define MCA_SCREEN_LOG(...) do { if (mca_nx_runlog) mca_nx_runlog(__VA_ARGS__); } while (0)
+#else
+#define MCA_SCREEN_LOG(...) ((void)0)
+#endif
+
 static void fill_screen(uint32_t *screen, int width, int height, uint32_t color) {
     const int n = width * height;
     for (int i = 0; i < n; ++i)
@@ -123,6 +133,10 @@ DLLEXPORT void pxt_screen_get_pixels(int width, int height, uint32_t *screen) {
         return;
     }
     numGetPixels++;
+    if (numGetPixels <= 2)
+        MCA_SCREEN_LOG("[screen] real frame #%d %dx%d panic=%d seq=%llu/%llu", numGetPixels,
+                       width, height, panicCode, (unsigned long long)mySeq,
+                       (unsigned long long)mcaPubSeq);
 
     if (mcaPubSeq < mySeq) {
         // 兜底路径：VM 没在预算内出帧（恐慌 / 卡顿 / 正在重置）。
@@ -133,6 +147,10 @@ DLLEXPORT void pxt_screen_get_pixels(int width, int height, uint32_t *screen) {
 
     if (width != disp->width || height != disp->height) {
         // 尺寸不符是镜像配置问题，蓝屏让玩家/开发者看得见，但不要杀前端
+        static int reported = 0;
+        if (reported++ < 3)
+            MCA_SCREEN_LOG("[screen] size mismatch core=%dx%d disp=%dx%d buf=%u",
+                           width, height, disp->width, disp->height, disp->screenBufSize);
         pthread_mutex_unlock(&screenMutex);
         fill_screen(screen, width, height, 0xff0000ff);
         return;
