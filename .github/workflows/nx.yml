@@ -7,7 +7,14 @@
 #   nro         把 .a 改名 libretro_libnx.a 放进 RetroArch 源码，make -f Makefile.libnx
 #
 # 与主 build.yml 分开：NRO 要拉 RetroArch 源码 + 装一堆 portlibs，耗时十几分钟，
-# 不适合每次 push 都跑。这里用 workflow_dispatch（手动）+ core-v* tag 触发。
+# 不适合每次 push 都跑。触发方式有三种：
+#   * push main（且改了 core/运行时）—— 回归，只出 artifact，不建 Release
+#   * workflow_dispatch             —— 手动回归，同上
+#   * push tag nx-v*                —— 发版，额外建 GitHub Release（见 release job）
+#
+# 为什么发版用独立的 nx-v* tag 而不是复用 core-v*：NRO 的产物形态与 6 个平台包
+# 完全不同（它内含前端本体），两者构建耗时也差一个量级，绑在一起会拖慢每一次
+# 核心发版。版本号仍与核心同步（nx-v0.3.3 ↔ core-v0.3.3）。
 name: NX (Switch)
 
 on:
@@ -20,10 +27,15 @@ on:
   push:
     branches:
       - main
+    # 发版 tag。注意 paths 过滤器对 tag push 不一定生效，所以 release-notes
+    # 也列进来——每次发版必然新增该文件，保证 tag 一定能触发。
+    tags:
+      - "nx-v*"
     # 只在 core 侧或本 workflow 变动时跑（NRO 全量构建要十几分钟，
     # 不适合像 build.yml 那样每次 push 都跑）
     paths:
       - ".github/workflows/nx.yml"
+      - ".github/release-notes/**"
       - "core/Makefile"
       - "core/src/**"
       - "core/third_party/**"
@@ -262,3 +274,80 @@ jobs:
           name: nx-switch-nro
           path: /tmp/pkg/makecode_arcade_switch.zip
           if-no-files-found: error
+
+  # ------------------------------------------------------------ 发版
+  # 只在推 nx-v* tag 时跑。与 build.yml 的 release job 同一个思路：
+  # 凭据用仓库内置 GITHUB_TOKEN（job 级 contents: write），不需要 PAT。
+  #
+  # 这里不做"发布前重新构建"的额外保险——nro job 已经断言过 NRO 里真的有
+  # 本核心的符号（链接成功但核心被丢掉的情况会被拦住），产物可信。
+  release:
+    name: release (nx-v*)
+    if: startsWith(github.ref, 'refs/tags/nx-v')
+    needs: [nro]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: nx-switch-nro
+          path: pkg
+
+      - name: 校验产物与 tag 一致
+        run: |
+          set +e
+          out=$(mktemp)
+          (
+            set -u
+            tag="${GITHUB_REF#refs/tags/}"
+            ver="${tag#nx-v}"
+            z=pkg/makecode_arcade_switch.zip
+            [ -f "$z" ] || { echo "没有 artifact $z"; exit 1; }
+            ls -l "$z"
+            python3 -c "import sys,zipfile;n=zipfile.ZipFile(sys.argv[1]).namelist();print('  '+'\n  '.join(n))" "$z"
+            # 包里必须真有 .nro 与 .info（只校验数量的老坑：发过只有调试符号的包）
+            python3 -c "import sys,zipfile;n=zipfile.ZipFile(sys.argv[1]).namelist();ok=any(x.endswith('.nro') for x in n) and any(x.endswith('.info') for x in n);sys.exit(0 if ok else 'zip 内容不全: '+str(n))" "$z" \
+              || { echo "zip 里缺 .nro 或 .info"; exit 1; }
+            got=$(python3 -c "import sys,zipfile,re;d=zipfile.ZipFile(sys.argv[1]).read('makecode_arcade_libretro.info').decode();print(re.search(r'display_version = \"([^\"]+)\"',d).group(1))" "$z")
+            echo ".info 版本: $got / tag 版本: $ver"
+            [ "$got" = "$ver" ] || { echo ".info 版本 $got 与 tag $ver 不符"; exit 1; }
+            notes=".github/release-notes/${tag}.md"
+            [ -f "$notes" ] || { echo "缺少发版说明 $notes"; exit 1; }
+            echo "发版说明: $notes"
+            echo "校验通过"
+          ) > "$out" 2>&1
+          rc=$?
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::发版校验失败（rc=$rc）"
+            tail -30 "$out" | cut -c1-300 | sed 's/^/::error::  /'
+            exit 1
+          fi
+          tail -10 "$out"
+
+      - name: 创建 Release 并上传
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF#refs/tags/}"
+          title="nx ${tag#nx-} - Switch NRO (RetroArch + core)"
+          notes=".github/release-notes/${tag}.md"
+          # 幂等：重推 tag / 手动 rerun 时更新而不是报错（与 build.yml 的
+          # release job 同一套写法）
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" pkg/makecode_arcade_switch.zip --clobber
+            gh release edit "$tag" --title "$title" --notes-file "$notes"
+          else
+            gh release create "$tag" pkg/makecode_arcade_switch.zip \
+              --title "$title" --notes-file "$notes"
+          fi
+          gh release view "$tag" --json url,assets \
+            --jq '.url, (.assets[] | "  " + .name + "  " + (.size|tostring) + " B")'
+
+      # 回填链接，方便在 Actions 里直接点开
+      - name: 输出 Release 地址
+        run: |
+          echo "https://github.com/${GITHUB_REPOSITORY}/releases/tag/${GITHUB_REF#refs/tags/}"

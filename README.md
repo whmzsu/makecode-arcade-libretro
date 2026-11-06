@@ -227,7 +227,9 @@ Switch **没有 `dlopen`**，核心不能像桌面那样丢一个 `.so` 进核�
 的产物是**静态库**（`makecode_arcade_libretro_libnx.a`，devkitA64 +
 `-fPIE`），由 RetroArch 的 `Makefile.libnx` 连同前端一起链成 NRO——
 **一个 NRO 内含且仅含一个核心**（官方在线更新器分发的也是这样一个个 `.nro`）。
-`tools/package_release.sh` 不参与这条线，由独立 workflow 负责：
+`tools/package_release.sh` 不参与这条线，由独立 workflow 负责。产物也不进
+6 平台发版矩阵，而是推 `nx-v*` tag 时**单独发一个 Release**（版本号与
+`core-v*` 同步，例如 `nx-v0.3.3` ↔ `core-v0.3.3`）：
 
 ```bash
 # .github/workflows/nx.yml 等价命令（devkitpro/devkita64 容器内）
@@ -288,8 +290,15 @@ cd ../makecode_arcade_cartconv/vm-build && npm install
 | `android-arm64` | 跑者自带 NDK + `core/jni/`（与官方模板同一套参数） | `.so` |
 | `zig-*`（x64/arm64 Windows + Linux x64/arm64） | **与本地发版同一工具链**（zig 0.17.0 + `tools/build_target.sh`） | `.so` / `.dll` |
 | `macos-universal` | Xcode clang，arm64+x86_64 | `.dylib`（实验，`continue-on-error`） |
-| `package` | 汇总发行版工具链产物 → `tools/package_release.sh` | 4 个 zip |
-| `release`（只在推 `core-v*` tag 时） | 汇总 `zig-*` + `android-*` 产物 → `package_release.sh` → `gh release create` | **5 个 zip**（含只有 zig 能出的 `windows-arm64`） |
+| `lakka-musl` | dockcross `linux-arm64-musl` + GNU ld `-shared -static` | `.so`（**全静态，零 NEEDED**，给 Lakka/LibreELEC 这类 musl 系统） |
+| `behavior-miniretro` | 真 aarch64 runner（`ubuntu-24.04-arm`）+ 第三方前端 miniretro | 900 帧冒烟（行为层，不是编译层） |
+| `package` | 汇总发行版工具链产物 → `tools/package_release.sh` | 5 个 zip |
+| `release`（只在推 `core-v*` tag 时） | 汇总 `zig-*` + `android-*` + `lakka-musl` 产物 → `package_release.sh` → `gh release create` | **6 个 zip**（含只有 zig 能出的 `windows-arm64`，以及只有 musl 工具链能出的 `lakka-arm64`） |
+
+NX（Switch）不在这张表里：它由独立的 `.github/workflows/nx.yml` 负责，
+**推 `nx-v*` tag 时单独建一个 Release**（与核心发版分开，因为 NRO 要拉
+RetroArch 源码 + 装 portlibs，十几分钟，绑进主流水线会拖慢每次核心发版）。
+产物形态也不同——NRO 内含前端本体，不是可丢进 `cores/` 的 `.so`。
 
 工具链**刻意分两套**，别合并：
 

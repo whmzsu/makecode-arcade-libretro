@@ -251,7 +251,10 @@ the build product is a **static archive** (`makecode_arcade_libretro_libnx.a`,
 built with devkitA64, `-fPIE`) that RetroArch's `Makefile.libnx` links together
 with the frontend into a NRO - **one NRO carries exactly one core**, which is
 also the shape of the cores the official online updater distributes.
-`tools/package_release.sh` does not take part; a dedicated workflow handles it:
+`tools/package_release.sh` does not take part; a dedicated workflow handles it.
+Its output is also not part of the 6-platform release matrix — it gets **its own
+release on `nx-v*` tags** (version kept in sync with `core-v*`, e.g.
+`nx-v0.3.3` ↔ `core-v0.3.3`):
 
 ```bash
 # equivalent to .github/workflows/nx.yml (inside devkitpro/devkita64)
@@ -321,8 +324,18 @@ bottom of the Actions run page).
 | `android-arm64` | Runner-provided NDK + `core/jni/` (same parameters as the official template) | `.so` |
 | `zig-*` (x64/arm64 Windows + Linux x64/arm64) | **Same toolchain as local releases** (zig 0.17.0 + `tools/build_target.sh`) | `.so` / `.dll` |
 | `macos-universal` | Xcode clang, arm64+x86_64 | `.dylib` (experimental, `continue-on-error`) |
-| `package` | Collects distro-toolchain artifacts → `tools/package_release.sh` | 4 zips |
-| `release` (only on `core-v*` tags) | Collects `zig-*` + `android-*` artifacts → `package_release.sh` → `gh release create` | **5 zips** (including `windows-arm64`, which only zig can produce) |
+| `lakka-musl` | dockcross `linux-arm64-musl` + GNU ld `-shared -static` | `.so` (**fully static, zero `NEEDED`**, for musl systems like Lakka/LibreELEC) |
+| `behavior-miniretro` | real aarch64 runner (`ubuntu-24.04-arm`) + third-party frontend miniretro | 900-frame smoke run (behaviour layer, not compile layer) |
+| `package` | Collects distro-toolchain artifacts → `tools/package_release.sh` | 5 zips |
+| `release` (only on `core-v*` tags) | Collects `zig-*` + `android-*` + `lakka-musl` artifacts → `package_release.sh` → `gh release create` | **6 zips** (including `windows-arm64`, which only zig can produce, and `lakka-arm64`, which only the musl toolchain can produce) |
+
+NX (Switch) is not in this table: it is handled by a separate
+`.github/workflows/nx.yml` that **creates its own release on `nx-v*` tags**.
+It is kept apart from core releases because the NRO needs the RetroArch
+sources plus a pile of portlibs (a dozen-plus minutes), which would slow down
+every core release if chained into the main pipeline. The artifact shape
+differs too — an NRO embeds the frontend itself, it is not a `.so` you can
+drop into `cores/`.
 
 The toolchains are **deliberately split in two** — don't merge them:
 
