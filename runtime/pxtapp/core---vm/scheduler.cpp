@@ -16,7 +16,10 @@
 // __MINGW32__ is defined on both mingw32 and mingw64
 #ifdef __MINGW32__
 #include <windows.h>
-#else
+#elif !defined(PXT64)
+// 只有 32 位目标才用 mmap 分配 GC 堆（见 gcAllocBlock）；64 位走 malloc，
+// 而裸机工具链（devkitA64/newlib，Switch）没有 sys/mman.h——无条件包含会
+// 让整个文件编不过。
 #include <sys/mman.h>
 #endif
 #endif
