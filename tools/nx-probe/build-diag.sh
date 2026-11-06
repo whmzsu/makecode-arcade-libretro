@@ -46,7 +46,12 @@ if aarch64-none-elf-gcc \
         -L"$DEVKITPRO/libnx/lib" -L"$PORTLIBS/lib" \
         -specs="$DEVKITPRO/libnx/switch.specs" \
         tools/nx-probe/probe.c -o "$OUT/probe.elf" -lnx -lm; then
-    aarch64-none-elf-elf2nro "$OUT/probe.elf" "$OUT/probe.nro" && echo "probe.nro OK"
+    # elf2nro 不是 target 前缀工具，装在 $DEVKITPRO/tools/bin（有时也以
+    # aarch64-none-elf-elf2nro 的形式存在），两种都试
+    ELF2NRO=$(command -v elf2nro || command -v aarch64-none-elf-elf2nro || true)
+    echo "elf2nro: ${ELF2NRO:-<找不到>}"
+    [ -n "$ELF2NRO" ] || { echo "!! 找不到 elf2nro"; exit 1; }
+    "$ELF2NRO" "$OUT/probe.elf" "$OUT/probe.nro" && echo "probe.nro OK"
 else
     echo "!! probe 编译失败"
     exit 1
