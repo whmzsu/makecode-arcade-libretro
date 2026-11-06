@@ -49,6 +49,8 @@ int pxt_vm_poll_exit();   // 返回 1 表示 VM 线程已退出（读后自动�
 // 卸载内容 / 换游戏 / 关闭核心时必须调用。
 int pxt_vm_stop();
 int pxt_vm_running();     // VM 线程是否仍在运行
+int pxt_vm_online();      // VM 是否已进入主循环并能出帧
+int pxt_vm_is_vm_thread();
 
 } // extern "C"
 
@@ -102,6 +104,8 @@ void vm_pull_screen(uint32_t* bgra);                // 拉一帧 BGRA32 (160x120
 void vm_pull_audio(int16_t* mono, unsigned samples); // 拉一帧 44.1kHz 单声道 S16
 size_t vm_flush_logs(void (*emit)(const char*, size_t)); // 倒 VM 日志
 int vm_panic_code();                                // 0 正常；见 M3-VM-HOST.md
+bool vm_thread_alive();                             // VM 线程是否还活着（诊断用）
+bool vm_online();                                   // VM 是否已出帧（诊断用）
 
 } // namespace mca
 

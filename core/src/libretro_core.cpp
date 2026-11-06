@@ -22,6 +22,12 @@
 #include <windows.h>
 #endif
 
+#if defined(__SWITCH__)
+#include <fcntl.h>
+#include <unistd.h>
+#include <cstdlib>
+#endif
+
 using namespace mca;
 
 // ---- 崩溃现场 -----------------------------------------------------------
@@ -301,10 +307,85 @@ void nxBoot(const char* fmt, ...) {
 // 构造函数：只要本文件的目标文件被链进 NRO，这个函数就在 main 之前跑。
 // 日志里有这一行 = 我们的代码真的被执行了，而不只是被链进来。
 __attribute__((constructor)) void nxBootCtor(void) { nxBoot("[boot] ctor"); }
+
+// ---- NX 运行期 trace（每 30 帧一行） ------------------------------------
+//
+// 只在诊断构建里编译（-DMCA_NX_DIAG=1，见 tools/nx-probe/build-diag.sh）。
+// 正式包不带：每 0.5 秒写一次 SD 卡对真机帧率是白扔钱，而发版不需要它。
+//
+// mca_boot.log 只覆盖启动阶段。真机现在的情况是"能启动、加载游戏后黑屏几秒才崩"，
+// 崩在运行期，所以需要一条**崩溃前还在写**的日志：
+//
+//   * 用裸 POSIX IO（open/write/close），不用 stdio。原因是这个日志的意义就是
+//     "堆已经被写坏之后还能写出去"，而 fprintf 需要扩容缓冲时会 malloc。
+//   * 每次 open 一次再关（0.5 秒一次，开销可忽略），避免长期持有 fd。
+//   * 写日志**先于**堆探针：探针崩掉时，文件最后一行就是崩溃帧号。
+//
+// 另外支持 sdmc:/switch/mca_mode.txt 切通路（见 nxMode）：
+//   0 = 正常；1 = 不推视频帧；2 = 不推音频；3 = 完全不拉 VM 数据（黑帧+静音）
+// 一次装包能把"哪条通路把堆写坏"用四次运行切开。
+#if defined(MCA_NX_DIAG)
+void nxRunLogV(const char* fmt, va_list ap) {
+    static int lines = 0;
+    if (lines > 4000) return; // 约 33 分钟，防止日志把 SD 卡写满
+    ++lines;
+    char buf[256];
+    int n = std::vsnprintf(buf, sizeof(buf) - 2, fmt, ap);
+    if (n < 0) return;
+    if (n > static_cast<int>(sizeof(buf)) - 2) n = static_cast<int>(sizeof(buf)) - 2;
+    buf[n++] = '\n';
+    int fd = ::open("sdmc:/switch/mca_run.log", O_WRONLY | O_CREAT | O_APPEND, 0666);
+    if (fd < 0) return;
+    ssize_t ignored = ::write(fd, buf, static_cast<size_t>(n));
+    (void)ignored;
+    ::close(fd);
+}
+
+void nxRunLog(const char* fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    nxRunLogV(fmt, ap);
+    va_end(ap);
+}
+
+int nxMode() {
+    static int cached = -1;
+    if (cached >= 0) return cached;
+    char b[16] = {0};
+    int fd = ::open("sdmc:/switch/mca_mode.txt", O_RDONLY);
+    if (fd < 0) { cached = 0; return cached; }
+    int n = static_cast<int>(::read(fd, b, sizeof(b) - 1));
+    ::close(fd);
+    cached = (n > 0) ? std::atoi(b) : 0;
+    if (cached < 0 || cached > 3) cached = 0;
+    return cached;
+}
+#endif // MCA_NX_DIAG
 } // namespace
+
+#if defined(MCA_NX_DIAG)
+// C 链接包装：runtime 侧（vmload.cpp 等）用 weak 引用它，把宿主线程/栈信息
+// 也写进同一条运行期日志。weak 意味着"没有 core 时不影响任何其他构建"。
+extern "C" void mca_nx_runlog(const char* fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    nxRunLogV(fmt, ap);
+    va_end(ap);
+}
+#endif
+
 #define MCA_NX_BOOT(...) nxBoot(__VA_ARGS__)
+#if defined(MCA_NX_DIAG)
+#define MCA_NX_RUN(...) nxRunLog(__VA_ARGS__)
+#define MCA_NX_MODE() nxMode()
+#else
+#define MCA_NX_RUN(...) ((void)0)
+#define MCA_NX_MODE() (0)
+#endif
 #else
 #define MCA_NX_BOOT(...) ((void)0)
+#define MCA_NX_RUN(...) ((void)0)
+#define MCA_NX_MODE() (0)
 #endif
 
 void retro_set_environment(retro_environment_t cb) {
@@ -371,6 +452,10 @@ void retro_get_system_av_info(struct retro_system_av_info* info) {
     info->geometry.aspect_ratio = 4.0f / 3.0f;
     info->timing.fps = kFrameRate;
     info->timing.sample_rate = kAudioSampleRate;
+    // NX 上确认两件事：前端接受的像素格式（false = 它按默认 0RGB1555 解读，
+    // 我们仍按 RGB565 写 → 颜色错）与本核心报的时序。
+    MCA_NX_BOOT("[boot] av_info %dx%d fps=%d sr=%d fmt_ok=%d", kScreenWidth, kScreenHeight,
+                kFrameRate, kAudioSampleRate, (int)g_pixel_format_set);
 }
 
 void retro_set_controller_port_device(unsigned port, unsigned device) {
@@ -682,11 +767,15 @@ void render_vm_frame() {
 } // namespace
 
 void retro_run(void) {
+    // NX 诊断开关（其他平台恒为 0）。见 nxMode() 的说明。
+    const int nxmode = MCA_NX_MODE();
+
     if (g_input_poll) g_input_poll();
 
     if (g_frame == 0) {
         log_printf(RETRO_LOG_INFO, "[MCA] first retro_run\n");
         MCA_NX_BOOT("[boot] first retro_run");
+        MCA_NX_RUN("[run] first retro_run (mode=%d)", nxmode);
     }
 
     if (runtime_available()) {
@@ -721,14 +810,36 @@ void retro_run(void) {
         // 我们以前在这里一行 else if 跳过了拉取 —— VM 线程于是永远停在取帧等待里，
         // 连 mcaResetRequest 都读不到，重置就这么死住了（真机上"按重置后画面
         // 冻住、不崩不退"）。离线时拉取会立刻返回黑屏+静音，代价可忽略。
-        render_vm_frame();
+        if (nxmode != 3) {
+            render_vm_frame();
+        } else {
+            // 诊断模式 3：完全不碰 VM 的数据通路（不取帧、不取音频）。
+            // 用来判断"堆被写坏"是否发生在 pxt_screen_get_pixels /
+            // pxt_get_audio_samples 这两条跨线程拷贝上。
+            std::memset(g_fb, 0, sizeof(g_fb));
+            std::memset(g_audio, 0, sizeof(g_audio));
+        }
     } else {
         render_test_frame();
         std::memset(g_audio, 0, sizeof(g_audio));
     }
 
-    if (g_audio_batch) g_audio_batch(g_audio, kAudioSamplesPerFrame);
-    if (g_video) g_video(g_fb, kScreenWidth, kScreenHeight, kScreenWidth * sizeof(uint16_t));
+    if (nxmode != 2 && g_audio_batch) g_audio_batch(g_audio, kAudioSamplesPerFrame);
+    if (nxmode != 1 && g_video)
+        g_video(g_fb, kScreenWidth, kScreenHeight, kScreenWidth * sizeof(uint16_t));
+
+    // 每 30 帧一行运行期 trace（0.5 秒一次），写完再动堆：
+    // 探针如果崩了，文件最后一行就是崩溃帧号。
+    if ((g_frame % 30) == 0) {
+        MCA_NX_RUN("[run] f=%u online=%d thr=%d up=%d panic=%d mode=%d sp=%p",
+                   g_frame, (int)vm_online(), (int)vm_thread_alive(),
+                   (int)runtime_available(), vm_panic_code(), nxmode,
+                   (const void*)&nxmode);
+#if defined(MCA_NX_DIAG)
+        void* hp = std::malloc(24);
+        if (hp) std::free(hp);
+#endif
+    }
 
     g_frame++;
 }

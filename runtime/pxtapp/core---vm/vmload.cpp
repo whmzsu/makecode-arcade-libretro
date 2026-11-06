@@ -11,6 +11,16 @@
 #define MCA_VM_STACK_SIZE (8 * 1024 * 1024)
 #endif
 
+// NX 诊断：core 侧提供的运行期日志（裸 POSIX IO，堆坏了也能写出去）。
+// weak 引用 —— 没有 core 的构建（官方 sim / 其他宿主）里它是 NULL。
+// 只有诊断构建（-DMCA_NX_DIAG=1）才会真正打点，正式包里这条宏是空的。
+#if defined(__SWITCH__) && defined(MCA_NX_DIAG)
+extern "C" void mca_nx_runlog(const char *fmt, ...) __attribute__((weak));
+#define MCA_RUNLOG(...) do { if (mca_nx_runlog) mca_nx_runlog(__VA_ARGS__); } while (0)
+#else
+#define MCA_RUNLOG(...) ((void)0)
+#endif
+
 namespace pxt {
 
 // MCA PATCH 5：定义在 scheduler.cpp（VM 主循环与 systemReset 都在那边）
@@ -112,6 +122,11 @@ static unsigned vm_len;
 static const char *vm_filename;
 
 static void *multiStart(void *) {
+    // NX 诊断：入口处的局部变量地址 ≈ 新线程的栈顶附近。和主线程的地址一比，
+    // 就能看出这个线程到底拿到了多大的栈（newlib/libnx 会不会悄悄改成 128KB，
+    // 是我们的头号怀疑）。
+    char stack_probe = 0;
+    MCA_RUNLOG("[vm] thread entry local=%p", (void *)&stack_probe);
     if (vm_filename)
         vmStartFile(vm_filename);
     else
@@ -154,11 +169,18 @@ static void spinThread() {
     // 无声消失、无任何日志。固定 8MB 与前端无关。
     pthread_attr_t vm_attr;
     pthread_attr_init(&vm_attr);
-    pthread_attr_setstacksize(&vm_attr, MCA_VM_STACK_SIZE);
-    pthread_create(&vm_thread, &vm_attr, multiStart, NULL);
+    const int attr_set = pthread_attr_setstacksize(&vm_attr, MCA_VM_STACK_SIZE);
+    size_t stack_got = 0;
+    const int attr_get = pthread_attr_getstacksize(&vm_attr, &stack_got);
+    const int created = pthread_create(&vm_thread, &vm_attr, multiStart, NULL);
     pthread_attr_destroy(&vm_attr);
     vm_has_thread = 1;
     mcaTrace("[host] new vm thread created");
+    // NX 诊断：attr 是否被接受（set/get 的返回值与读回值）+ 线程是否真创建成功。
+    // newlib 在 libnx 上如果把栈悄悄限成 128KB，VM 深递归就会踩穿相邻堆 ——
+    // 这与"崩在 free 的链表拆链"完全吻合，所以这三个数必须落到日志里。
+    MCA_RUNLOG("[host] stack request=%zu set=%d get=%d got=%zu create=%d",
+               (size_t)MCA_VM_STACK_SIZE, attr_set, attr_get, stack_got, created);
 
     // MCA v0.2.10：等 VM 真正就绪（镜像装载完 + 主循环停在取帧闸门上）再返回，
     // 也就是让 retro_load_game 变成同步的。

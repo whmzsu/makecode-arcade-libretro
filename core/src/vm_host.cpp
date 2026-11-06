@@ -211,4 +211,9 @@ size_t vm_flush_logs(void (*emit)(const char* line, size_t len)) {
 
 int vm_panic_code() { return pxt_get_panic_code(); }
 
+// 诊断用：VM 线程/在线状态。NX 上排查"跑几秒后崩"时需要区分
+// "VM 还在推进" 与 "VM 线程已经没了但前端还在拉帧"。
+bool vm_thread_alive() { return pxt_vm_running() != 0; }
+bool vm_online() { return pxt_vm_online() != 0; }
+
 } // namespace mca

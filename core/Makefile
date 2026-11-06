@@ -93,6 +93,13 @@ ifneq (,$(findstring libnx,$(platform)))
    CFLAGS   := $(filter-out -fPIC,$(CFLAGS)) $(NX_ARCH) -fdata-sections
    CXXFLAGS += -D__SWITCH__ -DHAVE_LIBNX -D_GNU_SOURCE
    CFLAGS   += -D__SWITCH__ -DHAVE_LIBNX -D_GNU_SOURCE
+   # 诊断构建开关：打开后核心每 30 帧往 sdmc:/switch/mca_run.log 写一行运行期
+   # trace（裸 POSIX IO，堆坏了也写得出去），并支持 mca_mode.txt 切通路口径。
+   # 发版包不开（写 SD 卡换不到收益），只有 nx-diag 的两个对比 NRO 开。
+   ifeq ($(MCA_NX_DIAG),1)
+      CXXFLAGS += -DMCA_NX_DIAG=1
+      CFLAGS   += -DMCA_NX_DIAG=1
+   endif
 else ifneq (,$(findstring win,$(platform)))
    TARGET  := $(CORE_DIR)/$(TARGET_NAME).dll
    LDFLAGS += -shared -Wl,--export-all-symbols

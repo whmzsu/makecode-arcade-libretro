@@ -71,7 +71,7 @@ echo "  空核心入口完整: $(echo $LIBRETRO_API | wc -w) 个"
 # --------------------------------------------------------- 2. 我们的核心 .a
 echo
 echo "==================== 我们的核心 .a ===================="
-if ! make -C "$WS/core" platform=libnx -j"$(nproc)" > "$OUT_ABS/core-libnx-build.log" 2>&1; then
+if ! MCA_NX_DIAG=1 make -C "$WS/core" platform=libnx -j"$(nproc)" > "$OUT_ABS/core-libnx-build.log" 2>&1; then
     echo "!! 核心静态库编译失败"
     grep -nE 'error:|Error [0-9]|undefined reference' "$OUT_ABS/core-libnx-build.log" | head -15
     exit 1
