@@ -44,6 +44,10 @@ jobs:
             switch-mesa switch-libdrm_nouveau 2>&1 | tail -3
 
       - name: 构建诊断 NRO
+        # 这一步挂了不要让后面的对比构建也跟着跳过 —— 对比构建（空核心 vs
+        # 我们的核心）才是判"机制问题还是代码问题"的关键证据。诊断 workflow
+        # 的原则是"能产出多少算多少"，所以这里只告警不阻断。
+        continue-on-error: true
         run: |
           set +e
           out=$(mktemp)
@@ -74,12 +78,15 @@ jobs:
             exit 1
           fi
 
+      # 即使某个对照构建失败也把已产出的东西传上去：排查现场拿到一半对照
+      # 也远好过什么都拿不到（之前一次失败把 4 个产物全丢在容器里）。
       - name: 上传
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: nx-diag
           path: out/nx-diag
-          if-no-files-found: error
+          if-no-files-found: warn
 
   # workflow artifact 要登录才能下载，而排查现场往往只有一只手机/一台 PC。
   # 这里把产物挂到一个固定的预发布 Release（tag 固定 nx-diag），
@@ -87,6 +94,7 @@ jobs:
   publish:
     name: publish nx-diag release
     needs: diag
+    if: always()
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -102,13 +110,20 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -euo pipefail
-          ls -l pkg
+          set -uo pipefail
+          ls -l pkg || true
           TAG=nx-diag
           TITLE="nx-diag - 排查用探针（不是发版）"
           # 说明放独立文件：多行文本写进 run: | 里一旦顶到第 0 列就会截断 YAML
           NOTES=tools/nx-probe/diag-notes.md
           [ -f "$NOTES" ] || { echo "缺少 $NOTES"; exit 1; }
+          # 对比构建失败时 pkg 里可能只有一部分文件，甚至为空；空目录下
+          # pkg/* 不会被展开，gh 会收到字面量 "pkg/*" 而报错，所以先判空。
+          have=$(find pkg -maxdepth 1 -type f -name '*.nro' | head -1)
+          if [ -z "$have" ]; then
+            echo "!! pkg 里没有任何 .nro，跳过发布"
+            exit 1
+          fi
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" pkg/* --clobber
             gh release edit "$TAG" --title "$TITLE" --notes-file "$NOTES"

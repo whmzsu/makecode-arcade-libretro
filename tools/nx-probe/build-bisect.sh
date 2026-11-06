@@ -46,6 +46,28 @@ if ! aarch64-none-elf-ar rcs "$OUT_ABS/libretro_stub.a" "$OUT_ABS/stub_core.o"; 
 fi
 echo "  stub 导出 retro_* 符号: $(aarch64-none-elf-nm --defined-only -g "$OUT_ABS/libretro_stub.a" | grep -c ' T retro_')"
 
+# 完整性自检：libretro 的 25 个入口一个都不能少。
+# 少了不会在编译期报错，而是等到 5 分钟后的链接才炸（上次就是漏了
+# retro_set_controller_port_device / retro_get_memory_{data,size}），
+# 且错误信息只给 runloop.c 的行号，很难一眼看出是"桩没写全"。
+LIBRETRO_API="retro_api_version retro_get_system_info retro_get_system_av_info
+retro_set_environment retro_set_video_refresh retro_set_audio_sample
+retro_set_audio_sample_batch retro_set_input_poll retro_set_input_state
+retro_set_controller_port_device retro_init retro_deinit retro_reset retro_run
+retro_serialize_size retro_serialize retro_unserialize retro_cheat_reset
+retro_cheat_set retro_load_game retro_load_game_special retro_unload_game
+retro_get_region retro_get_memory_data retro_get_memory_size"
+missing=""
+for s in $LIBRETRO_API; do
+    aarch64-none-elf-nm --defined-only -g "$OUT_ABS/libretro_stub.a" \
+        | grep -qE " T $s\$" || missing="$missing $s"
+done
+if [ -n "$missing" ]; then
+    echo "!! 空核心缺少入口:$missing"
+    exit 1
+fi
+echo "  空核心入口完整: $(echo $LIBRETRO_API | wc -w) 个"
+
 # --------------------------------------------------------- 2. 我们的核心 .a
 echo
 echo "==================== 我们的核心 .a ===================="
@@ -122,12 +144,21 @@ echo "  已清理"
 
 echo
 echo "==================== 链 ra_stubcore.nro ===================="
-link_nro "$OUT_ABS/libretro_stub.a" ra_stubcore || exit 1
+link_nro "$OUT_ABS/libretro_stub.a" ra_stubcore
+rc_stub=$?
 
 echo
 echo "==================== 链 mca_boot.nro ===================="
-link_nro "$CORE_A" mca_boot || exit 1
+link_nro "$CORE_A" mca_boot
+rc_boot=$?
 
 echo
 echo "==================== 产物 ===================="
 ls -l "$OUT_ABS"
+
+# 两个链接各自独立收尾：一个失败不要连带另一个也不产出，
+# 否则每次都要再等一轮五分钟的 CI 才能拿到另一个对照。
+if [ "$rc_stub" -ne 0 ] || [ "$rc_boot" -ne 0 ]; then
+    echo "!! 失败：ra_stubcore=$rc_stub mca_boot=$rc_boot"
+    exit 1
+fi

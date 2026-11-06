@@ -57,6 +57,11 @@ void retro_set_environment(retro_environment_t cb)
     (void)env_cb;
 }
 
+void retro_set_controller_port_device(unsigned port, unsigned device)
+{
+    (void)port; (void)device;
+}
+
 void retro_set_video_refresh(retro_video_refresh_t cb)        { (void)cb; }
 void retro_set_audio_sample(retro_audio_sample_t cb)          { (void)cb; }
 void retro_set_audio_sample_batch(retro_audio_sample_batch_t cb) { (void)cb; }
@@ -85,6 +90,10 @@ bool retro_load_game_special(unsigned type, const struct retro_game_info *info, 
 void retro_unload_game(void) { }
 
 unsigned retro_get_region(void) { return RETRO_REGION_NTSC; }
+
+/* 没有可暴露的内存区（不要在这里返回栈地址，前端会当真去读） */
+void *retro_get_memory_data(unsigned id) { (void)id; return NULL; }
+size_t retro_get_memory_size(unsigned id) { (void)id; return 0; }
 
 size_t retro_serialize_size(void) { return 0; }
 bool retro_serialize(void *data, size_t size) { (void)data; (void)size; return false; }
