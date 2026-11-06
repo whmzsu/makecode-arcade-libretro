@@ -59,3 +59,39 @@ jobs:
           name: nx-diag
           path: out/nx-diag
           if-no-files-found: error
+
+  # workflow artifact 要登录才能下载，而排查现场往往只有一只手机/一台 PC。
+  # 这里把产物挂到一个固定的预发布 Release（tag 固定 nx-diag），
+  # 谁都能直接点链接下载。不是发版，不进 core-v*/nx-v* 体系。
+  publish:
+    name: publish nx-diag release
+    needs: diag
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: nx-diag
+          path: pkg
+
+      - name: 挂到固定 tag nx-diag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          ls -l pkg
+          TAG=nx-diag
+          TITLE="nx-diag - 排查用探针（不是发版）"
+          # 说明放独立文件：多行文本写进 run: | 里一旦顶到第 0 列就会截断 YAML
+          NOTES=tools/nx-probe/diag-notes.md
+          [ -f "$NOTES" ] || { echo "缺少 $NOTES"; exit 1; }
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" pkg/* --clobber
+            gh release edit "$TAG" --title "$TITLE" --notes-file "$NOTES"
+          else
+            gh release create "$TAG" pkg/* --title "$TITLE" --notes-file "$NOTES" --prerelease
+          fi
+          gh release view "$TAG" --json assets --jq '.assets[] | "  " + .name + "  " + (.size|tostring) + " B"'
