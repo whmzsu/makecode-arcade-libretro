@@ -43,6 +43,7 @@ if aarch64-none-elf-gcc \
         -D__SWITCH__=1 -D_GNU_SOURCE \
         -DBUILD_LIBNX_VER="\"$LIBNX_VER\"" \
         -I"$DEVKITPRO/libnx/include" -I"$PORTLIBS/include" \
+        -L"$DEVKITPRO/libnx/lib" -L"$PORTLIBS/lib" \
         -specs="$DEVKITPRO/libnx/switch.specs" \
         tools/nx-probe/probe.c -o "$OUT/probe.elf" -lnx -lm; then
     aarch64-none-elf-elf2nro "$OUT/probe.elf" "$OUT/probe.nro" && echo "probe.nro OK"
