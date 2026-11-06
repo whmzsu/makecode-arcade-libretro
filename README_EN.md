@@ -190,6 +190,7 @@ tools/package_release.sh  # Package into zips ready to drop into RetroArch
 | Linux x64 / ARM64 | `makecode_arcade_linux-x64.zip` / `-arm64.zip` |
 | Android ARM64 | `makecode_arcade_android-arm64.zip` |
 | Lakka / LibreELEC ARM64 (musl) | `makecode_arcade_lakka-arm64.zip` |
+| Nintendo Switch (NX) | `makecode_arcade_switch.zip` (NRO + `.info`) |
 
 > **64-bit frontends only** (important). Cartridges contain a **PXT64**
 > bytecode image: the official pxt compiler (the arcade target of
@@ -242,6 +243,34 @@ Install: drop `makecode_arcade_libretro.so` and `makecode_arcade_libretro.info`
 into `/storage/cores/` on Lakka (SSH defaults to root/lakka) and refresh the
 core list. A 900-frame miniretro smoke run covers it in CI
 (`behavior-miniretro (musl 全静态)`).
+
+### Nintendo Switch (RetroArch NX)
+
+The Switch has **no `dlopen`**, so a core cannot be dropped in as a `.so`. Here
+the build product is a **static archive** (`makecode_arcade_libretro_libnx.a`,
+built with devkitA64, `-fPIE`) that RetroArch's `Makefile.libnx` links together
+with the frontend into a NRO - **one NRO carries exactly one core**, which is
+also the shape of the cores the official online updater distributes.
+`tools/package_release.sh` does not take part; a dedicated workflow handles it:
+
+```bash
+# equivalent to .github/workflows/nx.yml (inside devkitpro/devkita64)
+make -C core platform=libnx                  # -> core/makecode_arcade_libretro_libnx.a
+cp core/makecode_arcade_libretro_libnx.a /path/to/RetroArch/libretro_libnx.a
+cd /path/to/RetroArch && make -f Makefile.libnx   # -> retroarch_switch.nro
+```
+
+Install: copy `makecode_arcade_libretro_libnx.nro` and
+`makecode_arcade_libretro.info` into `sdmc:/retroarch/cores/`, cartridges
+anywhere (e.g. `sdmc:/roms/makecode/`). Start it via title takeover (hold R
+while launching any game to reach hbmenu) for full memory; applet mode (album)
+also works with 448MB, and this core uses about 11MB RSS.
+
+> Archiver trap: GNU `ar` stores basenames only, and `runtime/pxtapp` has both
+> `base/control.cpp` and `core---vm/control.cpp` - archiving directly lets the
+> later member silently overwrite the earlier one, surfacing as missing symbols
+> at link time. The Makefile copies objects to flattened unique names and
+> asserts member count == object count.
 
 Each zip contains the core binary + `.info` + install notes. Linux targets
 are pinned to a glibc 2.17 baseline (covers handheld firmware from 2012

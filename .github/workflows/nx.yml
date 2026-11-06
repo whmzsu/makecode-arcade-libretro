@@ -189,6 +189,40 @@ jobs:
           fi
           ls -l /tmp/pkg/core/
 
+      - name: 校验 NRO 里真的链进了本核心
+        run: |
+          # 链接成功 ≠ 核心被链进去（归档成员没被引用就会被丢掉）。用只属于
+          # 本项目的符号做实证：retro_load_game / pxt_vm_start_buffer /
+          # mca_tick_init 都是 extern "C"，RetroArch 自身不会定义它们。
+          set +e
+          out=$(mktemp)
+          (
+            set -u
+            export PATH="${DEVKITPRO:-/opt/devkitpro}/devkitA64/bin:${DEVKITPRO:-/opt/devkitpro}/tools/bin:$PATH"
+            cd /tmp/ra || exit 1
+            ls -l retroarch_switch.* 2>/dev/null
+            elf=retroarch_switch.elf
+            if [ -f "$elf" ]; then
+              n=$(aarch64-none-elf-nm "$elf" | grep -cE ' T (retro_load_game|pxt_vm_start_buffer|mca_tick_init)$')
+              echo "核心符号命中 $n / 3"
+              aarch64-none-elf-nm "$elf" | grep -E ' T (retro_load_game|pxt_vm_start_buffer|mca_tick_init)$'
+              [ "$n" -eq 3 ] || { echo "核心符号没全进 ELF：归档成员被链接器丢掉了"; exit 1; }
+            else
+              echo "没有 .elf，退回 NRO 字符串检查"
+              grep -aq 'MakeCode Arcade' retroarch_switch.nro || { echo "NRO 里找不到核心字符串"; exit 1; }
+            fi
+            sz=$(stat -c %s retroarch_switch.nro)
+            echo "NRO 大小: $sz 字节"
+            [ "$sz" -gt 1000000 ] || { echo "NRO 太小，不像带前端+核心的完整包"; exit 1; }
+          ) > "$out" 2>&1
+          rc=$?
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::NRO 内容校验失败（rc=$rc）"
+            tail -25 "$out" | cut -c1-300 | sed 's/^/::error::  /'
+            exit 1
+          fi
+          tail -8 "$out"
+
       - name: 打 zip（含 .info 与说明）
         run: |
           set +e

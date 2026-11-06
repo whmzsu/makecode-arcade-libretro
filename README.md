@@ -177,6 +177,7 @@ tools/package_release.sh  # 打包成可直接放进 RetroArch 的 zip
 | Linux x64 / ARM64 | `makecode_arcade_linux-x64.zip` / `-arm64.zip` |
 | Android ARM64 | `makecode_arcade_android-arm64.zip` |
 | Lakka / LibreELEC ARM64（musl） | `makecode_arcade_lakka-arm64.zip` |
+| Nintendo Switch（NX） | `makecode_arcade_switch.zip`（NRO + `.info`） |
 
 > **只支持 64 位前端**（重要）。卡带里装的是 **PXT64** 字节码镜像：官方 pxt
 > 编译器（`pxt-core` 的 arcade target）**没有产出 32 位镜像的开关**，它唯一
@@ -219,6 +220,31 @@ docker run --rm -v "$PWD":/work -w /work \
 安装：把 `makecode_arcade_libretro.so` 和 `makecode_arcade_libretro.info` 放进
 Lakka 的 `/storage/cores/`（SSH 默认 root/lakka），刷新核心列表即可。行为回归
 由 CI 的 `behavior-miniretro (musl 全静态)` job 用 miniretro 跑 900 帧覆盖。
+
+### Nintendo Switch（RetroArch NX）
+
+Switch **没有 `dlopen`**，核心不能像桌面那样丢一个 `.so` 进核心目录，所以这里
+的产物是**静态库**（`makecode_arcade_libretro_libnx.a`，devkitA64 +
+`-fPIE`），由 RetroArch 的 `Makefile.libnx` 连同前端一起链成 NRO——
+**一个 NRO 内含且仅含一个核心**（官方在线更新器分发的也是这样一个个 `.nro`）。
+`tools/package_release.sh` 不参与这条线，由独立 workflow 负责：
+
+```bash
+# .github/workflows/nx.yml 等价命令（devkitpro/devkita64 容器内）
+make -C core platform=libnx                  # -> core/makecode_arcade_libretro_libnx.a
+cp core/makecode_arcade_libretro_libnx.a /path/to/RetroArch/libretro_libnx.a
+cd /path/to/RetroArch && make -f Makefile.libnx   # -> retroarch_switch.nro
+```
+
+安装：`makecode_arcade_libretro_libnx.nro` 与 `makecode_arcade_libretro.info`
+一起放 SD 卡 `sdmc:/retroarch/cores/`，卡带放 `sdmc:/roms/makecode/`。
+建议以 title takeover 启动（按住 R 点任意游戏进 hbmenu）拿完整内存；相册
+（applet 模式）只有 448MB 也能跑，本核心 RSS 约 11MB。
+
+> 归档这步有个坑：GNU `ar` 默认只存基名，而 `runtime/pxtapp` 里
+> `base/control.cpp` 与 `core---vm/control.cpp` 同名，直接归档会让后一个
+> 成员静默覆盖前一个（符号到链接期才报缺失）。Makefile 里先把对象拷成
+> 扁平唯一名再归档，并对成员数/对象数做断言。
 
 每个 zip 内含 core 二进制 + `.info` + 安装说明。Linux 目标固定用 glibc 2.17
 基线（覆盖 2012 年后的掌机固件）；Android 静态链 libc++ 并做 16KB 页对齐
