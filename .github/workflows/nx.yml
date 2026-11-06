@@ -191,16 +191,36 @@ jobs:
 
       - name: 打 zip（含 .info 与说明）
         run: |
-          set -euo pipefail
-          cd "$GITHUB_WORKSPACE"
-          # .info 与发版包用同一份模板，版本号取自源码 kCoreVersion（单点）
-          VERSION="$(sed -n 's/.*kCoreVersion = "\([^"]*\)".*/\1/p' core/src/libretro_core.cpp | head -1)"
-          [ -n "$VERSION" ] || { echo "::error::读不到 kCoreVersion"; exit 1; }
-          sed "s|@VERSION@|$VERSION|" tools/core.info.in > /tmp/pkg/makecode_arcade_libretro.info
-          grep -E 'display_(name|version)' /tmp/pkg/makecode_arcade_libretro.info
-          cp tools/nx-install-notes.txt /tmp/pkg/安装说明.txt
-          zip -q -r makecode_arcade_switch.zip core makecode_arcade_libretro.info 安装说明.txt
-          ls -l makecode_arcade_switch.zip
+          set +e
+          out=$(mktemp)
+          (
+            set -u
+            command -v zip >/dev/null || { apt-get update -qq && apt-get install -y -qq zip; }
+            cd "$GITHUB_WORKSPACE" || exit 1
+            # .info 与发版包用同一份模板，版本号取自源码 kCoreVersion（单点）
+            VERSION=$(sed -n 's/.*kCoreVersion = "\([^"]*\)".*/\1/p' core/src/libretro_core.cpp | head -1)
+            [ -n "$VERSION" ] || { echo "读不到 kCoreVersion"; exit 1; }
+            echo "版本: $VERSION"
+            mkdir -p /tmp/pkg
+            sed "s|@VERSION@|$VERSION|" tools/core.info.in > /tmp/pkg/makecode_arcade_libretro.info || exit 1
+            grep -E 'display_(name|version)' /tmp/pkg/makecode_arcade_libretro.info
+            cp tools/nx-install-notes.txt /tmp/pkg/安装说明.txt || exit 1
+            ls -l /tmp/pkg /tmp/pkg/core
+            cd /tmp/pkg || exit 1
+            rm -f makecode_arcade_switch.zip
+            zip -q -r makecode_arcade_switch.zip core makecode_arcade_libretro.info 安装说明.txt || exit 1
+            # 断言：zip 里必须真有 NRO（别发空包/只有说明的包）
+            unzip -l makecode_arcade_switch.zip
+            unzip -l makecode_arcade_switch.zip | grep -q '\.nro' || { echo "zip 里没有 .nro"; exit 1; }
+            unzip -l makecode_arcade_switch.zip | grep -q '\.info' || { echo "zip 里没有 .info"; exit 1; }
+          ) > "$out" 2>&1
+          rc=$?
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::打包失败（rc=$rc）"
+            tail -25 "$out" | cut -c1-300 | sed 's/^/::error::  /'
+            exit 1
+          fi
+          tail -12 "$out"
 
       - name: 上传 zip
         uses: actions/upload-artifact@v4
