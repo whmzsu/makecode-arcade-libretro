@@ -238,10 +238,12 @@ cp core/makecode_arcade_libretro_libnx.a /path/to/RetroArch/libretro_libnx.a
 cd /path/to/RetroArch && make -f Makefile.libnx   # -> retroarch_switch.nro
 ```
 
-安装：`makecode_arcade_libretro_libnx.nro` 与 `makecode_arcade_libretro.info`
-一起放 SD 卡 `sdmc:/retroarch/cores/`，卡带放 `sdmc:/roms/makecode/`。
-建议以 title takeover 启动（按住 R 点任意游戏进 hbmenu）拿完整内存；相册
-（applet 模式）只有 448MB 也能跑，本核心 RSS 约 11MB。
+安装：`makecode_arcade_libretro_libnx.nro` 放 SD 卡 **`sdmc:/switch/`**
+（它本身就是一个 homebrew 程序，hbmenu 只扫这个目录；**不是** `retroarch/cores/`
+——那是官方 RetroArch 自己的核心目录）。`.info` 可选，同样放 `switch/` 即可；
+卡带放 `sdmc:/roms/makecode/`。务必以 title takeover 启动（按住 R 点任意游戏
+进 hbmenu）拿完整内存，从相册（applet 模式）进入内存只有几百 MB，RetroArch
+前端不一定撑得住。
 
 > 归档这步有个坑：GNU `ar` 默认只存基名，而 `runtime/pxtapp` 里
 > `base/control.cpp` 与 `core---vm/control.cpp` 同名，直接归档会让后一个

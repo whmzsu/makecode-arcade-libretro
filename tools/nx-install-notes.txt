@@ -1,21 +1,29 @@
 MakeCode Arcade —— Nintendo Switch（RetroArch NX）
 =================================================
 
-1. 把 makecode_arcade_libretro_libnx.nro 和 makecode_arcade_libretro.info
-   一起拷到 SD 卡：sdmc:/retroarch/cores/
-2. 卡带（*.pxt64）随便放，例如 sdmc:/roms/makecode/
-3. 在 hbmenu 里启动这个 NRO（它自带 RetroArch 前端），
-   打开卡带即可游戏。
+放置
+----
+1. 把 makecode_arcade_libretro_libnx.nro 拷到 SD 卡：sdmc:/switch/
+   （重要：是 switch/ ，不是 retroarch/cores/）
+2. makecode_arcade_libretro.info 可选，放同一个目录就行
+3. 卡带（*.pxt64）随便放，例如 sdmc:/roms/makecode/
+
+启动
+----
+按住 R 点任意已装游戏 -> 进入 hbmenu -> 选这个 NRO。
+
+务必用这种方式（title takeover），不要从相册图标进 hbmenu：相册是 applet
+模式，内存只有几百 MB，RetroArch 前端（不是核心）不一定撑得住。
+hbmenu 里也可以直接按 R+方向键 切到"应用模式"启动，效果一样。
 
 说明
 ----
-Switch 没有 dlopen，核心不能像 PC 那样丢一个 .so 进去，所以每个 core
-都是一个独立的 NRO（官方在线更新器里下载的 core 也是一个个 .nro）。
-本 NRO 内含 RetroArch 前端 + MakeCode Arcade 核心；更新核心就是换掉这个 NRO。
+Switch 没有 dlopen，核心不能像 PC 那样丢一个 .so 进去。官方 RetroArch NX 的
+做法就是：每个核心和前端一起重新链一遍，产出一个独立 NRO（所以官方核心列表
+里每个核心都是一个几 MB 的 .nro）。本包就是这个产物：一个 NRO = RetroArch
+前端 + MakeCode Arcade 核心，装多个核心就是装多个 NRO，互不影响。
 
-建议以 title takeover 方式启动（按住 R 点任意游戏进入 hbmenu），
-可获得完整内存（约 3.2GB）；从相册（applet 模式）进入也能跑，
-但该模式内存只有 448MB。本核心 RSS 约 11MB，两种模式都够。
+更新核心 = 换掉这个 NRO，配置（retroarch.cfg）会保留。
 
 按键：Start = 游戏内菜单，Select = 重启游戏。
 方向/ABXY 可在 Quick Menu > Controls 里改。

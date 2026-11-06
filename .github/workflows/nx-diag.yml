@@ -1,0 +1,59 @@
+# NX 诊断产物（只在排查"一启动就崩"时用，不参与发版）
+#
+# 产出两个 NRO，用来把故障范围切开：
+#   probe.nro     纯 libnx 控制台程序（固件 / applet 模式 / 内存）
+#   ra_plain.nro  RetroArch 本体，不带我们的核心（尽力而为）
+#
+# 触发：手动 workflow_dispatch，或 push 改了 tools/nx-probe/** 与本文件。
+name: NX diag (probe)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "tools/nx-probe/**"
+      - ".github/workflows/nx-diag.yml"
+
+concurrency:
+  group: nx-diag-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  diag:
+    name: probe NROs
+    runs-on: ubuntu-24.04
+    container:
+      image: devkitpro/devkita64:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 装工具与 portlibs
+        run: |
+          set -u
+          command -v git >/dev/null || { apt-get update -qq && apt-get install -y -qq git; }
+          dkp-pacman -S --noconfirm --needed \
+            switch-ffmpeg switch-libvpx switch-opus switch-libpng \
+            switch-zlib switch-bzip2 switch-liblzma switch-libexpat \
+            switch-mesa switch-libdrm_nouveau 2>&1 | tail -3
+
+      - name: 构建诊断 NRO
+        run: |
+          set +e
+          out=$(mktemp)
+          bash tools/nx-probe/build-diag.sh out/nx-diag > "$out" 2>&1
+          rc=$?
+          cat "$out"
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::诊断构建失败（rc=$rc）"
+            tail -25 "$out" | cut -c1-300 | sed 's/^/::error::  /'
+            exit 1
+          fi
+
+      - name: 上传
+        uses: actions/upload-artifact@v4
+        with:
+          name: nx-diag
+          path: out/nx-diag
+          if-no-files-found: error
