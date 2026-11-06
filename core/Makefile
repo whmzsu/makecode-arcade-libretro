@@ -171,7 +171,7 @@ FLAT_DIR := $(BUILD_DIR)/flat
 $(TARGET): $(OBJECTS)
 	@rm -rf $(FLAT_DIR) $@
 	@mkdir -p $(FLAT_DIR)
-	@for o in $(OBJECTS); do cp "$$o" "$(FLAT_DIR)/$$(printf '%s' "$$o" | tr '/' '_')"; done
+	@for o in $(OBJECTS); do cp "$$o" "$(FLAT_DIR)/o_$$(printf '%s' "$$o" | tr '/' '_')"; done
 	$(AR) rcs $@ $(FLAT_DIR)/*.o
 	@narm=$$($(AR) t $@ | wc -l); nobj=$(words $(OBJECTS)); \
 	 if [ "$$narm" -ne "$$nobj" ]; then \
