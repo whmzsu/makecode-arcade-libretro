@@ -505,8 +505,9 @@ jobs:
           # docker run 的退出码经重定向可能丢失，用自检输出兜底；
           # 失败时把日志尾部转成注解（公开可读，不需要鉴权下日志）
           if ! grep -q "自检通过" "$log"; then
-            echo "::error::musl 构建未通过自检，日志尾部："
-            tail -30 "$log" | sed 's/^/::error::  /'
+            echo "::error::musl 构建未通过自检，关键输出（已滤 docker 拉取噪音）："
+            key=$(grep -vE "Pull complete|Download complete|Verifying Checksum|Pulling fs layer|Already exists|Extracting|Waiting" "$log" | tail -25)
+            printf '%s\n' "$key" | sed 's/^/::error::  /'
             exit 1
           fi
 
