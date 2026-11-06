@@ -36,6 +36,7 @@ MAIN_TARGETS=(
   x86_64-linux-gnu.2.17
   aarch64-linux-gnu.2.17
   aarch64-linux-android21
+  aarch64-linux-musl
 )
 
 case "${1:-}" in
@@ -72,6 +73,7 @@ platform_of() {
     x86_64-linux-gnu)          echo "linux-x64" ;;
     aarch64-linux-gnu)         echo "linux-arm64" ;;
     aarch64-linux-android21)   echo "android-arm64" ;;
+    aarch64-linux-musl)        echo "lakka-arm64" ;;
     *)                         echo "${1//\//-}" ;;
   esac
 }

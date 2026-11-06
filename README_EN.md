@@ -189,6 +189,7 @@ tools/package_release.sh  # Package into zips ready to drop into RetroArch
 | Windows x64 / ARM64 | `makecode_arcade_windows-x64.zip` / `-arm64.zip` |
 | Linux x64 / ARM64 | `makecode_arcade_linux-x64.zip` / `-arm64.zip` |
 | Android ARM64 | `makecode_arcade_android-arm64.zip` |
+| Lakka / LibreELEC ARM64 (musl) | `makecode_arcade_lakka-arm64.zip` |
 
 > **64-bit frontends only** (important). Cartridges contain a **PXT64**
 > bytecode image: the official pxt compiler (the arcade target of
@@ -217,6 +218,30 @@ tools/package_release.sh  # Package into zips ready to drop into RetroArch
 > PXT64 → 32-bit native layout is the compiler's job, and hard-patching it on
 > the core side would mean inventing a private ABI for near-zero benefit —
 > both real devices run fine with 64-bit frontends.
+
+### Lakka / LibreELEC (musl)
+
+Lakka uses **musl libc**, which cannot load our glibc dynamic `.so`. The Lakka
+build is therefore a **zero-dependency fully static DSO** (no `NEEDED` entries
+in `readelf -d`, loadable on any Linux).
+
+The musl target deliberately avoids local zig: zig 0.17's musl can only produce
+either a dynamic library that needs the system `libc.so` (absent from the Lakka
+rootfs) or an exe-only non-PIC static library whose data symbols use ABS64
+relocations that fail to link into a shared object. CI builds it with the
+dockcross aarch64-musl image plus GNU ld `-shared -static` - the same scheme
+libretro buildbot uses for Lakka cores:
+
+```bash
+# Equivalent to the lakka-musl job in .github/workflows/build.yml
+docker run --rm -v "$PWD":/work -w /work \
+  dockcross/linux-arm64-musl:latest bash tools/build_musl.sh
+```
+
+Install: drop `makecode_arcade_libretro.so` and `makecode_arcade_libretro.info`
+into `/storage/cores/` on Lakka (SSH defaults to root/lakka) and refresh the
+core list. A 900-frame miniretro smoke run covers it in CI
+(`behavior-miniretro (musl 全静态)`).
 
 Each zip contains the core binary + `.info` + install notes. Linux targets
 are pinned to a glibc 2.17 baseline (covers handheld firmware from 2012

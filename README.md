@@ -163,7 +163,8 @@ pxt 编译链已拆分到独立仓库：
 
 ### 交叉编译与发版
 
-纯 C/C++、无平台专有依赖，zig 自带 libc 头，换 `-target` 即可：
+纯 C/C++、无平台专有依赖，zig 自带 libc 头，换 `-target` 即可（musl 目标例外，
+见下）：
 
 ```bash
 tools/build_matrix.sh     # 发版矩阵：5 个主流目标（全部 64 位，约 30 秒）
@@ -175,6 +176,7 @@ tools/package_release.sh  # 打包成可直接放进 RetroArch 的 zip
 | Windows x64 / ARM64 | `makecode_arcade_windows-x64.zip` / `-arm64.zip` |
 | Linux x64 / ARM64 | `makecode_arcade_linux-x64.zip` / `-arm64.zip` |
 | Android ARM64 | `makecode_arcade_android-arm64.zip` |
+| Lakka / LibreELEC ARM64（musl） | `makecode_arcade_lakka-arm64.zip` |
 
 > **只支持 64 位前端**（重要）。卡带里装的是 **PXT64** 字节码镜像：官方 pxt
 > 编译器（`pxt-core` 的 arcade target）**没有产出 32 位镜像的开关**，它唯一
@@ -196,6 +198,27 @@ tools/package_release.sh  # 打包成可直接放进 RetroArch 的 zip
 > 补上游这个坑不在本项目范围内：PXT64 → 32 位原生布局的转换是编译器侧的
 > 职责，核心侧硬补等于自造一套 ABI，而且收益近零——两台真机的 64 位前端
 > 都跑得动。
+
+### Lakka / LibreELEC（musl）
+
+Lakka 用的是 **musl libc**，glibc 动态 `.so` 在它上面加载不了，所以 Lakka 包是
+**零依赖全静态 DSO**（`readelf -d` 里没有 NEEDED，任何 Linux 都能 dlopen）。
+
+musl 目标刻意不走本地 zig：zig 0.17 的 musl 只能给出两种产物——需要系统
+`libc.so` 的动态库（Lakka rootfs 里没有这个文件），或 exe 专用的非 PIC 静态库
+（数据符号 ABS64 重定位，进共享库直接链接失败）。CI 里用 dockcross 的
+aarch64-musl 镜像 + GNU ld `-shared -static` 编（和 libretro buildbot 的 Lakka
+core 同一种构型）：
+
+```bash
+# 与 .github/workflows/build.yml 的 lakka-musl job 等价
+docker run --rm -v "$PWD":/work -w /work \
+  dockcross/linux-arm64-musl:latest bash tools/build_musl.sh
+```
+
+安装：把 `makecode_arcade_libretro.so` 和 `makecode_arcade_libretro.info` 放进
+Lakka 的 `/storage/cores/`（SSH 默认 root/lakka），刷新核心列表即可。行为回归
+由 CI 的 `behavior-miniretro (musl 全静态)` job 用 miniretro 跑 900 帧覆盖。
 
 每个 zip 内含 core 二进制 + `.info` + 安装说明。Linux 目标固定用 glibc 2.17
 基线（覆盖 2012 年后的掌机固件）；Android 静态链 libc++ 并做 16KB 页对齐

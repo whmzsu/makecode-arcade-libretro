@@ -24,7 +24,7 @@
 #   android arm64-v8a（ndk-build，见 core/jni/）
 #   macOS 单独一个实验 job（continue-on-error，不阻塞）
 #   zig：x64/arm64 Windows + Linux x64/arm64（基线 2.17）
-#   lakka-musl：musl.cc 交叉工具链全静态 .so（Lakka 用，musl libc 例外不走 zig）
+#   lakka-musl：dockcross aarch64-musl 全静态 .so（Lakka 用，musl libc 例外不走 zig）
 #   behavior-miniretro：真 aarch64 硬件 runner（ubuntu-24.04-arm，公开仓库
 #     免费）上用第三方前端 miniretro 跑 900 帧冒烟 —— 行为层验证
 
@@ -689,7 +689,7 @@ jobs:
   # 方便验证"发行包结构"这条链路本身没坏
   package:
     name: package
-    needs: [linux, windows, android]
+    needs: [linux, windows, android, lakka-musl]
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -703,7 +703,8 @@ jobs:
           tools/package_release.sh \
             x86_64-linux-gnu aarch64-linux-gnu \
             x86_64-windows-gnu \
-            aarch64-linux-android21
+            aarch64-linux-android21 \
+            aarch64-linux-musl
           echo "== 产物 =="
           ls -l core/dist/release
           echo "== 各包清单 =="
@@ -732,7 +733,7 @@ jobs:
   release:
     name: release
     if: startsWith(github.ref, 'refs/tags/core-v')
-    needs: [zig, android]
+    needs: [zig, android, lakka-musl]
     runs-on: ubuntu-22.04
     permissions:
       contents: write
@@ -754,7 +755,7 @@ jobs:
             name="$(basename "$d")"
             case "$name" in
               zig-*)      cp -r "$d" "core/dist/${name#zig-}" ;;
-              *android*)  cp -r "$d" "core/dist/$name" ;;
+              *android*|*musl*) cp -r "$d" "core/dist/$name" ;;
             esac
           done
           ls -d core/dist/*/ | sed 's/^/  /'
@@ -767,7 +768,7 @@ jobs:
           tools/package_release.sh \
             x86_64-windows-gnu aarch64-windows-gnu \
             x86_64-linux-gnu.2.17 aarch64-linux-gnu.2.17 \
-            aarch64-linux-android21
+            aarch64-linux-android21 aarch64-linux-musl
           echo "== 产物 =="
           ls -l core/dist/release
 
@@ -778,7 +779,7 @@ jobs:
           tag="${GITHUB_REF#refs/tags/}"
           ver="${tag#core-v}"
           n=$(ls core/dist/release/*.zip | wc -l)
-          [ "$n" -eq 5 ] || { echo "::error::期望 5 个包，实际 $n"; exit 1; }
+          [ "$n" -eq 6 ] || { echo "::error::期望 6 个包，实际 $n"; exit 1; }
           for z in core/dist/release/*.zip; do
             got=$(python3 -c "import sys,zipfile,re;d=zipfile.ZipFile(sys.argv[1]).read('makecode_arcade_libretro.info').decode();print(re.search(r'display_version = \"([^\"]+)\"',d).group(1))" "$z")
             [ "$got" = "$ver" ] || { echo "::error file=$z::.info 版本 $got 与 tag $ver 不符"; exit 1; }
@@ -796,7 +797,7 @@ jobs:
         run: |
           set -euo pipefail
           tag="${GITHUB_REF#refs/tags/}"
-          title="core ${tag#core-} - libretro core (5 platforms, 64-bit)"
+          title="core ${tag#core-} - libretro core (6 platforms, 64-bit)"
           notes=".github/release-notes/${tag}.md"
           if [ -f "$notes" ]; then
             body=(--notes-file "$notes")
