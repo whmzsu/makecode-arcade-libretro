@@ -263,11 +263,23 @@ cp core/makecode_arcade_libretro_libnx.a /path/to/RetroArch/libretro_libnx.a
 cd /path/to/RetroArch && make -f Makefile.libnx   # -> retroarch_switch.nro
 ```
 
-Install: copy `makecode_arcade_libretro_libnx.nro` and
-`makecode_arcade_libretro.info` into `sdmc:/retroarch/cores/`, cartridges
-anywhere (e.g. `sdmc:/roms/makecode/`). Start it via title takeover (hold R
-while launching any game to reach hbmenu) for full memory; applet mode (album)
-also works with 448MB, and this core uses about 11MB RSS.
+Install: copy `makecode_arcade_libretro_libnx.nro` (and optionally the
+`.info`) into **`sdmc:/switch/`** - the NRO is a standalone homebrew program
+(frontend + core linked together), and hbmenu only scans that directory; it is
+NOT a core for `sdmc:/retroarch/cores/`. Cartridges go anywhere (e.g.
+`sdmc:/roms/makecode/`). Start it via title takeover (hold R while launching
+any game to reach hbmenu) for full memory.
+
+> **Known issue (real-device tested 2026-11, firmware 21/22 + Atmosphere
+> 1.11~1.12)**: the RetroArch frontend crashes when **loading any core** in
+> title takeover mode - crash reports land in mesa/nouveau's nv50_ir shader
+> compiler reading wild pointers; stock RetroArch 1.21.0/1.22.2 without any
+> third-party core crashes the same way, so this is unrelated to our core.
+> Upstream: [libretro/RetroArch#18905](https://github.com/libretro/RetroArch/issues/18905)
+> (open). In applet mode the NRO runs inside hbloader, and launching RA 1.21.0
+> there crashes the whole hbloader process (console reboot). Firmware 20 and
+> below are unaffected; until upstream fixes it, fw21/22 users need a firmware
+> downgrade or another device.
 
 > Archiver trap: GNU `ar` stores basenames only, and `runtime/pxtapp` has both
 > `base/control.cpp` and `core---vm/control.cpp` - archiving directly lets the

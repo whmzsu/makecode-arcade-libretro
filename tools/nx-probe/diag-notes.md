@@ -103,3 +103,32 @@ sdmc:/atmosphere/crash_reports/
 - `ra_plain.nro` — RetroArch 本体，不含核心
 - `*.symbols.txt` — 对应 NRO 的 `nm -n` 符号表，崩溃偏移靠它对到函数
 - `*-build.log` — 构建日志
+
+---
+
+## 最终定案（2026-11-07 凌晨）
+
+机器：固件 22.0.0 + Atmosphère 1.12.1（用户已从 1.11.1 升级）。
+
+**这不是我们核心的问题。**证据链：
+
+1. crash report 里的栈从未出现核心函数；VM 侧 mca_trace 一路跑到
+   "core started"（镜像装载/GC/initRuntime/主循环全通，10ms 就绪）。
+2. **官方 RetroArch 1.21.0 与 1.22.2（不含任何第三方核心）裸前端同样崩**，
+   用户配置重置（retroarch.cfg 重生 + 无着色器缓存）后依旧。
+3. 崩点在 mesa/nouveau 的 **nv50_ir 着色器编译器**（1.22.2 符号已确认：
+   NVC0LegalizePostRA::findFirstUses 读哈希表野指针）。1.21.0 与 1.22.2
+   寄存器签名逐位一致（X5=0xfffffffe, X6=0x21），野值每次不同（符号扩展
+   负值垃圾）。
+4. **连非 RA 的自制 GUI（tencent-switcher-gui）也崩，野值特征相同**；
+   melonDS 正常（软件渲染，不走 GL 着色器管线）。
+5. 启动方式矩阵：title takeover = 菜单✓、加载核心崩（Application 进程崩）；
+   applet = NRO 跑在 hbloader 进程里，RA 1.21.0 一启动整个 hbloader 崩
+   （Program ID 010000000000100d）→ 整机重启。
+
+上游：libretro/RetroArch#18905（open，fw21.2 起有人报，fw22.5 复现）；
+Atmosphere-NX/Atmosphere#2717（同错误码的 applet 崩溃讨论）。
+
+**NRO text 大小对照表**（判 crash report 归属用）：
+我们的 NRO=8,286,208 / 官方1.22.2=8,134,656 / 官方1.21.0≈7,741,440（个别
+报告 7,737,344，段对齐差一页）/ tencent-switcher-gui=4,984,832。

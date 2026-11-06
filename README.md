@@ -241,9 +241,18 @@ cd /path/to/RetroArch && make -f Makefile.libnx   # -> retroarch_switch.nro
 安装：`makecode_arcade_libretro_libnx.nro` 放 SD 卡 **`sdmc:/switch/`**
 （它本身就是一个 homebrew 程序，hbmenu 只扫这个目录；**不是** `retroarch/cores/`
 ——那是官方 RetroArch 自己的核心目录）。`.info` 可选，同样放 `switch/` 即可；
-卡带放 `sdmc:/roms/makecode/`。务必以 title takeover 启动（按住 R 点任意游戏
-进 hbmenu）拿完整内存，从相册（applet 模式）进入内存只有几百 MB，RetroArch
-前端不一定撑得住。
+卡带放 `sdmc:/roms/makecode/`。以 title takeover 启动（按住 R 点任意游戏进
+hbmenu）拿完整内存。
+
+> **已知问题（2026-11 真机实测，固件 21/22 + 大气层 1.11~1.12）**：RetroArch
+> 前端在 title takeover 模式下**加载任何核心都会崩**（crash report 显示崩在
+> mesa/nouveau 的 nv50_ir 着色器编译器，读野指针；官方 1.21.0/1.22.2 裸前端
+> 同样崩，与核心无关）——上游 issue
+> [libretro/RetroArch#18905](https://github.com/libretro/RetroArch/issues/18905)，
+> 尚未修复；applet（相册）模式下 NRO 跑在 hbloader 进程里，RA 1.21.0 一启动
+> 连累整机重启。崩溃与本核心无关（核心从未出现在任何崩溃栈上，VM 装载、
+> GC、主循环全部正常）。固件 20 及以下不受影响；等上游修复前，fw21/22 的
+> 机器请先降级固件或用其他设备游玩。
 
 > 归档这步有个坑：GNU `ar` 默认只存基名，而 `runtime/pxtapp` 里
 > `base/control.cpp` 与 `core---vm/control.cpp` 同名，直接归档会让后一个
