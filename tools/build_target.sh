@@ -87,6 +87,13 @@ case "$TAG" in
              # zig 自己的 0x0a00 不会被覆盖（见 core/src/win32_baseline.h）
              WIN_BASELINE=(-include "$CORE/src/win32_baseline.h") ;;
   *macos*)   EXT="dylib"; LINK_EXTRA=(-dynamiclib) ;;
+  *musl*)    # musl（Lakka）不在本地矩阵：zig 0.17 的 musl 只能产动态 libc.so
+             # （Lakka rootfs 没有 libc.so，加载不了）或非 PIC 静态 libc.a
+             # （数据符号 ABS64 重定位，进 DSO 必炸 R_AARCH64_ABS64 错）。
+             # 走 tools/build_musl.sh（musl.cc 交叉工具链 + GNU ld -shared -static），
+             # 见 .github/workflows/build.yml 的 lakka-musl job。
+             echo "musl 目标不支持本地 zig 构建，请用 tools/build_musl.sh（CI 环境）" >&2
+             exit 2 ;;
   *android*) # -static-libstdc++：把 libc++ 静态链进去，产物只依赖 libc/libm/libdl，
              # RetroArch 加载插件时无需 libc++_shared.so（不同 App 的 STL 版本差异会炸）
              # max-page-size=16384：Android 15 起有 16KB 页设备，4KB 对齐的 .so 无法 dlopen

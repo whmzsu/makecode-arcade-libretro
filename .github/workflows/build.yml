@@ -24,6 +24,7 @@
 #   android arm64-v8a（ndk-build，见 core/jni/）
 #   macOS 单独一个实验 job（continue-on-error，不阻塞）
 #   zig：x64/arm64 Windows + Linux x64/arm64（基线 2.17）
+#   lakka-musl：musl.cc 交叉工具链全静态 .so（Lakka 用，musl libc 例外不走 zig）
 #   behavior-miniretro：真 aarch64 硬件 runner（ubuntu-24.04-arm，公开仓库
 #     免费）上用第三方前端 miniretro 跑 900 帧冒烟 —— 行为层验证
 
@@ -477,6 +478,113 @@ jobs:
           [ "$rc" -ne 0 ] && { echo "::error::miniretro rc=$rc last3: $last"; exit 1; }
           [ "$n" -ge 2 ] || { echo "::error::900 帧只产出 $n 帧画面 last3: $last"; exit 1; }
           echo "miniretro 冒烟通过：rc=0 pngs=$n"
+
+  # ------------------------------------------------------- Lakka (musl)
+  # Lakka / LibreELEC 系是 musl libc，glibc 动态 .so 加载不了；musl 目标
+  # 不走本地 zig（zig 0.17 的 musl 静态库是 exe 专用非 PIC 版，见
+  # tools/build_musl.sh 头注释），用 musl.cc 的 aarch64 交叉工具链编全静态
+  # .so——与 libretro buildbot 的 Lakka core 同一构型。
+  # musl.cc 偶尔抽风，musl.cc 与 more.musl.cc 双源 fallback。
+  lakka-musl:
+    name: lakka-musl (aarch64 全静态)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 下载 musl.cc aarch64 交叉工具链
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          ok=0
+          for url in "https://musl.cc/aarch64-linux-musl-cross.tgz" \
+                     "https://more.musl.cc/11/x86_64-linux-musl-cross/aarch64-linux-musl-cross.tgz"; do
+            if curl -fSLo tc.tgz "$url" 2>curl.err; then
+              if tar -tf tc.tgz >/dev/null 2>&1; then ok=1; break; fi
+              echo "::error::$url 返回的不是合法 tar.gz：$(file -b tc.tgz | cut -c1-80)"
+            else
+              echo "::warning::$url 下载失败：$(tail -1 curl.err | cut -c1-160)"
+            fi
+          done
+          [ "$ok" = 1 ] || { echo "::error::两个 musl.cc 源都取不到工具链"; exit 1; }
+          mkdir -p "$RUNNER_TEMP/tc"
+          tar -xzf tc.tgz -C "$RUNNER_TEMP/tc" --strip-components=1
+          "$RUNNER_TEMP/tc/bin/aarch64-linux-musl-g++" --version | head -1
+          echo "$RUNNER_TEMP/tc/bin" >> "$GITHUB_PATH"
+
+      - name: 编译（musl-gcc 全静态，buildbot 同构型）
+        run: |
+          set -u
+          log=out/ci-musl.log
+          mkdir -p out
+          if ! tools/build_musl.sh > "$log" 2>&1; then
+            first=$(grep -n -m1 'error:' "$log" | cut -d: -f1 || true)
+            if [ -n "${first:-}" ]; then
+              sed -n "$((first > 8 ? first - 8 : 1)),$((first + 4))p" "$log" \
+                | sed 's/^/::error::musl /'
+            fi
+            grep -E 'error:|undefined reference|cannot find|Error [0-9]' "$log" | head -20
+            exit 1
+          fi
+          tail -5 "$log"
+
+      - name: 检查产物（AArch64 + 零 NEEDED + 导出符号）
+        run: |
+          so=core/dist/aarch64-linux-musl/makecode_arcade_libretro.so
+          file "$so" | grep -q "ELF 64-bit LSB .* ARM aarch64" \
+            || { echo "::error::产物不是 aarch64 ELF"; file "$so"; exit 1; }
+          n=$(readelf -d "$so" | grep -c NEEDED || true)
+          [ "$n" = "0" ] || { echo "::error::NEEDED=$n，全静态失败"; exit 1; }
+          for sym in retro_init retro_run retro_load_game retro_get_system_info; do
+            readelf --dyn-syms -W "$so" | grep -qw "$sym" \
+              || { echo "::error::缺少导出符号 $sym"; exit 1; }
+          done
+          echo "全静态 aarch64 DSO，NEEDED=0，导出符号齐全"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aarch64-linux-musl
+          path: core/dist/aarch64-linux-musl/makecode_arcade_libretro.so
+          if-no-files-found: error
+          retention-days: 30
+
+  # miniretro 冒烟跑 musl 全静态产物：全静态 .so 与宿主 libc 无关，
+  # glibc 系统的 dlopen 同样能加载（aarch64 机器码 + 零外部符号解析），
+  # 等于在"换了一个 libc 的世界"里再验一遍 core 行为。
+  behavior-miniretro-musl:
+    name: behavior-miniretro (musl 全静态)
+    needs: [lakka-musl]
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: aarch64-linux-musl
+          path: out/musl
+
+      - name: 编译 miniretro
+        run: |
+          git clone --depth 1 https://github.com/davidgfnet/miniretro
+          make -C miniretro -j"$(nproc)"
+
+      - name: miniretro 加载 musl core 跑 900 帧
+        run: |
+          mkdir -p out/mr out/mr-system
+          set +e
+          ./miniretro/miniretro \
+            --core out/musl/makecode_arcade_libretro.so \
+            --rom tools/fixtures/ping.pxt64 \
+            --output out/mr \
+            --system out/mr-system \
+            --frames 900 --dump-frames 300 600 900 \
+            > miniretro-musl.log 2>&1
+          rc=$?
+          set -e
+          n=$(find out/mr -name '*.png' | wc -l)
+          last=$(tail -3 miniretro-musl.log | tr '\n' '|' | cut -c1-220)
+          [ "$rc" -ne 0 ] && { echo "::error::musl miniretro rc=$rc last3: $last"; exit 1; }
+          [ "$n" -ge 2 ] || { echo "::error::900 帧只产出 $n 帧画面 last3: $last"; exit 1; }
+          echo "musl core 冒烟通过：rc=0 pngs=$n"
 
   # ------------------------------------- Makefile 兼容性（buildbot 同路径）
   # libretro buildbot 用的是 core/Makefile + make + gcc 工具链，不是 zig。
