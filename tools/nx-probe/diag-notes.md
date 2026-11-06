@@ -1,5 +1,30 @@
 自动生成的**诊断产物**，用于定位 Switch 上"加载游戏后黑屏几秒就崩"的问题。不是发版，不是给玩家玩的东西。
 
+## 最终结论（2026-11-07）：根因在系统侧，不在核心
+
+**用户侧决定性发现：官方 RetroArch 前端加载其他核心的游戏同样崩** —— 与我们的核心无关。
+用户启动方式为 NSP forwarder（title takeover 全内存），applet 内存额度论也排除。
+
+用符号表（`mca_boot.symbols.txt` + `addr2sym.py`）解析 4 份 crash report，
+**所有崩点全在 mesa/nouveau（Switch GL 驱动）的 malloc/free 路径里**，核心函数从未上栈：
+
+| 场景 | 栈（自底向上截取） |
+|---|---|
+| ozone 菜单画光标 | `_malloc_r` ← `nouveau_mm_allocate` ← `nouveau_buffer_transfer_map` ← `glBufferData` ← `ozone_draw_cursor` |
+| swap buffers | `_free_r` ← `nouveau_fence_trigger_work` ← `eglSwapBuffers` ← `gl2_frame` |
+| 游戏运行期（旧报告） | dlmalloc 拆链 ← `nouveau_buffer_create` ← `nvc0_launch_grid` |
+
+野指针高位全是 `0x3f…`（double 位模式）—— 堆空闲链表被浮点数据覆盖，是系统级内存被破坏的表现。
+
+**根因：固件 22 + Atmosphère 1.11.1 错配。** 官方 release notes 对照：
+1.11.0=22.0.0 基础支持 → 1.11.1=22.1.0 → **1.11.2（2026-06）才补全 22.x** → 1.12.1（2026-10-16）= 22.x 全量 + 23.0.0。
+fw 22 发布时 GBAtemp 帖子的症状（自制必崩、forwarder 能进但加载内容报错）与本机逐字吻合。
+**解法：升级 Atmosphère 到 1.12.1（fusee 必须同步更新，fusee-primary 已废弃；Hekate 一并升）。**
+
+我们的 NRO（CI libnx 4.12.0）证据链健康：菜单能进、VM 10ms 就绪、Lakka 真机全通过。
+教训：**没有符号表时纯反汇编"还原"函数会把 nouveau_buffer_create 误读成"我们的清理循环"** ——
+nx-diag 附带 symbols.txt + `addr2sym.py` 是诊断链的固定环节，不要省。
+
 ## 已经确认的事实
 
 真机：固件 22.0.0 / Atmosphere 1.11.1，从 hbmenu 启动。
@@ -21,6 +46,7 @@ PC = retroarch_switch + 0x7d20c4
 ```
 
 这段是 newlib 的 `free()` 在拆空闲链表。**堆被人写坏了**（空闲块的 fd 被覆盖），不是 libnx ABI / 链接 / 内存不足。
+（后注：该 PC 实为 `_dtoa_r+0x11e4` 处的 dlmalloc 例程，调用方是 nouveau——见上表；当时没有符号表，归属判断部分有误。）
 
 模块归属也是确定的：报告里模块的 text 段 8,286,208 字节，与本 NRO 的 `text_size` 逐字节相等（`ra_plain` 是 8,151,040，差 135,168）。所以崩的确实是"前端 + 我们的核心"这个包。
 
