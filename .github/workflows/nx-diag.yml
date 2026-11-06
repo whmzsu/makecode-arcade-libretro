@@ -123,14 +123,17 @@ jobs:
           NOTES=tools/nx-probe/diag-notes.md
           if [ ! -f "$NOTES" ]; then echo "::warning::缺少 $NOTES"; exit 0; fi
 
-          # 不假设 download-artifact 的落地层级：递归找 .nro，有几个发几个。
-          mapfile -t NROS < <(find pkg -type f -name '*.nro')
-          if [ "${#NROS[@]}" -eq 0 ]; then
+          # 不假设 download-artifact 的落地层级：递归找 .nro 与 .symbols.txt。
+          # 符号表必须一起发：真机 crash report 只给 "retroarch_switch + 偏移"，
+          # 有这份 nm 输出就能把偏移直接翻成函数名（没它只能反汇编猜）。
+          mapfile -t FILES < <(find pkg -type f \( -name '*.nro' -o -name '*.symbols.txt' \) | sort)
+          n_nro=$(printf '%s\n' "${FILES[@]}" | grep -c '\.nro$' || true)
+          if [ "${#FILES[@]}" -eq 0 ] || [ "$n_nro" -eq 0 ]; then
             echo "::warning::pkg 里没有任何 .nro，跳过发布（artifact 仍在本次 run 上）"
             exit 0
           fi
-          echo "将发布 ${#NROS[@]} 个 NRO"
-          printf '  %s\n' "${NROS[@]}"
+          echo "将发布 ${#FILES[@]} 个文件（其中 .nro ${n_nro} 个）"
+          printf '  %s\n' "${FILES[@]}"
 
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" --title "$TITLE" --notes-file "$NOTES" --prerelease \
@@ -138,7 +141,7 @@ jobs:
           fi
 
           rc=0
-          for f in "${NROS[@]}"; do
+          for f in "${FILES[@]}"; do
             if gh release upload "$TAG" "$f" --clobber; then
               echo "  上传 OK: $(basename "$f")"
             else
