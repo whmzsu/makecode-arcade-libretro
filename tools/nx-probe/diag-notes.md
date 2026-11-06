@@ -14,12 +14,12 @@
 
 全部放 `sdmc:/switch/`，按住 `R` 点任意已装游戏进 hbmenu（title takeover，全内存）。
 
-### 1. `probe_rules.nro`（先跑这个）
+### 1. `probe_nacp.nro`（先跑这个）
 
-和起不来的 `probe.nro` **源码完全一样**，唯一差别是改用 devkitPro 官方 `switch_rules` 编译（`tools/nx-probe/probe-mk/Makefile`）。
+和起不来的 `probe.nro` **用的是同一个 ELF**，唯一差别是 `elf2nro` 打包时多带了一个 NACP（标题/作者/版本）。头部对比显示 `probe.nro` 是三个 NRO 里唯一没有 NACP 的（文件末尾 0 字节额外数据，另两个都多 34214 字节）。
 
-- **能显示文字** → 我们的裸 gcc 调用姿势有问题（链接脚本/段布局/元数据），那么核心的编译方式也要跟着改
-- **也起不来** → 与编译方式无关，问题在更底层
+- **能显示文字** → 起不来的原因是我打包姿势少了元数据，跟核心无关；`probe.nro` 的失败就不能当作"平台不兼容"的证据
+- **也起不来** → 与 NACP 无关，问题在更底层
 
 ### 2. `ra_stubcore.nro`（对照：RetroArch + 空核心）
 

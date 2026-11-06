@@ -126,11 +126,21 @@ link_nro() {   # $1=静态库路径 $2=输出名（不含 .nro）
     aarch64-none-elf-nm -n "$RA_DIR/retroarch_switch.elf" 2>/dev/null \
         | grep -E ' [TtWw] ' > "$OUT_ABS/$name.symbols.txt"
     echo "  $name.nro: $(stat -c %s "$OUT_ABS/$name.nro") 字节，符号 $(wc -l < "$OUT_ABS/$name.symbols.txt") 条"
-    # 链接成功 ≠ 核心被链进去：用只属于核心的符号做实证
-    if ! aarch64-none-elf-nm "$RA_DIR/retroarch_switch.elf" | grep -qE ' T retro_load_game$'; then
+    # 链接成功 ≠ 核心被链进去：用只属于核心的符号做实证。
+    #
+    # 注意不能写 `nm ... | grep -qE ' T retro_load_game$'`：脚本开了
+    # pipefail，grep -q 命中后立刻退出会让 nm 吃到 SIGPIPE 而死，
+    # 整条管道返回非 0，于是"符号明明在"被误报成"符号缺失"。
+    # （这个假警报真实发生过一次，两个 NRO 都白跑了。）
+    # 所以先把 nm 输出落到变量里，再在变量上匹配。
+    local syms
+    syms=$(aarch64-none-elf-nm "$RA_DIR/retroarch_switch.elf" 2>/dev/null \
+           | grep -E ' [Tt] retro_load_game$' || true)
+    if [ -z "$syms" ]; then
         echo "  !! ELF 里没有 retro_load_game（归档成员被丢掉了）"
         return 1
     fi
+    echo "  retro_load_game @ $(echo "$syms" | head -1 | awk '{print $1}')"
 }
 
 # ra_plain 那棵树的对象是 HAVE_STATIC_DUMMY=1 编的，配置不同不能复用：
@@ -155,6 +165,19 @@ rc_boot=$?
 echo
 echo "==================== 产物 ===================="
 ls -l "$OUT_ABS"
+
+# 空核心只有几百字节、我们的核心有 754KB，两个 NRO 的段大小必须不同。
+# 一样大说明 .a 其实没进去（比如被 HAVE_STATIC_DUMMY 的 dummy 实现顶掉），
+# 那样"空核心能跑 / 我们的核心不能跑"这条对照就失效了。
+if [ -f "$OUT_ABS/ra_stubcore.nro" ] && [ -f "$OUT_ABS/mca_boot.nro" ]; then
+    s_stub=$(stat -c %s "$OUT_ABS/ra_stubcore.nro")
+    s_boot=$(stat -c %s "$OUT_ABS/mca_boot.nro")
+    echo "  段大小: ra_stubcore=$s_stub  mca_boot=$s_boot  差=$((s_boot - s_stub))"
+    if [ "$s_stub" -eq "$s_boot" ]; then
+        echo "!! 两个 NRO 一样大：核心没真的链进去，对照无效"
+        rc_boot=1
+    fi
+fi
 
 # 两个链接各自独立收尾：一个失败不要连带另一个也不产出，
 # 否则每次都要再等一轮五分钟的 CI 才能拿到另一个对照。

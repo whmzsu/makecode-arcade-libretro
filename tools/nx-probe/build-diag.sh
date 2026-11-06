@@ -57,28 +57,38 @@ else
     exit 1
 fi
 
-# ------------------------------------------------------ probe_rules.nro
-# 同一份 probe.c，改用 devkitPro 官方 switch_rules 编。
+# ------------------------------------------------- probe_nacp.nro（同 ELF）
+# 头部对比发现一个结构性差异：probe.nro 是三者里唯一**没有 NACP** 的
+#   probe.nro      188416 = 段末，末尾 0 字节额外数据
+#   ra_plain.nro   段末 16424960，文件 16459174，多出 34214 字节（NACP 等）
+#   mca core       段末 16613376，文件 16647590，同样多 34214 字节
+# 所以用一个**完全相同**的 probe.elf，只改 elf2nro 的参数，把 NACP 补上，
+# 直接看"少了 NACP 会不会导致 hbmenu 起不来"这一条。
 #
-# 为什么需要它：裸 gcc 编出来的 probe.nro 在真机上起不来，而同一容器里用
-# switch_rules 编的 ra_plain.nro 能起来。差异可能在链接脚本处理、段布局、
-# __nx_exit 收尾，或者 APP_TITLE 之类的元数据。两个探针源码完全相同，
-# 只有"编译方式"不同，所以：
-#   probe 崩 / probe_rules 正常 -> 我们的裸 gcc 调用姿势有问题
-#   两个都崩                   -> 与编译方式无关，是 libnx 与固件的问题
+# 不再走 switch_rules：那个文件不在 libnx 仓库里（由 pacman 包生成），
+# 猜它为什么"没有目标"是纯浪费——同一个 ELF 换打包参数就能隔离出结论。
 echo
-echo "==================== 构建 probe_rules.nro（switch_rules） ===================="
-MK="$PWD/tools/nx-probe/probe-mk"
-cp tools/nx-probe/probe.c "$MK/probe.c" || { echo "!! 拷 probe.c 失败"; exit 1; }
-if ( cd "$MK" && make clean >/dev/null 2>&1; \
-     make -j"$(nproc)" ) \
-        > "$OUT/probe_rules-build.log" 2>&1; then
-    cp "$MK/probe_rules.nro" "$OUT/probe_rules.nro" && echo "probe_rules.nro OK"
+echo "==================== 构建 probe_nacp.nro ===================="
+if [ ! -f "$OUT/probe.elf" ]; then
+    echo "!! 没有 probe.elf，跳过"
 else
-    echo "!! probe_rules 编译失败（见 probe_rules-build.log）"
-    grep -E 'error:|Error [0-9]|No such file' "$OUT/probe_rules-build.log" | head -10
+    ELF2NRO=$(command -v elf2nro || command -v aarch64-none-elf-elf2nro || true)
+    NACPTOOL=$(command -v nacptool || true)
+    echo "nacptool: ${NACPTOOL:-<找不到>}"
+    if [ -n "$ELF2NRO" ] && [ -n "$NACPTOOL" ]; then
+        if "$NACPTOOL" --create "NX probe" "makecode-arcade" "diag" \
+                "$OUT/probe.nacp" > "$OUT/probe_nacp-build.log" 2>&1 \
+           && "$ELF2NRO" "$OUT/probe.elf" "$OUT/probe_nacp.nro" \
+                --nacp="$OUT/probe.nacp" >> "$OUT/probe_nacp-build.log" 2>&1; then
+            echo "probe_nacp.nro OK ($(stat -c %s "$OUT/probe_nacp.nro") 字节)"
+        else
+            echo "!! probe_nacp 打包失败（见 probe_nacp-build.log）"
+            tail -5 "$OUT/probe_nacp-build.log" | sed 's/^/    /'
+        fi
+    else
+        echo "!! 缺 nacptool 或 elf2nro，跳过 NACP 变体"
+    fi
 fi
-rm -f "$MK/probe.c"
 
 # ------------------------------------------------------------- ra_plain.nro
 # RetroArch 本体，不链任何核心（Makefile.libnx 支持 HAVE_STATIC_DUMMY=1）。
