@@ -70,7 +70,7 @@ for f in "$PXTAPP"/base/*.cpp "$PXTAPP"/core---vm/*.cpp "$PXTAPP"/game/*.cpp \
   rel="${f#$PXTAPP/}"
   out="$OBJV/${rel//\//_}.o"
   if needs_build "$f" "$out"; then
-    "$CXX" "${CXXFLAGS[@]}" -c "$f" -o "$out"
+    "$CXX" "${CXXFLAGS[@]}" "${INC[@]}" -c "$f" -o "$out"
     n=$((n + 1))
   else
     skipped=$((skipped + 1))
