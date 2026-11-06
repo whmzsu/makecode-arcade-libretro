@@ -46,6 +46,21 @@ if ! aarch64-none-elf-ar rcs "$OUT_ABS/libretro_stub.a" "$OUT_ABS/stub_core.o"; 
 fi
 echo "  stub 导出 retro_* 符号: $(aarch64-none-elf-nm --defined-only -g "$OUT_ABS/libretro_stub.a" | grep -c ' T retro_')"
 
+# 胖桩：内容 = 空核心，足迹 ≈ 我们的核心（ro 8MB / bss 1MB / text 占位）。
+# 用来切开「代码内容坏堆」和「光足迹就触发」这两种可能（见 stub_core_fat.c 头注）。
+echo
+echo "==================== 空核心胖桩（足迹对照） ===================="
+if ! aarch64-none-elf-gcc "${NX_CFLAGS[@]}" -I "$WS/core" -I "$WS/tools/nx-probe" \
+        -c "$WS/tools/nx-probe/stub_core_fat.c" -o "$OUT_ABS/stub_core_fat.o"; then
+    echo "!! stub_core_fat 编译失败"
+    exit 1
+fi
+if ! aarch64-none-elf-ar rcs "$OUT_ABS/libretro_stub_fat.a" "$OUT_ABS/stub_core_fat.o"; then
+    echo "!! 胖桩归档失败"
+    exit 1
+fi
+echo "  胖桩就绪: $(stat -c %s "$OUT_ABS/libretro_stub_fat.a") 字节"
+
 # 完整性自检：libretro 的 25 个入口一个都不能少。
 # 少了不会在编译期报错，而是等到 5 分钟后的链接才炸（上次就是漏了
 # retro_set_controller_port_device / retro_get_memory_{data,size}），
@@ -158,6 +173,11 @@ link_nro "$OUT_ABS/libretro_stub.a" ra_stubcore
 rc_stub=$?
 
 echo
+echo "==================== 链 ra_fatstub.nro ===================="
+link_nro "$OUT_ABS/libretro_stub_fat.a" ra_fatstub
+rc_fat=$?
+
+echo
 echo "==================== 链 mca_boot.nro ===================="
 link_nro "$CORE_A" mca_boot
 rc_boot=$?
@@ -181,7 +201,7 @@ fi
 
 # 两个链接各自独立收尾：一个失败不要连带另一个也不产出，
 # 否则每次都要再等一轮五分钟的 CI 才能拿到另一个对照。
-if [ "$rc_stub" -ne 0 ] || [ "$rc_boot" -ne 0 ]; then
-    echo "!! 失败：ra_stubcore=$rc_stub mca_boot=$rc_boot"
+if [ "$rc_stub" -ne 0 ] || [ "$rc_boot" -ne 0 ] || [ "$rc_fat" -ne 0 ]; then
+    echo "!! 失败：ra_stubcore=$rc_stub ra_fatstub=$rc_fat mca_boot=$rc_boot"
     exit 1
 fi
