@@ -63,9 +63,22 @@ fi
 echo
 echo "==================== 构建 ra_plain.nro（尽力而为） ===================="
 RA_REF="${RA_REF:-v1.22.2}"
-if [ ! -d /tmp/ra ]; then
-    git clone --depth 1 --branch "$RA_REF" --recursive \
-        https://github.com/libretro/RetroArch.git /tmp/ra 2>&1 | tail -2
+# 容器里 git 拉 GitHub 偶发中断（实测停在 checkout 87% 就没了），带重试；
+# 失败要留下明确记录，不能像以前那样"静默跳过控制组"。
+if [ ! -f /tmp/ra/Makefile.libnx ]; then
+    rm -rf /tmp/ra
+    for i in 1 2 3; do
+        echo "  第 $i 次克隆 $RA_REF ..."
+        if git clone --depth 1 --branch "$RA_REF" --recursive \
+                https://github.com/libretro/RetroArch.git /tmp/ra \
+                > "$OUT/ra-clone.log" 2>&1 && [ -f /tmp/ra/Makefile.libnx ]; then
+            break
+        fi
+        echo "  克隆没成功，尾部输出："
+        tail -5 "$OUT/ra-clone.log" 2>/dev/null | sed 's/^/    /'
+        rm -rf /tmp/ra
+        sleep 10
+    done
 fi
 if [ -d /tmp/ra ]; then
     ( cd /tmp/ra && make -f Makefile.libnx -j"$(nproc)" HAVE_STATIC_DUMMY=1 ) \

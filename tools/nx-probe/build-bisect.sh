@@ -27,20 +27,24 @@ mkdir -p "$OUT"
 OUT_ABS=$(cd "$OUT" && pwd)
 WS=$(cd "$(dirname "$0")/../.." && pwd)
 RA_REF="${RA_REF:-v1.22.2}"
-RA_DIR="${RA_DIR:-/tmp/ra-core}"
+# 复用 build-diag.sh 已经克隆的那棵树（省一次网络与磁盘）：
+RA_DIR="${RA_DIR:-/tmp/ra}"
 
 NX_CFLAGS=(-O2 -fPIE -march=armv8-a -mtune=cortex-a57 -mtp=soft
            -D__SWITCH__ -DHAVE_LIBNX -D_GNU_SOURCE)
 
 # ------------------------------------------------------------- 1. 空核心 .a
 echo "==================== 空核心 stub_core.a ===================="
-aarch64-none-elf-gcc "${NX_CFLAGS[@]}" -I "$WS/core" \
-    -c "$WS/tools/nx-probe/stub_core.c" -o "$OUT_ABS/stub_core.o" || {
-    echo "!! stub_core 编译失败"; exit 1; }
-aarch64-none-elf-ar rcs "$OUT_ABS/libretro_stub.a" "$OUT_ABS/stub_core.o" || {
-    echo "!! stub 归档失败"; exit 1; }
-aarch64-none-elf-nm --defined-only -g "$OUT_ABS/libretro_stub.a" | grep -c ' T retro_' \
-    | sed 's/^/  stub 导出 retro_* 符号: /'
+if ! aarch64-none-elf-gcc "${NX_CFLAGS[@]}" -I "$WS/core" \
+        -c "$WS/tools/nx-probe/stub_core.c" -o "$OUT_ABS/stub_core.o"; then
+    echo "!! stub_core 编译失败"
+    exit 1
+fi
+if ! aarch64-none-elf-ar rcs "$OUT_ABS/libretro_stub.a" "$OUT_ABS/stub_core.o"; then
+    echo "!! stub 归档失败"
+    exit 1
+fi
+echo "  stub 导出 retro_* 符号: $(aarch64-none-elf-nm --defined-only -g "$OUT_ABS/libretro_stub.a" | grep -c ' T retro_')"
 
 # --------------------------------------------------------- 2. 我们的核心 .a
 echo
@@ -54,40 +58,67 @@ CORE_A="$WS/core/makecode_arcade_libretro_libnx.a"
 [ -f "$CORE_A" ] || { echo "!! 没生成 $CORE_A"; exit 1; }
 echo "  核心静态库: $(stat -c %s "$CORE_A") 字节"
 
-# ------------------------------------------------------ 3. RetroArch 静态核心树
-# 注意：ra_plain（build-diag.sh）用的是 HAVE_STATIC_DUMMY=1 编的树，那套对象
-# 与"真核心"不是同一个配置。这里单独克隆一份，保证两个 NRO 只在 .a 上不同。
+# ------------------------------------------------------ 3. RetroArch 源码树
+#
+# 只要一份源码树：两个 NRO 的 RetroArch 目标文件完全相同，只有 libretro_libnx.a
+# 不同，所以编一次、换 .a 重链即可（换 .a 会让 make 认为目标过期）。
+# 容器里 git 拉 GitHub 偶发中断（实测停在 checkout 87%），所以带重试。
 echo
-echo "==================== 取 RetroArch（静态核心用） ===================="
-if [ ! -d "$RA_DIR" ]; then
-    git clone --depth 1 --branch "$RA_REF" --recursive \
-        https://github.com/libretro/RetroArch.git "$RA_DIR" 2>&1 | tail -2
+echo "==================== 取 RetroArch 源码 ===================="
+if [ ! -f "$RA_DIR/Makefile.libnx" ]; then
+    rm -rf "$RA_DIR"
+    ok=0
+    for i in 1 2 3; do
+        echo "  第 $i 次克隆 $RA_REF ..."
+        if git clone --depth 1 --branch "$RA_REF" --recursive \
+                https://github.com/libretro/RetroArch.git "$RA_DIR" \
+                > "$OUT_ABS/ra-clone.log" 2>&1 \
+           && [ -f "$RA_DIR/Makefile.libnx" ]; then
+            ok=1
+            break
+        fi
+        echo "  克隆没成功，尾部输出："
+        tail -5 "$OUT_ABS/ra-clone.log" | sed 's/^/    /'
+        rm -rf "$RA_DIR"
+        sleep 10
+    done
+    [ "$ok" = 1 ] || { echo "!! RetroArch 源码取不到（见 ra-clone.log）"; exit 1; }
 fi
-[ -f "$RA_DIR/Makefile.libnx" ] || { echo "!! 没有 Makefile.libnx"; exit 1; }
+echo "  源码就绪: $RA_DIR"
 
+# 换 .a 重链：必须删掉旧产物，否则 make 认为已是最新
 link_nro() {   # $1=静态库路径 $2=输出名（不含 .nro）
     local a="$1" name="$2"
     cp "$a" "$RA_DIR/libretro_libnx.a" || return 1
-    # 换 .a 必须强制重链，否则 make 认为 NRO 已是最新
     rm -f "$RA_DIR/retroarch_switch.nro" "$RA_DIR/retroarch_switch.elf"
     if ! ( cd "$RA_DIR" && make -f Makefile.libnx -j"$(nproc)" ) \
             > "$OUT_ABS/$name-build.log" 2>&1; then
         echo "!! $name 链接失败"
         grep -nE 'error:|Error [0-9]|undefined reference|cannot find' \
             "$OUT_ABS/$name-build.log" | head -15
+        tail -5 "$OUT_ABS/$name-build.log" | sed 's/^/    /'
         return 1
     fi
     cp "$RA_DIR/retroarch_switch.nro" "$OUT_ABS/$name.nro" || return 1
-    # 符号表：真机崩溃报告只给模块内偏移，有了它就能对到函数
+    # 符号表：真机崩溃报告只给模块内偏移，有它就能对到函数
     aarch64-none-elf-nm -n "$RA_DIR/retroarch_switch.elf" 2>/dev/null \
         | grep -E ' [TtWw] ' > "$OUT_ABS/$name.symbols.txt"
     echo "  $name.nro: $(stat -c %s "$OUT_ABS/$name.nro") 字节，符号 $(wc -l < "$OUT_ABS/$name.symbols.txt") 条"
-    # 断言核心真的进了 ELF（链接成功 ≠ 被链进去）
-    if [ -f "$RA_DIR/retroarch_switch.elf" ]; then
-        aarch64-none-elf-nm "$RA_DIR/retroarch_switch.elf" \
-            | grep -qE ' T retro_load_game$' || echo "  !! ELF 里没有 retro_load_game"
+    # 链接成功 ≠ 核心被链进去：用只属于核心的符号做实证
+    if ! aarch64-none-elf-nm "$RA_DIR/retroarch_switch.elf" | grep -qE ' T retro_load_game$'; then
+        echo "  !! ELF 里没有 retro_load_game（归档成员被丢掉了）"
+        return 1
     fi
 }
+
+# ra_plain 那棵树的对象是 HAVE_STATIC_DUMMY=1 编的，配置不同不能复用：
+# 清掉对象重编一次（两个 NRO 共用这一次编译，只有 .a 不同）。
+echo
+echo "==================== 清理 RetroArch 目标文件 ===================="
+( cd "$RA_DIR" && rm -rf obj && find . -name '*.o' -delete \
+    && rm -f retroarch_switch.nro retroarch_switch.elf ) || {
+    echo "!! 清理失败"; exit 1; }
+echo "  已清理"
 
 echo
 echo "==================== 链 ra_stubcore.nro ===================="
