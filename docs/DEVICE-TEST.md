@@ -999,3 +999,50 @@ x86_64-windows-gnu 编 askpass 是最省事的路。）
 **结论：v0.3.3 的 `makecode_arcade_lakka-arm64.zip` 在 Switch Lakka 上功能完整**
 （20 张卡带全部可跑；图形、音频、重置、换卡、卸载全通过）——与八台 ARM 掌机
 的结论一致，Lakka 这条线闭环。
+
+---
+
+## 三台 RGB30 换装 Debian 13 (trixie) — 2026-11-07
+
+设备：`rgb30a` 192.168.1.26 / `rgb30b` 192.168.1.85 / `rgb30c` 192.168.1.101
+（原 ArkOS 已刷成 Debian 13 trixie + EmulationStation-fcamod，三台同一镜像，
+host key 相同）。RK3566 4 核 1.992GHz，966MB 内存，Python 3.13.5。
+
+### 部署（三台相同）
+
+- v0.3.3 `makecode_arcade_linux-arm64.zip`（glibc）核心 → `~/.config/retroarch/cores/`
+- 20 张卡带 → `/roms/makecode/`
+- ES 注册：`/etc/emulationstation/es_systems.cfg` 插入 makecode 系统（130 系统，
+  字母序 macintosh 前，命令同模板 `sudo perfmax %GOVERNOR% %ROM%; nice -n -19
+  /usr/local/bin/retroarch -L .../makecode_arcade_libretro.so %ROM%; sudo perfnorm`），
+  重启 emulationstation.service 生效。已重启，XML 校验通过。
+- SSH：公钥已装（三台），别名 rgb30a/b/c 恢复可用。
+
+### 全量冒烟（每台 20 张 × 300 帧，60fps 节拍）
+
+**20/20 全绿 × 3 台**，rc=0、无 PANIC。关键指标三台逐位一致，且与
+Lakka@Switch / 八台掌机历史数据一致（Blocky 音频峰值 1264、Jewel 16376、
+Bunny 4080、Secure_the_river 16128）。
+
+### 吞吐（turbo，governor=performance + DDR performance 1056MHz，2000 帧）
+
+| 卡带 | rgb30b | rgb30c | rgb30a（热限频） |
+|---|---|---|---|
+| arcade-cube-land | **186.7** | **186.6** | 164.0 |
+| arcade-jumpy-platformer | 283.3 | 285.3 | 243.8 |
+| Blocky_Boss_Battle | 302.1 | 305.3 | 252.6 |
+| Space_Destroyer | 390.1 | 395.4 | 332.9 |
+
+与旧 ArkOS RGB30（cubeland 205/189/179）同档，无退化。
+
+### 生命周期（三台全过）
+
+换卡带（--switch）+ dlclose、重置（SELECT@120，trace 显示
+`HOST RESET begin/end` + `initRuntime return (restart path)`）、
+60 秒长测（3600 帧 56.5fps 节拍 1077 独立帧干净退出）。
+
+### rgb30a 散热异常（待处理）
+
+空载 soc 85°C（b/c 65~67°C），CPU max 被热限到 1.4~1.8GHz → 吞吐低 12%。
+被动散热机型不该空载 85°C，怀疑导热垫接触/壳体问题，或刷机后温控策略变化。
+建议关机凉透后复测温度；若仍异常查散热装配。
