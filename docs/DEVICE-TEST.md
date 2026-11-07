@@ -1510,3 +1510,54 @@ chroot /opt/mca-work/arm64-root /usr/bin/python3 /root/mca/libretro_host.py \
   吞吐数字没有参考价值；性能基准仍只能用 rgb30c / cubexx 真机。
 - **不解决**：github.com / raw / jsdelivr 的墙依旧，拉 release 资产仍走
   `api.github.com/.../releases/assets/<id>`。
+
+## core 0.3.4 在线两台部署与实测（2026-11-07 23:40~23:47）
+
+发版 `core-v0.3.4`（CI run 42386567562，15/15 job 绿；6 个包体检 6/6 PASS），
+随后只给当时在线的 2 台换核心。**其余 7 台关机、仍是 0.3.3（md5 `9da97c82…`）**。
+
+### 部署与备份
+
+| 设备 | 核心路径 | .info 路径 | 备份位置 | 新 md5 |
+|---|---|---|---|---|
+| cubexx (.149, muOS) | `/opt/muos/share/core/makecode_arcade_libretro.so` | `/opt/muos/share/emulator/retroarch/info/` | `/root/mca-backups/core-0.3.3/` | `7bd2bfe0…` |
+| rgb30c (.101, Debian13) | `~/.config/retroarch/cores/makecode_arcade_libretro.so` | 同核心目录 | `~/mca-backups/core-0.3.3/` | `7bd2bfe0…` |
+
+用的是发行包 `makecode_arcade_linux-arm64.zip` 里的 `.so` 与 `.info`（5170520 B），
+备份放在**家目录**而不是核心目录（避免被前端 glob 扫成重复条目），核心目录最终只剩
+目标文件，没有 `.bak` / `.old`。两台的 `libretro_host.py` 也换成修复后的版本。
+
+**部署前的真实不一致**：cubexx 的 `.info` 还写着 **0.3.2**（11-05 那次把核心升到 0.3.3
+时，muOS 的 `.info` 在系统目录里，漏改了）；rgb30c 是 0.3.3。本次两台 `.info` 一并
+对齐到 0.3.4。备份 `.info` 的 md5 分别是 `21b18de5…` / `c5346275…`。
+
+### 无头冒烟：逐帧哈希一致、吞吐无退化
+
+| 设备 | governor | ping 末帧哈希 / 吞吐 | cubeland 末帧哈希 / 吞吐 |
+|---|---|---|---|
+| cubexx | powersave（待机 288MHz） | `f93e4597…` / 63.1 fps | — |
+| cubexx | 临时 performance | `f93e4597…` / 424.1 fps | `23210fb3…` / 152.9 fps |
+| rgb30c | ondemand | `f93e4597…` / 372.1 fps | `23210fb3…` / 167.3 fps |
+
+吞吐取宿主的「实际节拍」（总帧/耗时），不是宿主打印的「游戏真实帧率」。
+cubexx 待机 powersave 与 performance 差 6.7 倍，再次印证跑性能前必须临时切
+performance（测完已恢复 powersave）。cubeland 152.9 fps 与 11-05 记录的 158 fps
+同档，**0.3.4 相对 0.3.3 没有性能退化**；两张卡带的哈希与真机 0.3.3 基准、
+工具机全量回归、发行包三路冒烟全部一致。
+
+### 真 RetroArch 前端层（1.22.2，/tmp 配置 + null 驱动）
+
+两台日志都出现 `[MCA] core version 0.3.4`、`Loading content file`、跑到 16 万+ tick、
+已知 panic 后核心自动重载（`HOST RESET`）。
+
+- rgb30c：`timeout 20` 正常结束，RC=124。
+- cubexx：RC=139（SIGSEGV），但日志显示崩在 `[Core] Unloading core symbols...`
+  之后，即**退出卸载阶段**。**用备份的 0.3.3 核心在同样配置下重跑同样是 139**，
+  0.3.4 再跑一次也是 139 → 与核心版本无关，是 muOS 定制 RA 在无头 null 驱动下
+  退出路径的既有现象；游戏运行段正常，13:36 用户实机前端验收也正常。
+
+### 遗留
+
+- 其余 7 台开机后按同流程替换即可（备份移出核心目录），届时全场才重新一致。
+- Switch NX 是独立 `nx-v*` 发布线，本次未跟随，现有 NX 产物仍 0.3.3。
+- 若 muOS 前端仍显示旧版本号，重启一次 RetroArch 让它重建 `core_info.cache`。
