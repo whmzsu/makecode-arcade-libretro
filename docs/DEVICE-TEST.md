@@ -1017,6 +1017,8 @@ host key 相同）。RK3566 4 核 1.992GHz，966MB 内存，Python 3.13.5。
   /usr/local/bin/retroarch -L .../makecode_arcade_libretro.so %ROM%; sudo perfnorm`），
   重启 emulationstation.service 生效。已重启，XML 校验通过。
 - SSH：公钥已装（三台），别名 rgb30a/b/c 恢复可用。
+- **前端验证（用户实机确认）**：ES 系统列表出现 "MakeCode Arcade" 分类，
+  点进去可正常启动游戏 —— 全链路（ES → perfmax → retroarch -L → 核心）通。
 
 ### 全量冒烟（每台 20 张 × 300 帧，60fps 节拍）
 
