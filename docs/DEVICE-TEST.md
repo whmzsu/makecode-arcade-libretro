@@ -943,3 +943,59 @@ panic 降级、音频、资源占用全部稳定。两个 panic 卡带的行为�
 6. 实测 `memcpy` 带宽（12.4 / 11.0 / 12.8 GB/s）与吞吐**不成正比**，说明瓶颈是
    **延迟**而非**带宽**——这也是为什么 DDR 升频带来的增益（+10%）没有延迟差异
    带来的离散（25%）那么大。
+
+---
+
+## Lakka (L4T Linux) @ Nintendo Switch OLED — 2026-11-07
+
+设备：`ssh root@192.168.1.61`（Lakka / L4T，内核 4.9.140 aarch64，Switch OLED
+Mariko，6 核 max 2.295GHz，3.9GB 可用内存）。SD 卡 vfat 以 **ro** 挂载在
+`/flash` 与 `/storage` 同一分区，核心在 `/storage/cores/`，卡带在
+`/flash/roms/pxt64_collections/`（20 张）。测试宿主放 `/tmp`（tmpfs，可执行）。
+
+**Windows 上密码登录 Lakka 的办法**：Lakka 只开密码认证（root/root）。Git Bash
+的 ssh 需要原生 askpass exe（cmd 脚本会静默失败）：
+
+```bash
+# 用 zig 编一个 20 行 C 程序：打印 $ASKPASS_PW
+ASKPASS_PW=root SSH_ASKPASS="C:/tmp/askpass/askpass.exe" SSH_ASKPASS_REQUIRE=force \
+  ssh -o PreferredAuthentications=password -o NumberOfPasswordPrompts=1 root@192.168.1.61 '...' < /dev/null
+```
+
+（本机没有 sshpass/plink，pip 装 paramiko 也不通；zig cc -target
+x86_64-windows-gnu 编 askpass 是最省事的路。）
+
+### 结果：20/20 卡带全绿
+
+每张 300 帧（`tools/libretro_host.py` + `--data-dir=/tmp/sw_N`）：
+
+| 判定 | 数量 |
+|---|---|
+| OK（rc=0、无 PANIC、有统计行） | **20** |
+| CRASH / PANIC / NO-STAT | 0 |
+
+样例数据（300 帧，60fps 节拍）：
+
+| 卡带 | 独立帧 | 画面非黑峰值 | 音频峰值 |
+|---|---|---|---|
+| Blocky_Boss_Battle | 128 | 9% | **1264**（与真机一致） |
+| Bunny_Hop_ | 46 | 100% | 4080 |
+| Jewel_Raider | 5 | 98% | 16376 |
+| Cave_Explorer | 150 | 100% | 0 |
+| Space_Destroyer | 150 | 6% | 0 |
+
+独立帧低的（GalgaMulti 8、Mouse_Adventure 2、cube-land 8）都是**停在标题画面
+等输入**，非性能问题：整个循环始终稳定 58~60 fps 节拍。
+
+### 生命周期
+
+- **换卡带**（`--switch`，Space_Destroyer → Cave_Explorer）：第二张正常跑 150 帧；
+- **dlclose**（卸载核心库）：`dlclose OK`，无崩溃；
+- **重置**（`--press=SELECT --press-at=120`）：`mca_trace` 显示
+  `HOST RESET begin/end` + `initRuntime return (restart path)`，重置后继续出帧；
+- **60 秒长测**（Cave_Explorer 3600 帧）：59.6 fps 节拍、1077 独立帧、
+  `unload + deinit` 干净退出，无泄漏迹象。
+
+**结论：v0.3.3 的 `makecode_arcade_lakka-arm64.zip` 在 Switch Lakka 上功能完整**
+（20 张卡带全部可跑；图形、音频、重置、换卡、卸载全通过）——与八台 ARM 掌机
+的结论一致，Lakka 这条线闭环。
