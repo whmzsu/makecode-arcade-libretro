@@ -47,6 +47,8 @@ tools/vm-build/node_modules/pxt-arcade/testproj/built/
 /libretro_host_saves/
 /makecode_arcade/
 mca_trace.log
+# 本机 Chromium/crashpad 落下的临时日志，与项目无关
+debug.log
 
 # pxt 扩展转换缓存（下载的社区扩展源码，不入仓库）
 .cache_ext/

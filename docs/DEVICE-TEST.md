@@ -1048,3 +1048,465 @@ Bunny 4080、Secure_the_river 16128）。
 空载 soc 85°C（b/c 65~67°C），CPU max 被热限到 1.4~1.8GHz → 吞吐低 12%。
 被动散热机型不该空载 85°C，怀疑导热垫接触/壳体问题，或刷机后温控策略变化。
 建议关机凉透后复测温度；若仍异常查散热装配。
+
+### SSH 开机自启（本镜像的坑，2026-11-07 修）
+
+- `/opt/system/Enable Remote Services.sh` 里 `sudo systemctl enable ssh` 那一行是
+  **被注释掉的**，脚本只执行 `sudo systemctl start ssh.service`；`Disable Remote
+  Services.sh` 同理只 stop 不 disable。→ 重启后 SSH 静默失联（rgb30c 当天早上
+  22 端口 refused 就是这个原因，与硬件无关）。
+- 修法：`sudo systemctl enable ssh.service`。三台已做并验证：冷启动后日志
+  `Starting ssh.service → Server listening on 0.0.0.0 port 22 → Started`，
+  PID 921/925，`/run/sshd` 由 unit 的 `RuntimeDirectory=sshd` 在开机时重建。
+- **锁死状态（会踩第二次）**：sshd 运行中被 `systemctl stop ssh`（该 unit
+  `KillMode=process`，子进程不跟随退出）会留下陈旧状态 —— 22 端口仍能应答
+  `SSH-2.0-OpenSSH_*` banner，但 KEX 阶段被 RST；此时 `systemctl start` 因端口
+  占用以 255 退出（`sshd -t` 却通过），点多少次“启用远程服务”都无效。
+  只能整机重启恢复，重启后 RuntimeDirectory 重建即正常。
+- **采样污染（重要）**：该镜像 `/etc/xdg/systemd/user/default.target.wants/
+  fluidsynth.service` 是全局启用的，任何登录（含 SSH）都会拉起 `fluidsynth -is
+  -r 48000 -z 512 default-GM.sf3`，实测吃 50~57% 单核 + 172MB 内存，能把 SoC
+  从 62°C 抬到 77°C。远程采样前必须先
+  `systemctl --user stop fluidsynth mpris-proxy`，否则数据全废。
+
+### 待机温度复测（2026-11-07 上午，屏保黑屏 + 无登录会话）
+
+| 设备 | SoC 空载 | 备注 |
+|---|---|---|
+| rgb30b | 48.9~51.2°C | 正常 |
+| rgb30c | 55.0°C | 正常 |
+| rgb30a | 61.7~67.5°C（冷启动 1 分钟即 67.5） | **异常**，比同负载 b 高 10~12°C |
+| rg353m（ArkOS） | 51.9~53.8°C | 正常 |
+| rk2023（ArkOS） | 53.8°C | 正常 |
+| clone-r36s（RK3326 对照） | 50.8°C | 说明 50°C 级是这类机器的地板 |
+
+CPU 86~94% idle、DDR 324MHz、无异常进程 → 不是软件跑飞；停掉 ES 只降 3°C。
+`thermal_zone0` 降频触发点**按系统不同**（hyst 均为 2°C，critical 均 115°C）：
+ArkOS / R36S Clone = passive **70°C**，RGB30 的 Debian 13 = passive **75°C**。
+rgb30a 待机就贴着 70~75 这条线，这正是它吞吐低 12% 的直接原因。
+
+补测（清理登录态服务后、开机 5 分钟稳态）：rgb30a 51.2°C vs b/c 46.7°C，差距收窄到
+4.5°C。说明之前 +10~13°C 里有一部分是「刚重启 + ES 冷启动 + 探针叠加」的残留热，
+但上一轮 perf 测试里 rgb30a 空载 85°C 仍无法用软件解释，重活下（游戏 60s）仍需复看。
+
+### 关掉登录态常驻服务（2026-11-07）
+
+三台 RGB30 有全局 user 级自启：`/etc/xdg/systemd/user/default.target.wants/
+{fluidsynth,mpris-proxy}.service` —— 任何用户登录（含 SSH/TTY）都会拉起
+`fluidsynth -is -r 48000 -z 512 default-GM.sf3`（实测 50~57% 单核 + 172MB）
+和 mpris-proxy。已 `sudo systemctl --global disable fluidsynth.service
+mpris-proxy.service`（三台）。
+
+验证（全新 SSH 登录后）：`pgrep -x fluidsynth` / `mpris-proxy` 均为空，
+`/etc/xdg/systemd/user/default.target.wants/` 与 `/etc/systemd/user/default.target.wants/`
+均空，未做 mask（保留手动启动能力）。
+
+清理后六台空载（10s 采样，ES 屏保黑屏）：
+
+| 设备 | busy | SoC |
+|---|---|---|
+| rgb30a | 3.3% | 51.2°C |
+| rgb30b | 3.3% | 46.7°C |
+| rgb30c | 3.3% | 46.7°C |
+| rg353m | 9.7% | 54.4°C |
+| rg353v | 5.4% | 42.5°C |
+| rk2023 | 4.9% | 50.6°C |
+
+samba 六台均 `disabled/inactive`、无进程（ES 菜单「Enable Remote Services」
+仍会临时 `start` 起来，重启即失效，属预期）。
+
+## R36S Clone 两台（原 RG351MP 硬件）：喇叭无声 → 换 DTB 修好 — 2026-11-07
+
+### 设备
+
+| 节点 | 硬件 | 系统 | 正确的 DTB |
+|---|---|---|---|
+| `r36s-clone-a`（192.168.1.31，旧名 rg351mpa） | RG351MP | R36S-Clone 镜像（Debian 13 + **内核 4.4.189**） | `rk3326-r36s-type2-panel1-with-amp-linux.dtb` |
+| `r36s-clone-b`（192.168.1.137，旧名 rg351mpb） | RG351MP | 同上 | 同上 |
+
+### 现象
+
+刷 R36S-Clone 镜像后**喇叭全无声**，耳机正常。ALSA 一切显示正常：
+`aplay` 送出无报错、`Playback Path=SPK_HP`、音量 100%、PCM 跑到 RUNNING。
+
+### 根因：镜像默认 DTB 没声明外部功放
+
+镜像默认用 `rk3326-r36s-type1-panel5-linux.dtb`，其 `rk817 codec` 节点缺
+外部功放声明的三个属性（与老系统能出声的 DTB 逐属性比对得出）：
+
+| 属性 | 老系统（有声） | `type1-panel5`（无声） |
+|---|---|---|
+| `spk-ctl-gpios` | `<&gpio3 7 GPIO_ACTIVE_HIGH>` | **缺失** |
+| `use-ext-amplifier` | 有（布尔） | **缺失** |
+| `spk-mute-delay-ms` | `500` | **缺失** |
+| `spk-volume` | `11` | `3` |
+
+RG351MP 的喇叭挂在**外部功放**上，使能脚是 GPIO3_A7（gpio-103），要靠 codec
+驱动按 `spk-ctl-gpios` 拉高。DTB 不声明 → 驱动只开 RK817 片内功放 → 外部功放
+始终不使能 → 喇叭无声。耳机走 codec 内部 HP 通路，完全绕开外部功放，所以有声。
+
+正确 DTB 文件名里的 **`with-amp`** 就是这个意思。
+
+### 走过的弯路（别重踩）
+
+1. **`hp-det-gpio` 极性**：克隆 DTB 是 `ACTIVE_LOW`、老系统 `ACTIVE_HIGH`，导致
+   系统永远认为「耳机已插入」，喇叭被静音。我按老系统改成 `ACTIVE_HIGH`（单字节
+   补丁，`hp-det` 标志位 1→0），重启后 `Headphone Jack=off` —— **但这只是必要条件，
+   不是充分条件**，功放没使能照样无声。改极性后不要误判为「已修好」。
+2. 停 ES 独占、`aplay -D hw:0,0` 直连、循环放音验证耳机通路，都只能证明
+   **codec/I2S/DMA 正常**，不能证明喇叭通路正常。
+3. 判断喇叭通路是否正常，最快的判据是看 DTB 里有没有 `use-ext-amplifier` +
+   `spk-ctl-gpios`，而不是反复调 ALSA。
+
+### 结论
+
+`/boot` 里选 `rk3326-r36s-type2-panel1-with-amp-linux.dtb`，重启后喇叭正常。
+以后重刷该镜像，**一律选带 `with-amp` 的那份 DTB**。
+
+### 验证与现状（2026-11-07 11:40）
+
+两台已切到 with-amp DTB 并重启，`/boot/boot.ini` 的 `load mmc X:1 ${dtb_loadaddr}`
+直接指向该文件（a 用 `mmc 1:1`、b 用 `mmc 0:1`，各自 TF/eMMC 编号不同，正常）。
+运行中 `/proc/device-tree/i2c@ff180000/pmic@20/codec` 已含
+`spk-ctl-gpios = <0x68 0x07>`、`use-ext-amplifier`、`spk-mute-delay-ms`；
+`/sys/kernel/debug/gpio` 出现 `gpio-103 | spk-ctl  out hi`（放音时拉高、空闲拉低）。
+用户实机确认两台喇叭有声。
+
+注意：`amixer -c 0 cget name="Headphone Jack"` 在**没插耳机**时仍报 `on`
+（该 DTB 的 `hp-det-gpio` 是 `ACTIVE_LOW`，gpio-86 空闲读 lo），但外部功放照常
+使能、喇叭有声 —— 所以这个 mixer 元素在本机型上不可作为「喇叭是否可用」的判据。
+
+设备已改名（2026-11-07）：`r36s-clone-a`（192.168.1.31）、`r36s-clone-b`
+（192.168.1.137），SSH 别名 `r36sclonea` / `r36scloneb`（旧别名 rg351mpa/b 保留兼容）。
+设备内 `/etc/r36s-clone-info` 记录了镜像/DTB 信息。顺手修了恢复镜像后
+`/home/ark` 又变回 777 导致 StrictModes 拒公钥的问题（改 755 + 重装公钥）。
+
+### 2026-11-07 12:00 重装回填 + 全量冒烟（a 机）
+
+用户重刷后镜像自带内容全清（核心/卡带/ES 条目/公钥全无，`/roms` 只剩空系统目录），
+已回填：v0.3.3 linux-arm64 核心 + 21 张卡带 → `/roms/makecode/` +
+ES 条目（`systems=136 makecode=1`）。用户实机确认「分类在，能玩游戏」。
+
+a 机 21 张全量冒烟（600 帧/张，`--turbo`）：
+
+| 判定 | 数量 | 说明 |
+|---|---|---|
+| ok | 19 | 独立帧 12~300，非黑 3~100% |
+| static | 1 | `Mouse_Adventure` 独立帧 2 —— 没模拟按键停在标题画面，非缺陷 |
+| panic | 1 | `Strawberry_Slam` 固定第 5133 tick `PANIC 980`，宿主存活 —— 游戏自身 bug，与 11-04 桌面判读一致 |
+
+吞吐参考（a/b 两台几乎逐位相同，未跑 perfmax）：cubeland 66.5/66.4、ping 158/159、
+Blocky 98.8/99.6（音频峰值 1264）、Space_Destroyer 156.6/161.7 fps。
+cubeland 低于 11-06 的 77.6 是因为 governor 默认档 + DDR 未调 performance。
+
+### 2026-11-07 12:12 b 机 21 张全量冒烟（与 a 对照）
+
+| 判定 | a | b |
+|---|---|---|
+| ok | 19 | 19 |
+| static | 1（Mouse_Adventure） | 1（同） |
+| panic | 1（Strawberry_Slam 5133 tick PANIC 980） | 1（同） |
+
+**关键：两台 21/21 张卡带的「独立帧数」与「非黑百分比」完全一致**
+（277/53/31/220/33/15/15/12/59/2/277/35/282/300/300/117/15/15/33/15/295），
+即同一卡带在两台机器上产生完全相同的帧序列 —— 核心的确定性在 ARM 真机可复现，
+不只是桌面端。
+
+吞吐差异（b 略高，同负载同 governor 默认档）：
+
+| 卡带 | a | b |
+|---|---|---|
+| Pigeon's Deliverance | 240.5 | 248.0 |
+| Secure the river | 225.7 | 226.3 |
+| Stack the Goats | 220.7 | 219.8 |
+| Blocky Boss Battle | 104.3 | 101.2 |
+| arcade-cube-land | 66.6 | 67.5 |
+
+两位数字落在 ±3% 内，属正常机间离散（11-04 的 RK3566 离散可达 25%，RK3326 同型号仅 1%）。
+
+### 全机温度快照（2026-11-07 12:20，屏保/待机态）
+
+横切 8 台可连设备（Switch/Lakka 关机、原 r36s .81 送修）+ 12:25 补测 cubexx：
+
+| 设备 | 系统 | SoC | GPU | 空载 busy | 当前频率 | 降频线 | 电池 |
+|---|---|---|---|---|---|---|---|
+| rg353m | ArkOS (U19.10) | 54.4°C | 51.2°C | 23.4% | 1.992GHz (100%) | 70°C | 74% 放电 470mA |
+| rg353v | ArkOS | 42.5°C | 40.6°C | 5.0% | 1.608GHz (89%) | 70°C | 100% **充电中** +411mA |
+| rk2023 | ArkOS | 48.3°C | 47.2°C | 4.0% | 1.8GHz (90%) | 70°C | **37% 放电 985mA** |
+| rgb30a | Debian 13 | 52.5°C | 46.1°C | 3.2% | 1.104GHz (55%) | 75°C | 61% |
+| rgb30b | Debian 13 | 47.8°C | 45.6°C | 3.2% | 1.104GHz (55%) | 75°C | 69% |
+| rgb30c | Debian 13 | 46.1°C | 41.9°C | 3.4% | 1.104GHz (55%) | 75°C | 59% |
+| r36s-clone-a | Debian 13 | 53.8°C | 50.4°C | 15.6% | 1.2GHz (93%) | 70°C | 42% |
+| r36s-clone-b | Debian 13 | 51.2°C | 51.7°C | 2.4% | 1.008GHz (78%) | 70°C | 51% |
+| cubexx | muOS 2606.0 | 46.9~47.7°C | 46.6~47.1°C | ~5% | 1.51~1.8GHz | 75°C | 84% **充电中**，电池 30.0°C |
+
+cubexx 另读三个独立感应点：`ve_thermal_zone` 45.9°C、`ddr_thermal_zone` 46.8°C，
+`axp2202-battery` **30.0°C 是真实读数**（rk817 那批恒 18.8 是死值）—— 这说明 H700
+这代的电池温度传感是好的，可作为以后判断充电发热的可靠指标。
+
+读数口径：`thermal_zone0`(soc-thermal) / `thermal_zone1`(gpu-thermal)；busy 为 10s
+`/proc/stat` 均值；`battery=18.8°C` 是 rk817 死值，全体一致，不可用。
+
+结论：
+
+- **全部在安全区**，距各自的 passive 触发点还有 17~29°C 余量，没有一台在降频。
+- **cubexx 边充电边跑前端只有 47°C，电池 30.0°C** —— 是全场唯一"插着电还最凉"的机器，
+  直接印证了「插电≠发烫」：真正升温来自低电量大电流充电，满电涓流几乎无感。
+- **rg353m 最高 54.4°C**，同时 busy 也是最高（ES 主题动画，14h 累计 65 分钟 CPU，
+  均摊 7.8% 单核，瞬时可达 38%），属"开机久了 + ES 前台在跑"的正常结果。
+- **rgb30a 比 b/c 高 4.7~6.4°C**，负载与频率三者完全相同（3.2% / 1.104GHz），
+  与上午的结论一致 —— 这台是散热装配差异（导热垫），软件侧无解释项。
+- **r36s-clone-a 53.8°C** 是 21 分钟前刚刷完机，ES 首次建库 + 卡带写入的余热，
+  b（50 分钟）已回落到 51.2°C，属正常收敛过程。
+- rk2023 电量 37% 且放电 985mA（约 3.7W），是这屋里功耗最高的一台，注意别让它跑到
+  低电自动关机。
+
+## 在线设备软件清单（2026-11-07 12:35）
+
+9 台在线（Switch/Lakka 关机、原 r36s .81 送修）。采集脚本 `out/therm/softinfo.sh`。
+
+> **历史快照**：本节两张表是 12:35 的读数。13:00~13:20 期间 rg353m / rg353v 已换成
+> Debian 13，表中这两行的 ArkOS 数据不再代表当前状态，现值见下方「换系统」章节；
+> 其余 7 行未变。
+
+### 系统层
+
+| 设备 | IP | DT model | 系统 | 内核 | libc | 内存 | CPU 上限 | 根分区 |
+|---|---|---|---|---|---|---|---|---|
+| rg353m | .130 | Anbernic RG353M v1 | ArkOS (Ubuntu 19.10) | 4.19.172 | glibc 2.30 | 1970MB | 1.99GHz | 8.7G / 79% |
+| rg353v | .77 | RK3566 EVB2 LP4X V10 | ArkOS (Ubuntu 19.10) | 4.19.172 | glibc 2.30 | 963MB | 1.80GHz | 8.5G / 74% |
+| rk2023 | .17 | Powkiddy RK2023 | ArkOS (Ubuntu 19.10) | 4.19.172 | glibc 2.30 | 964MB | 1.99GHz | 11G / 72% |
+| rgb30a | .26 | Powkiddy RGB30 | Debian 13 trixie | 5.10.226 | glibc 2.41 | 967MB | 1.99GHz | 11G / 51% |
+| rgb30b | .85 | Powkiddy RGB30 | Debian 13 trixie | 5.10.226 | glibc 2.41 | 967MB | 1.99GHz | 11G / 51% |
+| rgb30c | .101 | Powkiddy RGB30 | Debian 13 trixie | 5.10.226 | glibc 2.41 | 967MB | 1.99GHz | 11G / 51% |
+| r36s-clone-a | .31 | R36S Clone Type2（RG351MP 硬件） | Debian 13 trixie | **4.4.189** | glibc 2.41 | 918MB | 1.30GHz | 6.1G / 79% |
+| r36s-clone-b | .137 | 同上 | Debian 13 trixie | 4.4.189 | glibc 2.41 | 918MB | 1.30GHz | 6.1G / 79% |
+| cubexx | .149 | sun50iw9（全志 H700） | MustardOS 2606.0 ANDROMEDA | 4.9.170 | **glibc 2.44 (Buildroot)** | 973MB | 1.80GHz | 7.8G / 55% |
+
+四个不同的内核分支：**4.4.189（R36S Clone 镜像）/ 4.9.170（muOS）/ 4.19.172（ArkOS）/
+5.10.226（RGB30 Debian）**。同一颗 RK3566 上跑着 3 种内核，这也解释了 DTB 与
+`hp-det`/`spk-ctl` 行为在不同机器上不一致。
+
+### 模拟器 / 应用层
+
+| 设备 | 前端 | RetroArch | MakeCode 核心 | 卡带 | 核心目录 | 启动 DTB |
+|---|---|---|---|---|---|---|
+| rg353m | emulationstation | 1.19.1 | 0.3.2 | **25**（21+4 张诊断卡） | `~/.config/retroarch/cores` | `rk3566-OC.dtb` |
+| rg353v | emulationstation | **1.15.0** | 0.3.2 | 21 | 同上 | `rk3566-OC.dtb` |
+| rk2023 | emulationstation | 1.19.1 | 0.3.2 | 21 | 同上 | `rk3566-OC.dtb` |
+| rgb30a/b/c | emulationstation | 1.22.2 | **0.3.3** | **20**（缺 `ping`） | 同上 | `rk3566-rgb30.dtb` |
+| r36s-clone-a/b | emulationstation | 1.22.2 | **0.3.3** | 21 | 同上 | `rk3326-r36s-type2-panel1-with-amp-linux.dtb` |
+| cubexx | **muxfrontend** | 1.22.2 | **0.3.2** | 21 | `/opt/muos/share/core` | muOS 内置（无 boot.ini） |
+
+Python：ArkOS 三台 3.7.5 / RGB30 与 Clone 3.13.5 / cubexx 3.11.8。
+SSH：8 台 openssh 均 `enabled+active`；cubexx 用 **dropbearmulti**（22 端口 root，
+另 2022 端口 sftp jail），由 muOS 前端拉起，无 systemd。
+
+### 三个待统一项（13:20 更新）
+
+1. **核心版本不一致**：rk2023 + cubexx 仍是 **0.3.2**；rg353m / rg353v 换系统时已升到
+   **0.3.3**，与 RGB30 三台 + Clone 两台一致 → 目前 9 台里 7 台是 0.3.3，待升级仅 2 台。
+2. **RetroArch 版本跨度大**：换系统后 rg353m / rg353v 均为 1.22.2，最旧的 1.15.0 已消失；
+   现存 1.19.1（rk2023）与 1.22.2（其余 8 台）两代。
+3. **RGB30 缺 `ping.pxt64`**（20/21），是 11-07 部署时漏传；其余 20 张齐全。
+   （rg353m 原有的 4 张诊断卡随换系统被清掉，现为干净 21 张。）
+
+## rg353m / rg353v 换系统（2026-11-07 13:00~13:20）
+
+两台从 ArkOS(U19.10, kernel 4.19.172) 换成 **Debian 13 trixie + kernel 5.10.226** ——
+与 RGB30 三台同一镜像家族（`/opt/system` 脚本、`/roms` 布局、RA 1.22.2、perfmax/perfnorm
+全部一致）。IP 不变（.130 / .77），但主机密钥更换需 `ssh-keygen -R`。
+
+两台新镜像的共同状态：131 个核心、ES active、`ssh.service` **disabled**、
+`/etc/xdg/systemd/user/default.target.wants/` 带 **fluidsynth + mpris-proxy 全局自启**、
+家目录 700（sshd StrictModes 可接受）、sudo 免密。
+
+### rg353v（.77）—— 已完成全套
+
+- 公钥安装 + `systemctl enable ssh`（enabled/active）
+- `--global disable fluidsynth mpris-proxy`（新登录 procs/wants 均空）
+- 核心 v0.3.3 linux-arm64 → `~/.config/retroarch/cores/`
+- 21 张卡带 → `/roms/makecode/`（此镜像的卡带目录不再是 ~/makecode）
+- ES 注册：`/etc/emulationstation/es_systems.cfg`（systems=130, makecode=1），ES 已重启
+- 冒烟（900 帧 --turbo，governor 默认）：**cubeland 180.1 / ping 390.4 / Blocky 264.6 /
+  Space 384.3 fps**，Blocky 音频峰值 1264 与历史一致
+
+### rg353m（.130）—— 13:15 重启后补齐，已完成全套
+
+换系统后首次配置时撞上已记录过的 **sshd 锁死坑**：手动启动过的 sshd 占着 22 端口但
+`/run/sshd` 缺失 → KEX 阶段 RST（公钥/密码都连不上），`systemctl start ssh` 因端口占用
+退 255。与 RGB30 上的表现完全一致——**此坑无需手工杀进程，整机断电重启即自愈**
+（因为公钥已写入、服务已 enable，systemd 开机拉起的是干净 sshd）。
+
+13:15 用户重启后复核：`ssh=enabled/active`、BatchMode 公钥登录正常、
+`procs=[]`（fluidsynth/mpris-proxy 均未复活）、`wants=[]`、家目录 700。
+随后按 `deploy353.sh` 补齐：核心 0.3.3（5169256 B）、21 张卡带（含 `ping`）、
+ES 注册 `/etc/emulationstation/es_systems.cfg`（systems=130, makecode=1），ES active。
+
+冒烟（900 帧 --turbo，governor=ondemand）：
+
+| 卡带 | rg353m | rg353v | 差 |
+|---|---|---|---|
+| arcade-cube-land | 179.3 | 180.1 | −0.4% |
+| ping | 386.4 | 390.4 | −1.0% |
+| Blocky_Boss_Battle | 263.8 | 264.6 | −0.3%（音频峰值同为 1264） |
+| Space_Destroyer | 379.5 | 384.3 | −1.2% |
+
+**两台换到同一镜像后吞吐差 ≤1.2%，方法可重复**；此前 ArkOS 时代 rg353m 因 ES 主题
+动画空载 busy 高一个数量级而显得偏热/偏慢，现在软件环境完全对齐。
+注意 rg353m 是 1970MB 内存、rg353v 963MB，但本核心是延迟敏感型、RSS 仅 11MB，
+内存容量不体现在吞吐上。
+
+## 最新设备清单（2026-11-07 13:30，补齐后）
+
+9 台在线设备一次性同源采集，脚本 `out/therm/softinfo2.sh`，原始输出
+`out/therm/softinfo-latest.txt`。Switch/Lakka 关机、原 r36s .81 送修，均不计入。
+
+**全场已统一**：MakeCode 核心 **0.3.3**（9 台 md5 全部 = `9da97c82…a676fe93bb4d61634f7dbf`）、
+卡带 **21 张**（含 `ping.pxt64`）、前端注册齐全（8 台 ES `makecode=1` + 1 台 muOS catalogue）。
+
+### 系统层
+
+| 设备 | IP | DT model | 系统 | 内核 | libc | 内存 | CPU 上限 | 根分区 | governor |
+|---|---|---|---|---|---|---|---|---|---|
+| rg353m | .130 | Anbernic RG353M | Debian 13 trixie | 5.10.226 | glibc 2.41 | 1971MB | 1.99GHz | 11G/53% | ondemand |
+| rg353v | .77 | Anbernic RG353V/VS | Debian 13 trixie | 5.10.226 | glibc 2.41 | 967MB | 1.99GHz | 11G/52% | ondemand |
+| rk2023 | .17 | Powkiddy RK2023 | **Ubuntu 19.10 (ArkOS)** | **4.19.172** | **glibc 2.30** | 964MB | 1.99GHz | 11G/72% | ondemand |
+| rgb30a | .26 | Powkiddy RGB30 | Debian 13 trixie | 5.10.226 | glibc 2.41 | 967MB | 1.99GHz | 11G/51% | ondemand |
+| rgb30b | .85 | Powkiddy RGB30 | Debian 13 trixie | 5.10.226 | glibc 2.41 | 967MB | 1.99GHz | 11G/51% | ondemand |
+| rgb30c | .101 | Powkiddy RGB30 | Debian 13 trixie | 5.10.226 | glibc 2.41 | 967MB | 1.99GHz | 11G/51% | ondemand |
+| r36s-clone-a | .31 | R36S Clone Type2 | Debian 13 trixie | **4.4.189** | glibc 2.41 | 918MB | **1.30GHz** | 6.1G/79% | ondemand |
+| r36s-clone-b | .137 | R36S Clone Type2 | Debian 13 trixie | 4.4.189 | glibc 2.41 | 918MB | 1.30GHz | 6.1G/79% | ondemand |
+| cubexx | .149 | sun50iw9 (H700) | **MustardOS 2606.0** | **4.9.170** | **glibc 2.44 (Buildroot)** | 973MB | 1.80GHz | 7.8G/55% | **powersave** |
+
+系统分布：Debian 13 ×7 / ArkOS ×1 / muOS ×1；内核 4 个分支
+（5.10.226 ×5、4.4.189 ×2、4.19.172 ×1、4.9.170 ×1）。
+
+### 应用层
+
+| 设备 | 前端 | RetroArch | 核心 | 核心目录（总数） | 卡带目录 | 卡带 | ES 注册 | Python | 启动 DTB | SSH |
+|---|---|---|---|---|---|---|---|---|---|---|
+| rg353m | emulationstation | 1.22.2 | 0.3.3 | `~/.config/retroarch/cores` (132) | `/roms/makecode` | 21 | 130+1 | 3.13.5 | `rk3566-353m.dtb` | enabled/active |
+| rg353v | emulationstation | 1.22.2 | 0.3.3 | 同上 (132) | `/roms/makecode` | 21 | 130+1 | 3.13.5 | `rk3566-353v.dtb` | enabled/active |
+| rk2023 | emulationstation | **1.19.1** | 0.3.3 | 同上 (117) | **`~/makecode`** | 21 | **127+1** | **3.7.5** | `rk3566-OC.dtb` | enabled/active |
+| rgb30a/b/c | emulationstation | 1.22.2 | 0.3.3 | 同上 (132) | `/roms/makecode` | 21 | 130+1 | 3.13.5 | `rk3566-rgb30.dtb` | enabled/active |
+| r36s-clone-a/b | emulationstation | 1.22.2 | 0.3.3 | 同上 (146) | `/roms/makecode` | 21 | 136+1 | 3.13.5 | `rk3326-…-with-amp-linux.dtb` | enabled/active |
+| cubexx | **muxfrontend** | 1.22.2 | 0.3.3 | **`/opt/muos/share/core`** (195) | **`/mnt/mmc/ROMS/MakeCode Arcade`** | 21 | muOS catalogue | 3.11.8 | 无 boot.ini | **dropbearmulti** |
+
+注：cubexx 无 `.info`（muOS 不走 libretro info 目录），版本只能 `strings` 读；
+`VINFO` 空是正常的，不代表缺文件。ES 注册列「N+1」= 系统总数 + makecode 条目数。
+
+### 本轮补齐动作（13:19~13:30）
+
+1. **RGB30 三台补 `ping.pxt64`**：20 → 21 张，三台 md5 与本地一致
+   （`b6efe3f6e60f…`）。
+2. **rk2023 核心 0.3.2 → 0.3.3**：备份到 `~/core_backup_032/`，换新 `.so` + `.info`，
+   冒烟 900 帧 turbo 全过（cubeland 170.0 / ping 394.5 / Blocky 258.9（音频 1264）/
+   Space 398.6 fps）。
+3. **cubexx 核心 0.3.2 → 0.3.3**：备份到 `/root/core_backup_032/`，直接换
+   `/opt/muos/share/core/makecode_arcade_libretro.so`；四张冒烟均正常出帧。
+4. **rk2023 补 ES 注册**（此前从未注册，前端看不到分类）：
+   `/etc/emulationstation/es_systems.cfg` 126 → 127 系统、`makecode=1`，ES 已重启。
+   用 `out/therm/reg_es_arkos.py`（ArkOS 卡带路径是 `~/makecode`，与其他机不同）。
+
+### 三个新踩到的坑
+
+- **0.3.2 与 0.3.3 的 `.so` 大小完全相同**（都是 5169256 B），判断是否旧版必须用
+  md5 或 `strings`，看大小会漏判。实测 rk2023 / cubexx 的 0.3.2 是两份不同二进制。
+- **ArkOS 的 `es_systems.cfg` 不是合法 XML**（第 2063 行 `<command>` 里有未转义的
+  `2>&1`），ES 用宽松解析器。插入条目时不能用 `xml.etree` 严格校验，否则会误判为
+  「XML_INVALID」而拒绝写入；改用 `<system>` / `</systemList>` 计数校验。
+- **muOS 待机时 governor 是 `powersave`，CPU 锁 288MHz**：无头冒烟会读到
+  cubeland 24.2 / ping 62.4 fps，比真实性能低约 6 倍，容易误判成核心坏了。
+  临时 `echo performance > .../scaling_governor` 后是 1.8GHz、
+  cubeland 158.7 / ping 422.3 fps，与历史 156 fps 一致；测完已恢复 powersave。
+  换核心后备份文件要移出核心目录（`.so.bak032` 后缀仍可能被前端 glob 扫到）。
+
+### 前端验收（用户实测，2026-11-07 13:36）
+
+rk2023 新补的 ES 条目经用户实机确认：**MakeCode Arcade 分类可见、游戏可正常进入**。
+至此 9 台在线设备全部完成「核心 + 卡带 + 前端注册 + 冒烟」闭环，其中前端可见性
+由用户实机确认（无头脚本只能验证核心加载与出帧，无法替代前端这一层）。
+
+## 工具机 192.168.1.69（2026-11-07 21:50 配置）
+
+用户提供一台常驻 Linux 主机做构建/验证环境（用户选「完整构建环境」）。`root/ally` 可登录；
+已装本机 ed25519 公钥（追加，原有 key 保留），本机 `~/.ssh/config` 加别名 **`tool69`**
+（兼 `mcatool`）。sshd 配置、密码登录方式均未改动。
+
+### 规格与已装工具
+
+| 项 | 值 |
+|---|---|
+| 机型 | MoreFine S500+ 迷你主机，无电池，`HandleLidSwitch=ignore`（可常驻） |
+| 系统 | Ubuntu 24.04.3 LTS / kernel 6.8.0-90 / x86_64 |
+| CPU / 内存 / 磁盘 | Ryzen 3 5300U 4C8T（AMD-V、`/dev/kvm` 可用）/ 7.1G（6.4G 可用）/ 60G（39G 可用） |
+| 容器 | Docker 28.2.2（overlay2, systemd cgroup） |
+| 工具链 | zig 0.17.0（PyPI wheel）、clang/lld 18、cmake 3.28、ninja 1.11、gcc/g++ 13、Python 3.12 + pip、node 18.19 / npm 9.2、qemu-user-static 8.2.2 + binfmt、ccache、patchelf、debootstrap、rsync、strace/gdb |
+
+路径：`/opt/mca-tools`（venv、`env.sh`、`bin/zig` → `/usr/local/bin/zig`）；
+`/opt/mca-work`（`src/` 源码、`arm64-root` chroot、`mca/` 冒烟素材、`buildcheck/`）。
+使用 `source /opt/mca-tools/env.sh` 拿 PATH。
+
+### 两条已跑通的链路
+
+**① 真实构建 aarch64 核心**（源码 = `core/src` + `core/third_party` + `core/libretro.h` +
+`runtime/pxtapp` + `tools/build_target.sh`，225KB tar）：
+
+```
+cd /opt/mca-work/src && ZIG=zig ./tools/build_target.sh aarch64-linux-gnu.2.17
+→ core/dist/aarch64-linux-gnu.2.17/makecode_arcade_libretro.so
+  5197360 B, ELF64 AArch64 DYN, strings 版本 0.3.3
+```
+第一次同步漏了 `core/libretro.h`，报 `../libretro.h file not found`；补上后
+「编译 0 个 / 跳过 34 个」+ 链接成功，**以后同步源码务必带上这个头文件**。
+`build_target.sh` 默认找 Windows 的 `zig.exe`，Linux 侧用 `ZIG=zig` 覆盖即可。
+
+**② arm64 无头冒烟**（x86 宿主 + qemu-user + chroot）：
+
+```
+# rootfs: Debian bookworm arm64 / Python 3.11.2
+debootstrap --arch=arm64 --foreign --include=python3,ca-certificates --no-check-gpg \
+  bookworm /opt/mca-work/arm64-root https://mirrors.tuna.tsinghua.edu.cn/debian
+cp /usr/bin/qemu-aarch64-static <rootfs>/usr/bin/
+chroot <rootfs> /debootstrap/debootstrap --second-stage
+
+chroot /opt/mca-work/arm64-root /usr/bin/python3 /root/mca/libretro_host.py \
+  /root/mca/core-built.so /root/mca/carts/ping.pxt64 120 --turbo --data-dir=/tmp/mca_data
+```
+`qemu-aarch64` binfmt 由 qemu-user-static 自动注册（`flags: POF`），静态 arm64 ELF
+可以不写 qemu 前缀直接执行（已用 `zig cc -target aarch64-linux-musl -static` 验证）。
+
+**逐帧等价对照**（120 帧 turbo，`FINAL-FRAME-HASH`）：
+
+| 卡带 | 工具机新编核心 | 真机在用的 0.3.3 | 一致 |
+|---|---|---|---|
+| ping | `f93e4597e3503d50ea1374e2b87fba35` | 同 | ✅ |
+| arcade-cube-land | `23210fb3b56189cd2946ea37bf44b204` | 同 | ✅ |
+
+两份二进制 md5/大小都不同（5197360 / `f7f76e45…` vs 5169256 / `9da97c82…`），
+但画面逐字节一致 → **不同宿主 zig 产物语义等价；判等价要看画面哈希，不是大小或 md5**。
+
+### 网络与踩到的坑
+
+- `api.github.com` / pypi / npm / npmmirror / apt archive / 清华镜像 **通**；
+  `github.com`、`raw`、`jsdelivr`、**Docker Hub**（registry-1.docker.io / auth.docker.io）**不通** ——
+  所以拉不到 arm64 容器镜像，改用 debootstrap 建 rootfs。
+- `ziglang.org` 与 `files.pythonhosted.org` 从这台只有约 **20KB/s**（100MB 要一小时以上）；
+  **zig 走清华 PyPI 镜像装 `ziglang==0.17.0` wheel，12 秒完成**（101MB）。
+  该版本在 PyPI 被标记 yanked，但 `zig version` / `zig cc` / 实际构建全部正常
+  （备选 `0.17.0.post0` / `0.17.1`）。Debian 的清华镜像 1.9MB/s，debootstrap
+  second-stage 在 qemu 下约 8.5 分钟，不是卡死。
+- apt 安装触发 needrestart 重启了 ssh/smbd/nmbd 等一批服务，复查均 active；
+  `systemctl degraded` 只是 ModemManager + networkd-wait-online 两个无害失败。
+- 这是台共用桌面机（3 个 root 会话、Samba、X11 转发、Ceph 相关服务），
+  后续只在 `/opt/mca-work` 下作业，不改服务、不重启、不占满 CPU。
+
+### 能力边界
+
+- **能替代**：Linux 侧 ELF/Makefile/脚本检查、aarch64 交叉编译、arm64 核心的功能/出帧/崩溃验证
+  （不必再等 GitHub 免费 ARM runner，也不必为一次功能测试去开掌机）。
+- **不能替代**：性能量化。qemu 模拟下 cubeland 120 帧只有 4 个独立画面、游戏真实帧率 ≈3 fps，
+  吞吐数字没有参考价值；性能基准仍只能用 rgb30c / cubexx 真机。
+- **不解决**：github.com / raw / jsdelivr 的墙依旧，拉 release 资产仍走
+  `api.github.com/.../releases/assets/<id>`。

@@ -63,8 +63,13 @@ def pick_core(explicit: str | None) -> str:
 
 
 def run_one(core: str, cart: str, frames: int, press: str | None,
-            press_at: int, release: int | None, data_dir: str) -> dict:
+            press_at: int, release: int | None, data_dir: str,
+            turbo: bool = False) -> dict:
     cmd = [sys.executable, HOST, core, cart, str(frames), f"--data-dir={data_dir}"]
+    if turbo:
+        # qemu-user / 批量回归下按真实 27fps 节拍 sleep 会把一轮拖到十几分钟；
+        # turbo 只是跳过节拍等待，不改变 VM 出帧语义（FINAL-FRAME-HASH 一致）。
+        cmd.append("--turbo")
     if press:
         # 一律用 --opt=value：Git Bash 下 "--press-at 60" 这种空格形式会被
         # 宿主自己的参数解析漏掉，静默退回默认值（实测按在第 4 帧而不是 60）
@@ -120,6 +125,8 @@ def main() -> int:
     ap.add_argument("--press-at", type=int, default=60)
     ap.add_argument("--release", type=int, help="第 N 帧松开")
     ap.add_argument("--data-dir", default=os.path.join(HERE, "..", "out", "sweep_saves"))
+    ap.add_argument("--turbo", action="store_true",
+                    help="帧循环不 sleep（qemu-user / 批量回归用；默认保持真实节拍）")
     ap.add_argument("-o", "--json", default=os.path.join(HERE, "..", "out", "sweep.json"))
     args = ap.parse_args()
 
@@ -143,7 +150,7 @@ def main() -> int:
     rows = []
     for c in carts:
         r = run_one(core, c, args.frames, args.press, args.press_at, args.release,
-                    args.data_dir)
+                    args.data_dir, args.turbo)
         rows.append(r)
         print(f"  {r['verdict']:7s} {r['cart'][:38]:40s} "
               f"帧 {r['frames']:4d}  独立 {r['distinct']:4d}  "

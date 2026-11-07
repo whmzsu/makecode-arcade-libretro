@@ -149,9 +149,15 @@ AUDIO_BATCH_CB = ctypes.CFUNCTYPE(ctypes.c_size_t,
 POLL_CB = ctypes.CFUNCTYPE(None)
 STATE_CB = ctypes.CFUNCTYPE(ctypes.c_int16, ctypes.c_uint, ctypes.c_uint,
                             ctypes.c_uint, ctypes.c_uint)
-# retro_log_printf_t 是真变参；Win64/x64 SysV 都按寄存器传前几个参数，
-# 多声明一个 c_char_p 正好能读到第一个变参（我们的核心只会用 "%s" + 1 个串）。
-LOG_CB = ctypes.CFUNCTYPE(None, ctypes.c_int, ctypes.c_char_p, ctypes.c_char_p)
+# retro_log_printf_t 是真变参，回调里只能声明固定参数（level, fmt）。
+# 曾经多声明一个 c_char_p 想读第一个变参，但 ctypes 会把该参数无条件
+# 转成 Python bytes（内部 strlen）：当调用没带变参、或 libffi 在
+# Linux x86_64 上读到残留寄存器时，那个"指针"可能是字符串内容本身
+# （实测 0x65646f43656b614d == 小端 "MakeCode"），strlen 直接 SIGSEGV。
+# 血泪：2026-11-07 在 tool69（Ubuntu 24.04 / Python 3.12 / x86_64）上
+# retro_load_game 阶段稳定复现；Windows x64 与 arm64 只是恰好没踩到。
+# 代价：日志里的 "%s" 展开不出来（显示占位符）；画面/哈希等行为判据不受影响。
+LOG_CB = ctypes.CFUNCTYPE(None, ctypes.c_int, ctypes.c_char_p)
 
 
 class LogCallbackStruct(ctypes.Structure):
@@ -174,19 +180,18 @@ def say(msg):
     print(msg, flush=True)
 
 
-def fmt_text(fmt, arg1):
-    """核心只会用 "%s" + 一个串，这里手工展开（真变参在 ctypes 里读不全）。"""
+def fmt_text(fmt):
+    """变参读不到（见 LOG_CB 注释），把 "%s" 换成占位符而不是猜指针。"""
     f = (fmt or b"").decode("utf8", "replace")
-    a = (arg1 or b"").decode("utf8", "replace")
-    return f.replace("%s", a, 1) if "%s" in f else f
+    return f.replace("%s", "<...>", 1) if "%s" in f else f
 
 
 def env_cb(cmd, data):
     if cmd == ENV_GET_LOG_INTERFACE:
         cb = LogCallbackStruct()
-        cb.log = LOG_CB(lambda level, fmt, arg1:
+        cb.log = LOG_CB(lambda level, fmt:
                         (say(f"  {LOG_PREFIX.get(level, '?')} [core] "
-                             f"{fmt_text(fmt, arg1)}"), True)[1])
+                             f"{fmt_text(fmt)}"), True)[1])
         _keepalive.append(cb)
         ctypes.cast(data, ctypes.POINTER(LogCallbackStruct))[0] = cb
         return True

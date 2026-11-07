@@ -63,7 +63,7 @@ static retro_input_state_t g_input_state = nullptr;
 static retro_log_printf_t g_log = nullptr;
 static bool g_pixel_format_set = false;
 // 版本号只在这里出现一次：.info 打包脚本和运行时横幅都读它
-static const char* const kCoreVersion = "0.3.3";
+static const char* const kCoreVersion = "0.3.4";
 
 static unsigned g_frame = 0;
 static bool g_game_loaded = false;
@@ -257,13 +257,21 @@ static void set_input_descriptors() {
 static void set_controller_info() {
     if (!g_env) return;
     static struct retro_controller_description types[2] = {};
-    static struct retro_controller_info infos[1] = {};
+    // 必须多一个终止项：libretro 的 RETRO_ENVIRONMENT_SET_CONTROLLER_INFO 数组
+    // 按 port 顺序读到 types == nullptr 才停（前端不会另收长度）。只给
+    // infos[1] 时，前端/测试宿主会越界读 infos[1].types；栈上残留可能
+    // 正好是某个字符串常量的内容，被当成指针解引用 -> SIGSEGV。
+    // 2026-11-07 在 tool69 上由 gcc 12 干净构建复现（残留 0x65646f43656b614d
+    // 即小端 "MakeCode"），zig/clang 产物只是那块内存恰好为 0 才没暴露。
+    static struct retro_controller_info infos[2] = {};
     types[0].desc = "MakeCode Arcade Gamepad";
     types[0].id = RETRO_DEVICE_JOYPAD;
     types[1].desc = nullptr;
     types[1].id = 0;
     infos[0].types = types;
     infos[0].num_types = 1;
+    infos[1].types = nullptr;
+    infos[1].num_types = 0;
     g_env(RETRO_ENVIRONMENT_SET_CONTROLLER_INFO, infos);
 }
 
