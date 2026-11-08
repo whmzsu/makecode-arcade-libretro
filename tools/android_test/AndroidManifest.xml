@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  MCA 核心回归宿主（无头）。
+  - hasCode="false"：整个 APK 没有 Java 代码，入口是 android.app.NativeActivity
+  - targetSdkVersion 必须 <= 29（这里 28，与 RetroArch 一致）：>= 30 会让 bionic
+    开启堆指针打标，pxt 的 NaN-boxing 会把指针判成 double → PANIC 906。
+    详见 docs/ANDROID-2026-11-08.md。
+  - extractNativeLibs="true"：让系统把 lib/ 解到 nativeLibraryDir，
+    dlopen("libmca_core.so") 才能按名字找到核心。
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="org.mca.coretest">
+
+    <uses-sdk android:minSdkVersion="21" android:targetSdkVersion="28" />
+
+    <application
+        android:label="MCA Core Test"
+        android:hasCode="false"
+        android:extractNativeLibs="true"
+        android:allowBackup="false">
+
+        <activity
+            android:name="android.app.NativeActivity"
+            android:label="MCA Core Test"
+            android:exported="true"
+            android:configChanges="orientation|keyboardHidden|screenSize">
+            <meta-data android:name="android.app.lib_name" android:value="main" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

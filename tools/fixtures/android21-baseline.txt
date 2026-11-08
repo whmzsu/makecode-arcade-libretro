@@ -1,0 +1,24 @@
+# 21 张卡带 × 600 帧的末帧 MD5 基线（Android / 桌面等价性判据）
+# 生成：桌面 x86_64 核心 (core/dist/x86_64-windows-gnu) + tools/libretro_host.py，2026-11-08
+# 口径：FINAL-FRAME-HASH，与 arch 无关；改核心/改帧数都要重生成
+RESULT Blocky_Boss_Battle.pxt64 d73470a458a52433aa716e4499b27705
+RESULT Bunny_Hop_.pxt64 a0c165acb5131e060bf80d67b8d3d1aa
+RESULT Caterpillar.pxt64 12e28af2a3024d270b913bd65c1dd167
+RESULT Cave_Explorer.pxt64 1e272ac3023ad08f625b0b6e614dce9a
+RESULT Falling_Duck.pxt64 265613366fafb7d9f1987b19382df248
+RESULT GalgaMulti.pxt64 11567cd5033816af55898ac083f76cdb
+RESULT Hot_Air_Balloon.pxt64 47da2d3b337b4d9a13d9878cfb5bf70f
+RESULT Jewel_Raider.pxt64 e8e9b5a33d33559543ffbe075a033518
+RESULT Kickoff_.pxt64 9246e3a644b32c35a12b57934448dde8
+RESULT Mouse_Adventure.pxt64 6cc720f9d65700281a8c76473385b523
+RESULT Pigeon__Deliverance.pxt64 13be4af7afc6737b58bcbd7f93d35bee
+RESULT Save_the_Forest.pxt64 2d0a40d2dcefb32cd4d1a8d3ff6fa9fe
+RESULT Secure_the_river_.pxt64 9afe91534c00a6aa4ef9230a672d16c7
+RESULT Space_Destroyer.pxt64 dafdd7c7e60c208761ef5bcb9138ae35
+RESULT Stack_the_Goats.pxt64 9dc3dd90cc3bb0f5939a93ff168b2801
+RESULT Strawberry_Slam.pxt64 fcef568f9613e939e2ae121267bacbec
+RESULT TicTacTwo_.pxt64 d1c7f24b490c51fe2c3e8dcd1c087060
+RESULT arcade-cube-land.pxt64 a1c10cd9f8f980e863dcf7448de58438
+RESULT arcade-falling-duck.pxt64 265613366fafb7d9f1987b19382df248
+RESULT arcade-jumpy-platformer.pxt64 1c0f2dd46f99e3754ecdd0cb966ee3f6
+RESULT ping.pxt64 bddbba0cf87737f885e34cfd6aab85b6
