@@ -1,0 +1,17 @@
+# golden hash 基线 —— 末帧 MD5（FINAL-FRAME-HASH）
+#
+# 格式：<相对仓库根的卡带路径>|<帧数>|<额外宿主参数，无则 ->|<末帧 MD5>
+# 比对：tools/ci_regress.sh <core>      重新生成：tools/ci_regress.sh <core> --record
+#
+# 为什么只有 3 条：这三条各自盯一条不同的链路，多跑同构用例只会拖慢 CI。
+#   ping  300 帧 无输入 —— 静态场景 + 定时器/随机数（每次启动画面都在动）
+#   probe 120 帧 无输入 —— 纯色背景，断言"渲染链路输出的是正确颜色"
+#   probe 120 帧 按 A   —— 断言"RetroPad A → MakeCode A"，输入映射一改就红
+#
+# 口径与编译器、架构都无关：同一份源码在 zig/x86_64-windows、gcc 13/x86_64-linux、
+# zig 2.17/aarch64-linux-gnu（qemu）三处跑出的末帧逐位相同（2026-11-08 工具机
+# 三构型实测），所以这组值可以跨构型共用。但**改核心、改帧数、改输入时序必须
+# --record 重生成**，否则基线本身就成了误报源。
+tools/fixtures/ping.pxt64|300|-|0556e78f7ce0e828f2dc922d210dc047
+tools/fixtures/probe.pxt64|120|-|e82844f7160449d1767aa69afe788800
+tools/fixtures/probe.pxt64|120|--press=A --release=100000|0eb7884cb40cef0cb549946af3a942ab

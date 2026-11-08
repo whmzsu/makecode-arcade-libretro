@@ -27,6 +27,10 @@
 #   lakka-musl：dockcross aarch64-musl 全静态 .so（Lakka 用，musl libc 例外不走 zig）
 #   behavior-miniretro：真 aarch64 硬件 runner（ubuntu-24.04-arm，公开仓库
 #     免费）上用第三方前端 miniretro 跑 900 帧冒烟 —— 行为层验证
+#   golden-hash：末帧 MD5 比对（2 卡带 3 用例）—— 像素层验证，唯一能抓住
+#     "契约全绿但画面画错了"的断言
+#   pxt-patches：vendored pxt 树里的 9 个必要补丁是否还在（不编译，几秒）
+#   package：把上面各 job 的产物打成发行包，再解包 dlopen 跑 60 帧
 
 name: build
 
@@ -664,6 +668,53 @@ jobs:
           if-no-files-found: error
           retention-days: 10
 
+  # --------------------------------------- vendored pxt 树的补丁完整性
+  # runtime/pxtapp 是 vendored 的 pxt 运行时，9 个必要补丁直接落在源码里
+  # （没有独立 patch 文件，构建时也不重放）。升级 pxt 时"重新生成这棵树"是
+  # 最自然的动作，而补丁全消失后代码照样编得过、契约测试照样全绿——退化要
+  # 到真机上换游戏才暴露，且是崩溃。这一步把隐形约束变成断言，5 秒成本。
+  pxt-patches:
+    name: pxt-patches
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: 校验 9 个 pxt 上游补丁（--strict 还查未登记编号）
+        run: python3 tools/check_pxt_patches.py --strict
+
+  # --------------------------------------------------- 末帧哈希（golden hash）
+  # 契约测试断言的是"API 用对了"；这里断言"画面还是那张画面"。VM 语义、渲染
+  # 路径、输入映射任一处漂移，末帧 MD5 就变，而契约测试照样全绿——这是 CI 上
+  # 唯一能抓住「游戏画错了」的断言。
+  #
+  # 基线 tools/fixtures/golden-frames.txt 只有 3 条（2 卡带 3 用例），各自盯一条
+  # 不同链路：静态场景 / 纯色渲染 / 按键映射。多跑同构用例只会拖慢 CI。
+  # 改核心后本地 `tools/ci_regress.sh <core> --record` 重生成，再手工确认
+  # 「连跑两次结果相同」才提交——不稳定的基线比没有基线更坏。
+  golden:
+    name: golden-hash
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 编译（gcc/unix，与基线同构型）
+        env:
+          CC: gcc
+          CXX: g++
+        run: make -f core/Makefile platform=unix -j"$(nproc)"
+
+      - name: 末帧哈希比对
+        run: tools/ci_regress.sh core/makecode_arcade_libretro.so --bmp-dir out/ci_bmp
+
+      # 失败时把三个用例的末帧都留下来：光看哈希只能知道"变了"，看 BMP 才知道
+      # 变成什么样（黑屏 / 花屏 / 少一层 / 颜色错位，判断方向完全不同）
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: golden-frames-bmp
+          path: out/ci_bmp/*.bmp
+          if-no-files-found: ignore
+          retention-days: 14
+
   # ------------------------------------------------------------------ macOS
   # 实验：Makefile 支持 osx，但本机没有 macOS 工具链，作者未在真机验证过
   # 加载/音频；先只做"编得过"的观察，红了不算回归失败（continue-on-error）
@@ -733,6 +784,23 @@ jobs:
             echo "-- $z"
             python3 -c "import sys,zipfile;print('   '+'\n   '.join(zipfile.ZipFile(sys.argv[1]).namelist()))" "$z"
           done
+
+      # 前面的 job 验的都是 core/dist 下的裸文件；这里验「玩家真正下载到的
+      # zip 里那个 .so」。v0.3.1 的 Windows 包只装了 .pdb 就是这条链路漏出去
+      # 的——包结构对、版本号对、二进制却不在。解包 -> dlopen -> load_game ->
+      # 跑 60 帧，一步都不能少。
+      - name: 发行包 dlopen 跑 60 帧（linux-x64）
+        run: |
+          set -euo pipefail
+          z=$(ls core/dist/release/makecode_arcade_linux-x64.zip)
+          rm -rf out/pkg && mkdir -p out/pkg
+          unzip -o -q "$z" -d out/pkg
+          so=$(find out/pkg -name 'makecode_arcade_libretro.so' | head -1)
+          [ -n "$so" ] || { echo "::error file=$z::解包后没有 .so"; find out/pkg -type f; exit 1; }
+          echo "包内核心：$so（$(stat -c%s "$so") 字节）"
+          # 退出码：2 缺符号 / 3 load_game 失败 / 4 帧循环异常，任一都算红
+          python3 tools/libretro_host.py "$so" tools/fixtures/ping.pxt64 60 \
+            --turbo --data-dir=out/pkg-data | tail -12
 
       - uses: actions/upload-artifact@v4
         with:

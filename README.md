@@ -141,6 +141,21 @@ Android 走 NDK 的 `ndk-build`（官方 CI 同一条路径）：
 tools/build_core.sh   # DLL + core_test + contract_test + vm_smoke
 ```
 
+回归两项（CI 每次 push 都跑，本地改完 core 也该跑）：
+
+```bash
+tools/ci_regress.sh core/makecode_arcade_libretro.dll   # 末帧 MD5 比对（2 卡带 3 用例）
+python tools/check_pxt_patches.py --strict              # vendored pxt 树的 9 个补丁是否还在
+```
+
+`ci_regress.sh` 的基线在 `tools/fixtures/golden-frames.txt`；改核心或改帧数后
+用 `--record` 重生成，并确认连跑两次结果相同（不稳定的基线比没有基线更坏）。
+`--bmp-dir DIR` 会把每个用例的末帧落成 BMP，画面漂移时用它看"变成什么样"。
+
+源文件清单只有一份：`core/sources.mk`（`core/Makefile`、`core/jni/Android.mk`、
+`tools/build_{core,target,musl}.sh` 读的都是它）。加/删源文件只改这一个地方——
+以前 5 处各列一份，删 `cart.c` 那轮漏改了两处，靠 CI 链接失败才发现。
+
 ### 卡带转换（已拆分为独立项目）
 
 卡带转换器 **cartconv**（`.png` 卡带 → `.pxt64` 字节码，Node.js，玩家用）与
@@ -299,7 +314,9 @@ cd ../makecode_arcade_cartconv/vm-build && npm install
 | `macos-universal` | Xcode clang，arm64+x86_64 | `.dylib`（实验，`continue-on-error`） |
 | `lakka-musl` | dockcross `linux-arm64-musl` + GNU ld `-shared -static` | `.so`（**全静态，零 NEEDED**，给 Lakka/LibreELEC 这类 musl 系统） |
 | `behavior-miniretro` | 真 aarch64 runner（`ubuntu-24.04-arm`）+ 第三方前端 miniretro | 900 帧冒烟（行为层，不是编译层） |
-| `package` | 汇总发行版工具链产物 → `tools/package_release.sh` | 5 个 zip |
+| `pxt-patches` | 纯 python，不编译 | 校验 vendored pxt 树里 9 个必要补丁还在（几秒） |
+| `golden-hash` | gcc + `tools/libretro_host.py` | 2 张卡带 3 个用例的末帧 MD5 比对 —— 唯一能抓住"契约全绿但画面画错了"的断言 |
+| `package` | 汇总发行版工具链产物 → `tools/package_release.sh`，再解包 dlopen 跑 60 帧 | 5 个 zip |
 | `release`（只在推 `core-v*` tag 时） | 汇总 `zig-*` + `android-*` + `lakka-musl` 产物 → `package_release.sh` → `gh release create` | **6 个 zip**（含只有 zig 能出的 `windows-arm64`，以及只有 musl 工具链能出的 `lakka-arm64`） |
 
 NX（Switch）不在这张表里：它由独立的 `.github/workflows/nx.yml` 负责，
