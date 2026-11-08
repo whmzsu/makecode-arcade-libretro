@@ -23,13 +23,15 @@ include $(CLEAR_VARS)
 LOCAL_MODULE := retro
 LOCAL_CPP_EXTENSION := .cpp
 
-# VM 内核 + 引擎：只编这些子目录（runtime/pxtapp/main.cpp 有自己的 main()，排除）
-VM_DIRS    := base core---vm game mixer---ext screen---ext settings---files
-VM_SOURCES := $(foreach d,$(VM_DIRS),$(sort $(wildcard $(PXTAPP_DIR)/$(d)/*.cpp)))
-VM_SOURCES += $(PXTAPP_DIR)/pointers.cpp
+# VM 内核 + 引擎 + core 宿主：清单只有一份，与 core/Makefile、tools/build_*.sh
+# 共用 core/sources.mk（加源文件只改那一个地方）。
+include $(CORE_DIR)/sources.mk
+
+VM_SOURCES := $(foreach d,$(MCA_VM_DIRS),$(sort $(wildcard $(PXTAPP_DIR)/$(d)/*.cpp)))
+VM_SOURCES += $(foreach f,$(MCA_VM_FILES),$(PXTAPP_DIR)/$(f))
 
 # core 自身：只有两个 C++ 源（v0.3.5 起 PNG 解码链路整体移除，只认 .pxt64）
-CORE_CPP_SOURCES := $(CORE_DIR)/src/libretro_core.cpp $(CORE_DIR)/src/vm_host.cpp
+CORE_CPP_SOURCES := $(foreach f,$(MCA_CORE_FILES),$(CORE_DIR)/$(f))
 
 LOCAL_SRC_FILES  := $(VM_SOURCES) $(CORE_CPP_SOURCES)
 LOCAL_C_INCLUDES := $(CORE_DIR)/src $(PXTAPP_DIR)

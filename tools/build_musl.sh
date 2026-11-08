@@ -35,6 +35,12 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 PROJ="$(cd "$HERE/.." && pwd)"
 CORE="$PROJ/core"
 PXTAPP="$PROJ/runtime/pxtapp"
+
+# 源文件清单的唯一真源：core/sources.mk（与 Makefile / Android.mk / 另两个
+# build_*.sh 共用）
+MCA_SOURCES_MK="$CORE/sources.mk"
+# shellcheck source=lib/sources.sh
+source "$HERE/lib/sources.sh"
 TAG="aarch64-linux-musl"
 WORK="$CORE/build/$TAG"
 OBJV="$WORK/vm_objs"
@@ -64,36 +70,38 @@ needs_build() { [ ! -f "$2" ] || [ "$1" -nt "$2" ]; }
 
 echo "[$TAG] VM 内核 + 引擎"
 n=0; skipped=0
-for f in "$PXTAPP"/base/*.cpp "$PXTAPP"/core---vm/*.cpp "$PXTAPP"/game/*.cpp \
-         "$PXTAPP"/mixer---ext/*.cpp "$PXTAPP"/screen---ext/*.cpp \
-         "$PXTAPP"/settings---files/*.cpp "$PXTAPP"/pointers.cpp; do
+VM_OBJS=()
+while IFS= read -r f; do
   rel="${f#$PXTAPP/}"
   out="$OBJV/${rel//\//_}.o"
+  VM_OBJS+=("$out")
   if needs_build "$f" "$out"; then
     "$CXX" "${CXXFLAGS[@]}" "${INC[@]}" -c "$f" -o "$out"
     n=$((n + 1))
   else
     skipped=$((skipped + 1))
   fi
-done
+done < <(mca_vm_sources)
 echo "  编译 $n 个 / 跳过 $skipped 个"
 
 echo "[$TAG] core 源码"
 # musl.cc 是完整官方 musl，不需要 musl_missing.c（zig musl 裁剪补丁）
-for f in "$CORE"/src/libretro_core.cpp "$CORE"/src/vm_host.cpp; do
+CORE_OBJS=()
+while IFS= read -r f; do
   out="$OBJC/$(basename "$f" .cpp).o"
+  CORE_OBJS+=("$out")
   needs_build "$f" "$out" && "$CXX" "${CORECXXFLAGS[@]}" "${INC[@]}" -c "$f" -o "$out"
-done
+done < <(mca_core_sources)
 
 echo "[$TAG] 链接（全静态 DSO）"
 # GNU ld 的 -shared -static：musl libc.a/libm 全部静态链入，产物零 NEEDED。
 # C++ 运行库也要静态（-static 已覆盖 libc/libstdc++/libgcc，musl gcc 的
 # libstdc++.a 本身就是 musl 版）。
-# 显式对象列表：老构建目录里可能还有已删源码的 .o（cart/png_loader/LzmaDec），
-# glob 会把它们静默链进产物。
+# 对象列表由清单推出，不用 "$OBJV"/*.o：老构建目录里可能还有已删源码的 .o
+# （cart/png_loader/LzmaDec），glob 会把它们静默链进产物。
 "$CXX" -shared -static -Wl,--build-id=none \
   -o "$DIST/makecode_arcade_libretro.so" \
-  "$OBJC"/libretro_core.o "$OBJC"/vm_host.o "$OBJV"/*.o
+  "${CORE_OBJS[@]}" "${VM_OBJS[@]}"
 ls -l "$DIST/makecode_arcade_libretro.so" | awk '{print "  " $5 " bytes"}'
 
 # 自检：必须是零 NEEDED 的 AArch64 ELF DSO

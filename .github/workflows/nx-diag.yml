@@ -19,6 +19,7 @@ on:
       - ".github/workflows/nx-diag.yml"
       - "core/src/**"
       - "core/Makefile"
+      - "core/sources.mk"   # 源文件清单唯一真源
       - "runtime/**"
 
 concurrency:

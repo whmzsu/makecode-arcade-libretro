@@ -154,15 +154,18 @@ else
 endif
 
 # ---------------------------------------------------------------- 源文件
-# VM 内核 + 引擎：只编这些子目录（runtime/pxtapp/main.cpp 有自己的 main()，排除）
-VM_DIRS    := base core---vm game mixer---ext screen---ext settings---files
-VM_SOURCES := $(foreach d,$(VM_DIRS),$(sort $(wildcard $(PXTAPP_DIR)/$(d)/*.cpp)))
-VM_SOURCES += $(PXTAPP_DIR)/pointers.cpp
+# 清单只有一份：core/sources.mk。Android.mk 与 tools/build_*.sh 读的是同一个
+# 文件（shell 侧用 tools/lib/sources.sh），加源文件只改那一个地方。
+include $(CORE_DIR)/sources.mk
+
+# VM 内核 + 引擎：只编清单里的子目录（runtime/pxtapp/main.cpp 有自己的 main()，排除）
+VM_SOURCES := $(foreach d,$(MCA_VM_DIRS),$(sort $(wildcard $(PXTAPP_DIR)/$(d)/*.cpp)))
+VM_SOURCES += $(foreach f,$(MCA_VM_FILES),$(PXTAPP_DIR)/$(f))
 
 # core 自身：只有两个 C++ 源。卡带侧不做任何解码（v0.3.5 起 PNG 入口与
 # cart/miniz/lzma 一并删除，只认 .pxt64 镜像）。
 # 一律用 $(CORE_DIR) 前缀，使规则不依赖当前工作目录
-CORE_CPP_SOURCES := $(CORE_DIR)/src/libretro_core.cpp $(CORE_DIR)/src/vm_host.cpp
+CORE_CPP_SOURCES := $(foreach f,$(MCA_CORE_FILES),$(CORE_DIR)/$(f))
 
 # pxtapp 用 C++11（上游如此），core 宿主用 C++14
 # 对象路径去掉源码前缀（pxtapp 在 ../ 下，直接拼会产生带 .. 的目标名）

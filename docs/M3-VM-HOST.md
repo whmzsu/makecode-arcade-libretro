@@ -84,14 +84,18 @@ built/dockercross/vm_smoke.exe <game.pxt64> <out_prefix> [frames] [--press=a]
 
 实现：`core/src/vm_host.cpp`（宿主封装）+ `core/src/libretro_core.cpp`（接口层），
 构建脚本 `tools/build_core.sh` 一键产出 DLL + 三个测试程序。
+源文件清单唯一真源是 `core/sources.mk`（Makefile / Android.mk / 三个 build_*.sh 共用）。
 
-- **载入格式**：`.pxt64` 直载；`.png` 卡带若同目录存在同名 `.pxt64` 自动旁载，
-  否则提示先用 `tools/png2pxt64.py` 转换并回退测试画面。
+- **载入格式**：**只认 `.pxt64`**。`.png` 卡带一律在通用镜像校验处失败——核心
+  不解码 PNG，也不为 PNG 做专门提示，玩家先用 `tools/png2pxt64.py` 转换
+  （v0.3.5 删掉了 PNG 解码链路与"同名 .pxt64 旁载"分支）。
 - **音频**：VM 输出 44.1kHz 单声道 S16 → 复制为立体声喂 `audio_batch`（735 样本/帧）。
 - **视频**：VM 输出 BGRA32 → RGB565 → `video_cb`。
 - **按键**：RetroPad 状态沿检测 → `pxt_raise_event(DOWN/UP, key)` + any-key 补发；
   START → KEY_MENU。
 - **存档**：`pxt_vm_set_data_directory(<save目录>/makecode_arcade)`，启动前调用。
+- **NX 诊断**：`core/src/nx_diag.{h,cpp}`（非 Switch 平台编成空 TU），
+  调用点只写 `MCA_NX_BOOT(...)`，平台条件不在 `libretro_core.cpp` 里出现。
 
 ### 关键架构结论（实测）
 
@@ -124,7 +128,15 @@ pointers.cpp、functions.json、pxtconfig.h）逐字节一致（仅我们的 3 �
    整个测试在 VM 起跑前跑完，画面全黑（0xff000000 = screen.cpp 的 no-display 分支）。
 3. VM 日志每条重复两遍（官方宿主同样现象，pxt_get_logs 行为，不影响功能）。
 
-### 对 pxt 上游的 9 个补丁（PATCH 1~5 固化进 build_vmapp.sh；PATCH 6~9 见下）
+### 对 pxt 上游的 9 个补丁（PATCH 1/2/3/5~10；PATCH 4 已被 10 取代）
+
+> **校验**：`python tools/check_pxt_patches.py`（CI 的 `pxt-patches` job 每次 push 都跑）。
+> 补丁没有独立 patch 文件、构建时也不重放，全靠这棵树本身带着——脚本是唯一能
+> 拦住"重新生成 pxtapp 时补丁全丢"的东西。加新补丁要同步登记进那张表，
+> `--strict` 会把树上未登记的编号抓出来。
+
+> PATCH 1/2/3 是 64 位移植与编译修复（`build_vmapp.sh` 里有重放脚本）；
+> PATCH 5 起是 libretro 前端才需要的行为：重开、重开后音频、卸载、确定性。
 
 > PATCH 7~9（v0.2.6/v0.2.7）同样只落在 `runtime/pxtapp`：`screen---ext/screen.cpp`
 > （取帧等待超时 / shutdown）、`mixer---ext/sound.cpp`、`mixer---ext/melody.cpp`
@@ -146,6 +158,8 @@ pointers.cpp、functions.json、pxtconfig.h）逐字节一致（仅我们的 3 �
 | 4 | core---vm/platform.cpp | `initRandomSeed()` 对 fd=-1 调 `read()`：Windows 无 /dev/urandom，UCRT 无效参数 → `__fastfail(0xC0000409)` | **进程立刻消失**，无日志、无栈回溯、无 WER 记录 |
 
 补丁 4 是"RetroArch 直接崩溃退出，啥信息都没"的根因（2026-11-01 定位）。
+**它现在不在册**：整个 `initRandomSeed()` 在 PATCH 10 里换成"种子 = 镜像 hexHash"，
+fd 路径一并删除，崩溃点不复存在。表格保留这一行是因为旧日志里还有它。
 诊断手段：`tools/libretro_host.py`（ctypes 最小前端，复现 dlopen 装载路径 +
 25 符号解析 + 帧循环，`--bmp=` 可存末帧），core 内置 Windows 未处理异常
 过滤器会把异常码/地址打到 stderr。

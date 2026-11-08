@@ -30,6 +30,12 @@ CORE="$PROJ/core"
 ZIG="${ZIG:-$PROJ/../common tools/zig/zig.exe}"
 PXTAPP="$PROJ/runtime/pxtapp"
 
+# 源文件清单的唯一真源：core/sources.mk（Makefile / Android.mk / 另两个
+# build_*.sh 读的都是它）
+MCA_SOURCES_MK="$CORE/sources.mk"
+# shellcheck source=lib/sources.sh
+source "$HERE/lib/sources.sh"
+
 # 编译产物按 32/64 位与目标切分；这里只关心目标平台
 case "$TRIPLE" in
   native)
@@ -136,34 +142,35 @@ needs_build() { [ ! -f "$2" ] || [ "$1" -nt "$2" ]; }
 echo "[$TAG] 编译器: $( [ -n "$CXXMODE" ] && echo zig || echo "NDK clang ${NDK_VERSION:-}" )"
 echo "[$TAG] VM 内核 + 引擎"
 n=0; skipped=0
-for f in "$PXTAPP"/base/*.cpp "$PXTAPP"/core---vm/*.cpp "$PXTAPP"/game/*.cpp \
-         "$PXTAPP"/mixer---ext/*.cpp "$PXTAPP"/screen---ext/*.cpp \
-         "$PXTAPP"/settings---files/*.cpp "$PXTAPP"/pointers.cpp; do
+VM_OBJS=()
+while IFS= read -r f; do
   rel="${f#$PXTAPP/}"
   out="$OBJV/${rel//\//_}.o"
+  VM_OBJS+=("$out")
   if needs_build "$f" "$out"; then
     "$CXX" $CXXMODE "${CXXFLAGS[@]}" -c "$f" -o "$out"
     n=$((n + 1))
   else
     skipped=$((skipped + 1))
   fi
-done
+done < <(mca_vm_sources)
 echo "  编译 $n 个 / 跳过 $skipped 个"
 
 echo "[$TAG] core 源码"
 # 只有两个 C++ 源：PNG 解码链路（cart/decompress/miniz/lzma）已在 v0.3.5 移除
-for f in "$CORE"/src/libretro_core.cpp "$CORE"/src/vm_host.cpp; do
+CORE_OBJS=()
+while IFS= read -r f; do
   out="$OBJC/$(basename "$f" .cpp).o"
+  CORE_OBJS+=("$out")
   if needs_build "$f" "$out"; then
     "$CXX" $CXXMODE "${CXXFLAGS[@]}" -std=c++14 "${INC[@]}" -c "$f" -o "$out"
   fi
-done
+done < <(mca_core_sources)
 
 echo "[$TAG] 链接 -> $DIST/makecode_arcade_libretro.$EXT"
 rm -f "$DIST/makecode_arcade_libretro.$EXT"   # 避免上次失败残留被误判为成功
-# 用显式对象列表而不是 "$OBJC"/*.o：老构建目录里可能还躺着已删除源码的 .o
+# 对象列表由清单推出，不用 "$OBJV"/*.o：老构建目录里可能还躺着已删除源码的 .o
 # （cart.o / png_loader.o / LzmaDec.o…），glob 会把它们静默链进产物。
-CORE_OBJS=("$OBJC/libretro_core.o" "$OBJC/vm_host.o")
 "$CXX" $CXXMODE "${TARGET_FLAGS[@]}" "${PIC[@]}" "${LINK_EXTRA[@]}" \
-  -o "$DIST/makecode_arcade_libretro.$EXT" "${CORE_OBJS[@]}" "$OBJV"/*.o
+  -o "$DIST/makecode_arcade_libretro.$EXT" "${CORE_OBJS[@]}" "${VM_OBJS[@]}"
 ls -l "$DIST/makecode_arcade_libretro.$EXT" | awk '{print "  " $5 " bytes"}'

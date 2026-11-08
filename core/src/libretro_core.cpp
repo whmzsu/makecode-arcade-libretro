@@ -21,11 +21,8 @@
 #include <windows.h>
 #endif
 
-#if defined(__SWITCH__)
-#include <fcntl.h>
-#include <unistd.h>
-#include <cstdlib>
-#endif
+// NX（Switch）诊断宏：非 Switch 平台展开成 (void)0，实现见 nx_diag.cpp
+#include "nx_diag.h"
 
 using namespace mca;
 
@@ -297,126 +294,8 @@ static void set_controller_info() {
     g_env(RETRO_ENVIRONMENT_SET_CONTROLLER_INFO, infos);
 }
 
-// ---- NX 开机 trace -------------------------------------------------------
-//
-// Switch 上既拿不到前端日志（RetroArch 的 stdout 只在 nxlink 时可见），也没有
-// gdb，真机报障往往只剩"一启动就报错"一句话。所以核心自己在最早的时机把里程碑
-// 写进 sdmc:/switch/mca_boot.log，**写一行 flush 一行** —— 进程崩在下一行之前，
-// 最后一行就是最后到达的位置。
-//
-// 只写十几次（启动 + 装载 + 首帧），不在每帧路径上，对性能没有影响。
-#if defined(__SWITCH__)
-namespace {
-FILE* g_nx_boot = nullptr;
-int   g_nx_boot_tries = 0;
-
-void nxBoot(const char* fmt, ...) {
-    if (!g_nx_boot) {
-        if (g_nx_boot_tries >= 4) return;   // 反复失败就别每帧重试了
-        // 一律用 "w"：只有上一次 fopen 真的失败（g_nx_boot 仍为 nullptr）才会
-        // 走到这里，也就是说这一轮之前没有写过任何字节，截断不会冲掉本次内容。
-        // 反过来用 "a" 有风险：上一轮会话留下的旧日志会被当成本次的进度。
-        ++g_nx_boot_tries;
-        g_nx_boot = std::fopen("sdmc:/switch/mca_boot.log", "w");
-        if (!g_nx_boot) return;
-        // 记一行"文件已开"，用来区分"ctor 跑过但当时文件系统还没挂上"
-        // 与"ctor 根本没执行"——这两种情况都表现为缺 [boot] ctor 这一行。
-        std::fputs("[boot] log opened\n", g_nx_boot);
-        std::fflush(g_nx_boot);
-    }
-    char buf[256];
-    va_list ap;
-    va_start(ap, fmt);
-    std::vsnprintf(buf, sizeof(buf), fmt, ap);
-    va_end(ap);
-    std::fputs(buf, g_nx_boot);
-    std::fputc('\n', g_nx_boot);
-    std::fflush(g_nx_boot);
-}
-
-// 构造函数：只要本文件的目标文件被链进 NRO，这个函数就在 main 之前跑。
-// 日志里有这一行 = 我们的代码真的被执行了，而不只是被链进来。
-__attribute__((constructor)) void nxBootCtor(void) { nxBoot("[boot] ctor"); }
-
-// ---- NX 运行期 trace（每 30 帧一行） ------------------------------------
-//
-// 只在诊断构建里编译（-DMCA_NX_DIAG=1，见 tools/nx-probe/build-diag.sh）。
-// 正式包不带：每 0.5 秒写一次 SD 卡对真机帧率是白扔钱，而发版不需要它。
-//
-// mca_boot.log 只覆盖启动阶段。真机现在的情况是"能启动、加载游戏后黑屏几秒才崩"，
-// 崩在运行期，所以需要一条**崩溃前还在写**的日志：
-//
-//   * 用裸 POSIX IO（open/write/close），不用 stdio。原因是这个日志的意义就是
-//     "堆已经被写坏之后还能写出去"，而 fprintf 需要扩容缓冲时会 malloc。
-//   * 每次 open 一次再关（0.5 秒一次，开销可忽略），避免长期持有 fd。
-//   * 写日志**先于**堆探针：探针崩掉时，文件最后一行就是崩溃帧号。
-//
-// 另外支持 sdmc:/switch/mca_mode.txt 切通路（见 nxMode）：
-//   0 = 正常；1 = 不推视频帧；2 = 不推音频；3 = 完全不拉 VM 数据（黑帧+静音）
-// 一次装包能把"哪条通路把堆写坏"用四次运行切开。
-#if defined(MCA_NX_DIAG)
-void nxRunLogV(const char* fmt, va_list ap) {
-    static int lines = 0;
-    if (lines > 4000) return; // 约 33 分钟，防止日志把 SD 卡写满
-    ++lines;
-    char buf[256];
-    int n = std::vsnprintf(buf, sizeof(buf) - 2, fmt, ap);
-    if (n < 0) return;
-    if (n > static_cast<int>(sizeof(buf)) - 2) n = static_cast<int>(sizeof(buf)) - 2;
-    buf[n++] = '\n';
-    int fd = ::open("sdmc:/switch/mca_run.log", O_WRONLY | O_CREAT | O_APPEND, 0666);
-    if (fd < 0) return;
-    ssize_t ignored = ::write(fd, buf, static_cast<size_t>(n));
-    (void)ignored;
-    ::close(fd);
-}
-
-void nxRunLog(const char* fmt, ...) {
-    va_list ap;
-    va_start(ap, fmt);
-    nxRunLogV(fmt, ap);
-    va_end(ap);
-}
-
-int nxMode() {
-    static int cached = -1;
-    if (cached >= 0) return cached;
-    char b[16] = {0};
-    int fd = ::open("sdmc:/switch/mca_mode.txt", O_RDONLY);
-    if (fd < 0) { cached = 0; return cached; }
-    int n = static_cast<int>(::read(fd, b, sizeof(b) - 1));
-    ::close(fd);
-    cached = (n > 0) ? std::atoi(b) : 0;
-    if (cached < 0 || cached > 3) cached = 0;
-    return cached;
-}
-#endif // MCA_NX_DIAG
-} // namespace
-
-#if defined(MCA_NX_DIAG)
-// C 链接包装：runtime 侧（vmload.cpp 等）用 weak 引用它，把宿主线程/栈信息
-// 也写进同一条运行期日志。weak 意味着"没有 core 时不影响任何其他构建"。
-extern "C" void mca_nx_runlog(const char* fmt, ...) {
-    va_list ap;
-    va_start(ap, fmt);
-    nxRunLogV(fmt, ap);
-    va_end(ap);
-}
-#endif
-
-#define MCA_NX_BOOT(...) nxBoot(__VA_ARGS__)
-#if defined(MCA_NX_DIAG)
-#define MCA_NX_RUN(...) nxRunLog(__VA_ARGS__)
-#define MCA_NX_MODE() nxMode()
-#else
-#define MCA_NX_RUN(...) ((void)0)
-#define MCA_NX_MODE() (0)
-#endif
-#else
-#define MCA_NX_BOOT(...) ((void)0)
-#define MCA_NX_RUN(...) ((void)0)
-#define MCA_NX_MODE() (0)
-#endif
+// NX 诊断（开机里程碑 / 运行期 trace）已拆到 nx_diag.h + nx_diag.cpp：
+// 这里是接口层，调用点只写 MCA_NX_BOOT(...)，平台条件不在本文件出现。
 
 void retro_set_environment(retro_environment_t cb) {
     MCA_NX_BOOT("[boot] set_environment");

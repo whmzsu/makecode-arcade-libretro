@@ -24,6 +24,12 @@ PXTAPP="$PROJ/runtime/pxtapp"
 BUILD="$CORE/build"
 OBJV="$BUILD/vm_objs"
 
+# 源文件清单的唯一真源：core/sources.mk（core/Makefile、core/jni/Android.mk、
+# build_target.sh、build_musl.sh 读的都是它）
+MCA_SOURCES_MK="$CORE/sources.mk"
+# shellcheck source=lib/sources.sh
+source "$HERE/lib/sources.sh"
+
 CXXFLAGS=(
   -std=c++11
   -fno-rtti -fno-exceptions -fno-unwind-tables
@@ -37,32 +43,36 @@ mkdir -p "$OBJV" "$BUILD"
 
 echo "== 1. pxtapp（VM 内核 + 引擎原语）=="
 count=0
-for f in "$PXTAPP"/base/*.cpp "$PXTAPP"/core---vm/*.cpp "$PXTAPP"/game/*.cpp \
-         "$PXTAPP"/mixer---ext/*.cpp "$PXTAPP"/screen---ext/*.cpp \
-         "$PXTAPP"/settings---files/*.cpp "$PXTAPP"/pointers.cpp; do
+while IFS= read -r f; do
   rel="${f#$PXTAPP/}"
   out="$OBJV/${rel//\//_}.o"
   if [ ! -f "$out" ] || [ "$f" -nt "$out" ]; then
     "$ZIG" c++ "${CXXFLAGS[@]}" -c "$f" -o "$out"
   fi
   count=$((count + 1))
-done
+done < <(mca_vm_sources)
 echo "  $count objects -> $OBJV"
 
 echo "== 2. core 源码 =="
 CINC=(-I"$CORE/src")
-for f in "$CORE"/src/libretro_core.cpp "$CORE"/src/vm_host.cpp; do
+CORE_OBJS=""
+while IFS= read -r f; do
   out="$BUILD/$(basename "$f" .cpp).o"
   if [ ! -f "$out" ] || [ "$f" -nt "$out" ]; then
     "$ZIG" c++ -std=c++14 -O2 "${CINC[@]}" -I"$PXTAPP" -c "$f" -o "$out"
   fi
-done
+  CORE_OBJS="$CORE_OBJS $out"
+done < <(mca_core_sources)
 echo "  core objects -> $BUILD"
 
 echo "== 3. 链接 =="
-VM_OBJS=$(ls "$OBJV"/*.o)
-# 显式列表：老构建目录里可能还有已删源码的 .o，glob 会静默链进产物
-CORE_OBJS="$BUILD/libretro_core.o $BUILD/vm_host.o"
+# 对象列表由清单推出，不用 `ls *.o`：老构建目录里可能还躺着已删源码的 .o
+# （cart.o / png_loader.o / LzmaDec.o…），glob 会静默把它们链进产物
+VM_OBJS=""
+while IFS= read -r f; do
+  rel="${f#$PXTAPP/}"
+  VM_OBJS="$VM_OBJS $OBJV/${rel//\//_}.o"
+done < <(mca_vm_sources)
 
 "$ZIG" c++ -shared -o "$CORE/makecode_arcade_libretro.dll" $CORE_OBJS $VM_OBJS
 echo "  -> $CORE/makecode_arcade_libretro.dll"

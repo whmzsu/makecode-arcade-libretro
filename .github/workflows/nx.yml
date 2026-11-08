@@ -37,6 +37,7 @@ on:
       - ".github/workflows/nx.yml"
       - ".github/release-notes/**"
       - "core/Makefile"
+      - "core/sources.mk"   # 源文件清单唯一真源：加/删源文件只改这里
       - "core/src/**"
       - "runtime/**"
       - "tools/core.info.in"
