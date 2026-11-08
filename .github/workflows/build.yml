@@ -781,7 +781,7 @@ jobs:
           done
           ls -d core/dist/*/ | sed 's/^/  /'
 
-      - name: 打发行包（5 平台，仅 64 位）
+      - name: 打发行包（6 平台，仅 64 位）
         run: |
           set -euo pipefail
           # 只出 64 位包：32 位目标已整体移除（PXT64 镜像在 32 位 VM 下跑不了
