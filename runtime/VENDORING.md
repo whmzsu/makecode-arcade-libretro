@@ -13,10 +13,10 @@
 | 目标 TS 库（API 定义） | github.com/microsoft/pxt-arcade `libs/` | API 面 / 类型定义，转换器侧使用 | MIT | M5 |
 | PNG blob 编解码权威参考 | pxt `pxtlib/util.ts decodeBlobAsync` | 与我们的 C++ 实现逐行比对 | MIT | M1 |
 | libretro.h | github.com/libretro/libretro-common | 已放入 core/libretro.h | MIT | 完成 |
-| cart.c / cart.h | whmzsu/mcarcade-core `src/` | 卡带解析（PNG+隐写+LZMA+source 提取），已在两个生产 core 验证 | MIT | **已 vendor 至 core/src/** |
-| decompress.c/.h | whmzsu/mcarcade-core `src/` | LZMA-alone 解压 | MIT | **已 vendor 至 core/src/** |
-| miniz | whmzsu/mcarcade-core `third_party/miniz/` | PNG inflate（仅编 miniz.c 合并单元） | MIT | **已 vendor 至 core/third_party/** |
-| LzmaDec | whmzsu/mcarcade-core `third_party/lzma/` | LZMA 解码内核 | public domain | **已 vendor 至 core/third_party/** |
+| cart.c / cart.h | whmzsu/mcarcade-core `src/` | 卡带解析（PNG+隐写+LZMA+source 提取） | MIT | **v0.3.5 已从 core 删除**（只认 .pxt64） |
+| decompress.c/.h | whmzsu/mcarcade-core `src/` | LZMA-alone 解压 | MIT | **v0.3.5 已从 core 删除** |
+| miniz | whmzsu/mcarcade-core `third_party/miniz/` | PNG inflate | MIT | **v0.3.5 已从 core 删除** |
+| LzmaDec | whmzsu/mcarcade-core `third_party/lzma/` | LZMA 解码内核 | public domain | **v0.3.5 已从 core 删除** |
 | cache.c/.h | whmzsu/mcarcade-libretro `src/` | 编译产物落盘缓存（MCC1 容器） | MIT | 备用，M5 接转换器时引入 |
 | compiler.c + runtime/*.js | whmzsu/mcarcade-libretro | 内嵌 pxtc 的完整工程方案（内存 VFS/Buffer 替身/microtask 抽干） | MIT | M5 转换器参考 |
 

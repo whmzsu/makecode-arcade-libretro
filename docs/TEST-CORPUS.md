@@ -135,9 +135,10 @@ python tools/sweep_carts.py out/testcarts -n 600 --press A --press-at 60 --relea
 
 注意两点：
 
-1. **核心不能直接运行 .png**——`retro_load_game` 只认 .pxt64 字节码，喂 .png 会
-   把文件字节当字节码执行出花屏（日志：`no bytecode. Convert first`）。.png 的
-   用途是官方模拟器拖拽导入；跑核心前先 `python tools/png2pxt64.py` 转换。
+1. **核心不能直接运行 .png**——`retro_load_game` 只认 .pxt64 字节码，PNG 文件
+   送到核心会在通用镜像校验处失败（日志：`not a valid .pxt64 image`），核心
+   不解码 PNG、也不做额外提示。.png 的用途是官方模拟器拖拽导入；跑核心前先
+   `python tools/png2pxt64.py` 转换。
 2. **bpp=3 是上游 pxt 的坑**：官方编码器与解码器在 bpp=3 下互不一致（实测第 0
    字节就错），真实卡带也只有 bpp 1/2/4。`make_cart_png.py` 已跳过 3。
 
@@ -153,6 +154,8 @@ python tools/sweep_carts.py out/testcarts -n 600 --press A --press-at 60 --relea
   带崩（STATUS_BAD_STACK），修复后必须保持不崩。
 - **真机批量**：只抽了 5 张，剩下的 15 张还没在 RK3566 / RK3326 上跑过；两台
   都还没做"跑满 20 张 + 记录帧率"的完整表。
-- **CI 化**：`sweep_carts.py` 目前是本地脚本。若把 5 张 smoke 卡带放进 CI
+- **CI 化**：`sweep_carts.py` 目前是本地脚本（工具机每日 03:20 定时跑全量）。
+  v0.3.5 起 `contract_test`（契约自检 + UBSan 构型）已进 GitHub Actions 的
+  `makefile-compat` job；语料级回归仍没进 CI——若把 5 张 smoke 卡带放进去
   （需要解决第三方内容不入库的问题——可以 CI 里现场按 id 拉），能挡住"某次改动
   只崩个别游戏"这类回归。

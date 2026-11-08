@@ -46,17 +46,13 @@ makecode_arcade/
 │   ├── src/
 │   │   ├── libretro_core.cpp   libretro 入口 + 帧循环 + 视频/音频/输入接线
 │   │   ├── vm_host.cpp         pxt VM 宿主封装（镜像装载/按键沿/拉帧拉音频）
-│   │   ├── png_loader.h/.cpp   卡带解码 C++ 封装
-│   │   ├── cart.c/.h           卡带解析（vendored 自 mcarcade-core，MIT）
-│   │   ├── decompress.c/.h     LZMA-alone 解压（vendored，MIT）
 │   │   └── platform.h          pxt VM 宿主 ABI（对齐官方 sdlmain.cpp）
-│   ├── tests/              假前端 core_test / VM 冒烟 vm_smoke / 解码冒烟 cart_smoke
-│   └── third_party/            miniz（tinfl）+ LzmaDec（vendored）
+│   ├── tests/              假前端 core_test / 契约自检 contract_test / VM 冒烟 vm_smoke
 ├── runtime/
 │   ├── pxtapp/             pxt 官方 VM 内核+引擎原语（vendored，已打 3 个补丁，游戏无关）
 │   └── VENDORING.md
 ├── tools/
-│   ├── build_core.sh       一键构建：DLL + 三个测试程序
+│   ├── build_core.sh       一键构建：DLL + 三个测试程序（core_test / contract_test / vm_smoke）
 │   ├── make_local.sh       用 zig 驱动 core/Makefile（本地无目标工具链时）
 │   ├── build_target.sh     单目标交叉编译（zig；Android 走 NDK clang）
 │   ├── build_matrix.sh     发版矩阵（7 主流目标）/ --all 全架构
@@ -77,7 +73,7 @@ makecode_arcade/
 | 里程碑 | 内容 | 状态 |
 |---|---|---|
 | M0 | core 骨架可编译、可被 RetroArch 加载、显示测试画面 | ✅ 编译验证通过（zig 0.17.0） |
-| M1 | PNG 卡带解码（像素解码 + blob 位流 + LZMA + 项目 JSON） | ✅ cart.c 接入完成，3 张真实卡带冒烟通过（source 字节数与 Python 解码/生产日志一致） |
+| M1 | PNG 卡带解码（像素解码 + blob 位流 + LZMA + 项目 JSON） | ✅ 曾用 cart.c 接入，3 张真实卡带冒烟通过。**v0.3.5 起 core 侧整条链路已移除**（只认 `.pxt64`），PNG 解析只在工具链（cartconv / `tools/extract_png_meta.py`）里保留 |
 | M2 | vendor pxt C++ 运行时（screen/sprite/引擎）独立构建 | ✅ pxtapp vendored 到 runtime/pxtapp（33 TU 游戏无关，已验证 ping/jumpy/cube-land 共用同一二进制） |
 | M3 | pxt VM 字节码解释器接入，跑通第一个游戏 | ✅ **三款游戏全通**：vm_smoke（官方 ABI 直调）+ libretro 假前端路径（RGB565/按键沿/音频） |
 | M4 | 输入 / 音频合成 / 60fps 帧模型完整化 | ✅ 宿主接口全部打通：按键描述符/分键重绑、音频合成与峰值回归、帧驱动虚拟时钟（前端一圈一帧，快进=前端多取帧）、panic 横幅、存档目录对接（trace/数据走 `GET_SAVE_DIRECTORY`）、panic 自愈见 `test_lifecycle`。**v0.3.0 范围收敛：不做即时存档 / rewind（`retro_serialize*` 为 stub，前端自动禁用），核心只做官方模拟器同等的基本功能** |
@@ -142,7 +138,7 @@ Android 走 NDK 的 `ndk-build`（官方 CI 同一条路径）：
 一键本机构建 + 三个测试程序：
 
 ```bash
-tools/build_core.sh   # DLL + core_test + vm_smoke + cart_smoke
+tools/build_core.sh   # DLL + core_test + contract_test + vm_smoke
 ```
 
 ### 卡带转换（已拆分为独立项目）
@@ -340,13 +336,13 @@ RetroArch 源码 + 装 portlibs，十几分钟，绑进主流水线会拖慢每�
 | `.gitlab-ci.yml` | libretro 官方 buildbot（镜像仓库） | 收录进 RetroArch Core Downloader 用 |
 
 **发布由 tag 触发**。推 `core-v*` tag 时，`release` job 等 `zig-*` 与
-`android-*` 编完，用与本地同一份 `tools/package_release.sh` 打 5 个包（仅 64 位），
+`android-*` 编完，用与本地同一份 `tools/package_release.sh` 打 **6 个包**（仅 64 位），
 再创建 GitHub Release 并把 zip 挂上去。
 
 - 凭据用仓库内置 `GITHUB_TOKEN`（job 级 `contents: write`，全局仍是只读），
   **不需要 PAT**。Release 对象与附件上传只有 HTTPS API 提供，git/SSH 到不了
   这一层——SSH key 只能推 commit 和 tag。
-- 发版前硬断言：包数必须 5、每个包 `.info` 的 `display_version` 必须等于 tag，
+- 发版前硬断言：包数必须 6、每个包 `.info` 的 `display_version` 必须等于 tag，
   少一个或版本对不上就红，不会发出半套包。
 - 说明文本取 `.github/release-notes/<tag>.md`；没写就退回 `--generate-notes`。
 - 重跑安全：Release 已存在时走 `upload --clobber` + `edit`，不报错。
@@ -369,22 +365,20 @@ python tools/png2pxt64.py png_examples/arcade-ping.png out/ping.pxt64
 #    不会在项目根目录生成文件
 core/core_test.exe out/ping.pxt64 out/ping.bmp 120 --press=LEFT --every=40
 
-# 3) PNG 卡带 + 旁载 .pxt64（同目录同名文件；仅测试程序可走此路径，
-#    RetroArch 侧核心只接受 .pxt64）
-core/core_test.exe png_examples/arcade-ping.png out/ping2.bmp 60   # 无旁载时显示测试画面
+# 3) 契约自检（不需要卡带：system_info / 环境顺序 / 三个数组的终止哨兵 /
+#    非 .pxt64 必须 load 失败）
+core/contract_test.exe
+#    CI 里同一份断言还跑一遍 UBSan 构型：make -C core platform=unix SANITIZE=undefined contract-test
 
-# 4) 回归
-core/build/cart_smoke.exe png_examples/*.png        # 卡带解码
-
-# 5) 按键映射回归（探针卡带 + 颜色断言，16 个用例）
+# 4) 按键映射回归（探针卡带 + 颜色断言，16 个用例）
 python tools/make_probe_cartridge.py                # 生成 out/pxt64/probe.pxt64
 python tools/test_buttons.py
 
-# 6) 生命周期回归（三连换游戏 / 关闭游戏后 dlclose / 重置后音频恢复）
+# 5) 生命周期回归（三连换游戏 / 关闭游戏后 dlclose / 重置后音频恢复）
 python tools/make_probe_cartridge.py --audio        # 生成 out/pxt64/audio_probe.pxt64
 python tools/test_lifecycle.py
 
-# 7) 独立前端交叉冒烟（CI 也在跑）：miniretro 加载 core 跑 900 帧
+# 6) 独立前端交叉冒烟（CI 也在跑）：miniretro 加载 core 跑 900 帧
 #    （见 .github/workflows/build.yml 的 behavior-miniretro job）
 ```
 
@@ -481,8 +475,8 @@ functions.json 逐字节一致）。
 ## 许可
 
 本项目以 [MIT](LICENSE) 许可发布。vendored 组件沿用其原始许可：
-`core/libretro.h`、`core/third_party/miniz/`、`runtime/pxtapp/`（Microsoft pxt
-运行时）为 MIT，`core/third_party/lzma/`（LzmaDec）为公有领域——来源与出处
-详见 `runtime/VENDORING.md`。卡带转换器及其 pxt 工具链在
+`core/libretro.h`、`runtime/pxtapp/`（Microsoft pxt 运行时）为 MIT——来源与出处
+详见 `runtime/VENDORING.md`。（`core/third_party/` 的 miniz / LzmaDec 曾用于 PNG
+解码，v0.3.5 已随该链路一并删除。）卡带转换器及其 pxt 工具链在
 [makecode-arcade-cartconv](https://github.com/whmzsu/makecode-arcade-cartconv)
 仓库，pxt 依赖经 `npm install` 获取，同为 Microsoft MIT 许可。

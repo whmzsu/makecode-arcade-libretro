@@ -1,22 +1,21 @@
 // libretro_core.cpp — MakeCode Arcade libretro core（路线 B）
 //
-// M3 状态：pxt VM（vendored pxtapp）+ PNG/.pxt64 载入 + RetroPad 按键沿 +
+// M3 状态：pxt VM（vendored pxtapp）+ .pxt64 载入 + RetroPad 按键沿 +
 //          BGRA→RGB565 输出 + 单声道音频复制成立体声。
 // 载入格式：
 //   * .pxt64     字节码镜像（tools/png2pxt64.py 离线转换产物）→ 直接启动 VM
-//   * .png 卡带  若同目录存在 <同名>.pxt64 则自动旁载；否则提示转换并显示测试画面
-//                （v0.2.8 起 valid_extensions 只报 pxt64，前端文件浏览器不再
-//                 列出 .png；旁载仅供测试程序/高级用法直接调 API 时使用）
+//
+// **只认 .pxt64**：get_system_info 的 valid_extensions 也只报这一种，前端按
+// 扩展名过滤，官方 .png 卡带根本到不了这里（玩家先用 tools/png2pxt64.py 转换）。
+// 核心不解码 PNG，也不为 PNG 做任何提示——非 .pxt64 一律在通用镜像校验处失败。
 #include "../libretro.h"
 
 #include "platform.h"
-#include "png_loader.h"
 
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
 #include <string>
-#include <vector>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -61,9 +60,13 @@ static retro_input_poll_t g_input_poll = nullptr;
 static retro_input_state_t g_input_state = nullptr;
 
 static retro_log_printf_t g_log = nullptr;
-static bool g_pixel_format_set = false;
+// 像素格式：RGB565 是本核心的原生格式；前端拒绝时按 libretro 规范退回默认的
+// 0RGB1555（坚持按 565 写、前端按 1555 解 → 颜色全错）。g_pixel_format 是
+// **实际**要写的格式，渲染路径一律过 out_color()。
+static bool g_pixel_format_ok = false;
+static enum retro_pixel_format g_pixel_format = RETRO_PIXEL_FORMAT_0RGB1555;
 // 版本号只在这里出现一次：.info 打包脚本和运行时横幅都读它
-static const char* const kCoreVersion = "0.3.4";
+static const char* const kCoreVersion = "0.3.5";
 
 static unsigned g_frame = 0;
 static bool g_game_loaded = false;
@@ -104,6 +107,16 @@ static uint16_t g_palette[16] = {
     0x0000, 0x002A, 0x5400, 0x542A, 0xA800, 0xA82A, 0xFC00, 0xFC2A,
     0x0015, 0x003F, 0x5415, 0x543F, 0xA815, 0xA83F, 0xFC15, 0xFC3F,
 };
+
+// RGB565 → 前端实际接受的格式（只有 565 / 1555 两种，见 g_pixel_format）。
+// 所有往 g_fb 写的颜色都过这道转换，像素格式降级时不会再出"红变蓝"。
+static inline uint16_t out_color(uint16_t c565) {
+    if (g_pixel_format == RETRO_PIXEL_FORMAT_RGB565) return c565;
+    const uint16_t r = (uint16_t)((c565 >> 11) & 0x1f);
+    const uint16_t g = (uint16_t)(((c565 >> 5) & 0x3f) >> 1);
+    const uint16_t b = (uint16_t)(c565 & 0x1f);
+    return (uint16_t)((r << 10) | (g << 5) | b);
+}
 
 static uint16_t g_fb[kScreenWidth * kScreenHeight];
 static int16_t g_audio[2 * 735];      // 立体声交错（音频回调格式）
@@ -170,8 +183,9 @@ void draw_panic_banner(int code) {
     std::snprintf(msg, sizeof(msg), "VM PANIC %d", code);
     const int bar_h = 5 * 2 + 2 * 3; // 5 行字 * 2 倍 + 上下留白 3
     for (int y = 0; y < bar_h; ++y)
-        for (int x = 0; x < kScreenWidth; ++x) g_fb[y * kScreenWidth + x] = 0xF800;
-    draw_text_scaled(msg, 4, 3, 2, 0xFFFF, kScreenWidth);
+        for (int x = 0; x < kScreenWidth; ++x)
+            g_fb[y * kScreenWidth + x] = out_color(0xF800);
+    draw_text_scaled(msg, 4, 3, 2, out_color(0xFFFF), kScreenWidth);
 }
 
 } // namespace
@@ -201,13 +215,21 @@ static void log_printf(enum retro_log_level level, const char* fmt, ...) {
 // ---- libretro 必需接口 --------------------------------------------------
 
 static bool set_pixel_format_if_needed() {
-    if (g_pixel_format_set || !g_env) return g_pixel_format_set;
+    if (g_pixel_format_ok || !g_env) return g_pixel_format_ok;
+    // 必须同时校验回填值：个别前端会返回 true 却把 fmt 改成别的格式。
     enum retro_pixel_format fmt = RETRO_PIXEL_FORMAT_RGB565;
-    if (g_env(RETRO_ENVIRONMENT_SET_PIXEL_FORMAT, &fmt)) {
-        g_pixel_format_set = true;
+    if (g_env(RETRO_ENVIRONMENT_SET_PIXEL_FORMAT, &fmt) &&
+        fmt == RETRO_PIXEL_FORMAT_RGB565) {
+        g_pixel_format = RETRO_PIXEL_FORMAT_RGB565;
+        g_pixel_format_ok = true;
         log_printf(RETRO_LOG_INFO, "[MCA] pixel format: RGB565\n");
+    } else {
+        // 前端不接受 565 时不报错也不重试，直接按 libretro 默认的 0RGB1555 输出
+        g_pixel_format = RETRO_PIXEL_FORMAT_0RGB1555;
+        log_printf(RETRO_LOG_WARN,
+                   "[MCA] frontend rejected RGB565; output 0RGB1555\n");
     }
-    return g_pixel_format_set;
+    return g_pixel_format_ok;
 }
 
 // ---- 输入描述符 / 控制器类型 -------------------------------------------
@@ -405,8 +427,10 @@ void retro_set_environment(retro_environment_t cb) {
     if (g_env(RETRO_ENVIRONMENT_GET_LOG_INTERFACE, &log_cb))
         g_log = log_cb.log;
 
-    bool supports_no_game = false;
-    g_env(RETRO_ENVIRONMENT_SET_SUPPORT_NO_GAME, &supports_no_game);
+    // 像素格式尽早协商：前端通常在 set_environment 阶段就已接过视频驱动，
+    // 这样 load_game 之前就确定"写 565 还是 1555"，不会出现首帧用错格式。
+    // 万一这个时机前端还没接，load_game 里会再试一次。
+    set_pixel_format_if_needed();
 
     // 核心选项：本核心**没有**核心选项，输入相关的一切都在 Controls 页改。
     // 发空表而不是不发，前端日志/选项页能明确看到"0 个选项"，
@@ -460,10 +484,10 @@ void retro_get_system_av_info(struct retro_system_av_info* info) {
     info->geometry.aspect_ratio = 4.0f / 3.0f;
     info->timing.fps = kFrameRate;
     info->timing.sample_rate = kAudioSampleRate;
-    // NX 上确认两件事：前端接受的像素格式（false = 它按默认 0RGB1555 解读，
-    // 我们仍按 RGB565 写 → 颜色错）与本核心报的时序。
+    // NX 上确认两件事：前端接受的像素格式（false = 按 0RGB1555 输出）与本核心
+    // 报的时序。
     MCA_NX_BOOT("[boot] av_info %dx%d fps=%d sr=%d fmt_ok=%d", kScreenWidth, kScreenHeight,
-                kFrameRate, kAudioSampleRate, (int)g_pixel_format_set);
+                kFrameRate, kAudioSampleRate, (int)g_pixel_format_ok);
 }
 
 void retro_set_controller_port_device(unsigned port, unsigned device) {
@@ -508,28 +532,8 @@ std::string resolve_save_dir() {
     return "makecode_arcade_data";
 }
 
-// .png 卡带 → 同目录 <同名>.pxt64 旁载（game->path 在内存载入时也可能提供）
-bool try_sidecar_pxt64(const struct retro_game_info* game) {
-    if (!game->path) return false;
-    const std::string path = game->path;
-    const size_t dot = path.find_last_of('.');
-    if (dot == std::string::npos) return false;
-    const std::string sidecar = path.substr(0, dot) + ".pxt64";
-
-    FILE* f = std::fopen(sidecar.c_str(), "rb");
-    if (!f) return false;
-    std::fseek(f, 0, SEEK_END);
-    const long size = std::ftell(f);
-    std::fseek(f, 0, SEEK_SET);
-    std::vector<uint8_t> data(static_cast<size_t>(size));
-    const bool ok = std::fread(data.data(), 1, data.size(), f) == data.size();
-    std::fclose(f);
-    if (!ok) return false;
-
-    log_printf(RETRO_LOG_INFO, "[MCA] sidecar bytecode found: %s\n", sidecar.c_str());
-    return vm_start_from_image(data.data(), data.size(), resolve_save_dir().c_str());
-}
-
+// .pxt64 镜像校验 + 启动。非 .pxt64（含 PNG 卡带）在这里统一失败：
+// 前端已经按 valid_extensions 过滤过，走到这一步的多半是扩展名被改过的文件。
 bool load_pxt64(const uint8_t* data, size_t size) {
     const size_t img_len = pxt64_image_length(data, size);
     if (img_len < 64) {
@@ -544,9 +548,9 @@ bool load_pxt64(const uint8_t* data, size_t size) {
 bool retro_load_game(const struct retro_game_info* game) {
     MCA_NX_BOOT("[boot] load_game enter (size=%u)",
                 (unsigned)(game && game->size ? game->size : 0));
-    if (!set_pixel_format_if_needed()) {
-        log_printf(RETRO_LOG_WARN, "[MCA] frontend rejected RGB565\n");
-    }
+    // set_environment 里通常已经协商过；这里只兜"那个时机前端还没接"的情况，
+    // 成功则升级到 RGB565，失败就继续按 0RGB1555 输出（不再只打 WARN）。
+    set_pixel_format_if_needed();
 
     // 输入相关的声明要在前端环境就绪后发出去，Controls 页才拿得到。
     set_controller_info();
@@ -560,10 +564,13 @@ bool retro_load_game(const struct retro_game_info* game) {
     }
 
     if (runtime_available()) {
-        // VM 线程无停止接口（官方宿主为单游戏进程），换卡带需重载 core
-        log_printf(RETRO_LOG_WARN,
-                   "[MCA] VM already running; reload the core to switch games\n");
-        return true;
+        // 换卡带（同一进程内 load 第二次）：前端只在已加载内容时才会这样调用，
+        // 官方 VM 没有"停止"接口，但 vm_host 的 vm_stop() 能把线程收干净，
+        // unload→load 换游戏在 test_lifecycle 里验证过。这里必须先停，否则
+        // 直接把新镜像塞进去会和旧 VM 线程抢同一份全局状态 —— 以前是打一条
+        // WARN 就 return true，前端以为换成功了、实际还在跑旧游戏。
+        log_printf(RETRO_LOG_INFO, "[MCA] cart swap: stopping previous VM\n");
+        vm_stop();
     }
 
     g_frame = 0;
@@ -572,28 +579,6 @@ bool retro_load_game(const struct retro_game_info* game) {
 
     const uint8_t* data = static_cast<const uint8_t*>(game->data);
     const size_t size = game->size;
-
-    if (size > 8 && std::memcmp(data, "\x89PNG\r\n\x1a\n", 8) == 0) {
-        // PNG 卡带：解出工程信息用于日志/校验；字节码走旁载文件
-        CartProject project;
-        if (arcade_png_load_project(data, size, project)) {
-            log_printf(RETRO_LOG_INFO,
-                       "[MCA] cartridge decoded: %llu bytes of source (%s)\n",
-                       (unsigned long long)project.source.size(),
-                       project.is_source_json ? "file table" : "bare source");
-        } else {
-            log_printf(RETRO_LOG_WARN, "[MCA] PNG cartridge decode failed\n");
-        }
-        if (try_sidecar_pxt64(game)) {
-            g_game_loaded = true;
-            return true;
-        }
-        log_printf(RETRO_LOG_WARN,
-                   "[MCA] no bytecode. Convert first: "
-                   "python tools/png2pxt64.py <cart.png> <cart.pxt64>\n");
-        g_game_loaded = true; // 显示测试画面，不让前端报错
-        return true;
-    }
 
     if (load_pxt64(data, size)) {
         MCA_NX_BOOT("[boot] vm started (image %u bytes)", pxt::mca_image_bytes());
@@ -671,17 +656,17 @@ void render_test_frame() {
     const int stride = (g_frame / 4) % 16;
     for (int y = 0; y < kScreenHeight; y++) {
         for (int x = 0; x < kScreenWidth; x++) {
-            g_fb[y * kScreenWidth + x] = g_palette[(x / 10 + y / 10 + stride) & 15];
+            g_fb[y * kScreenWidth + x] = out_color(g_palette[(x / 10 + y / 10 + stride) & 15]);
         }
     }
     const int bx = (g_frame * 2) % (kScreenWidth - 20);
     const int by = (g_frame * 3) % (kScreenHeight - 20);
     for (int y = 0; y < 20; y++)
         for (int x = 0; x < 20; x++)
-            g_fb[(by + y) * kScreenWidth + (bx + x)] = g_palette[0];
+            g_fb[(by + y) * kScreenWidth + (bx + x)] = out_color(g_palette[0]);
     for (int y = 2; y < 18; y++)
         for (int x = 2; x < 18; x++)
-            g_fb[(by + y) * kScreenWidth + (bx + x)] = g_palette[15];
+            g_fb[(by + y) * kScreenWidth + (bx + x)] = out_color(g_palette[15]);
 }
 
 // 读一次前端的按键状态，返回 RetroPad id 位掩码。
@@ -744,13 +729,16 @@ void render_vm_frame() {
     vm_flush_logs(vm_log_emit);
 
     vm_pull_screen(g_bgra);
-    // BGRA32（字节序 B,G,R,A）→ RGB565
+    // BGRA32（字节序 B,G,R,A）→ 前端像素格式。先按 RGB565 打包，降级时再折成
+    // 0RGB1555；两条路都只做移位/掩码，单帧 76800 像素的代价可以忽略。
+    const bool rgb565 = (g_pixel_format == RETRO_PIXEL_FORMAT_RGB565);
     for (int i = 0; i < kScreenWidth * kScreenHeight; ++i) {
         const uint32_t px = g_bgra[i];
-        const uint32_t r = (px >> 16) & 0xf8;
-        const uint32_t g = (px >> 8) & 0xfc;
-        const uint32_t b = px & 0xf8;
-        g_fb[i] = static_cast<uint16_t>((r << 8) | (g << 3) | (b >> 3));
+        const uint32_t r5 = (px >> 19) & 0x1f;
+        const uint32_t g6 = (px >> 10) & 0x3f;
+        const uint32_t b5 = (px >> 3) & 0x1f;
+        const uint16_t c = static_cast<uint16_t>((r5 << 11) | (g6 << 5) | b5);
+        g_fb[i] = rgb565 ? c : out_color(c);
     }
 
     vm_pull_audio(g_audio_mono, kAudioSamplesPerFrame);

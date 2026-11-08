@@ -47,12 +47,19 @@ endif
 CORE_DIR   := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))
 PXTAPP_DIR := $(CORE_DIR)/../runtime/pxtapp
 
+# 可选 sanitizer（CI 的契约自检构型）：make platform=unix SANITIZE=undefined
+# 必须放在 BUILD_TAG 之前——打开后对象与产物落独立目录，不覆盖普通构建。
+ifneq ($(SANITIZE),)
+   SANFLAGS  := -fsanitize=$(SANITIZE) -fno-sanitize-recover=$(SANITIZE) -g
+   SAN_TAG   := -san
+endif
+
 # 产物与对象：对象按平台分目录，避免多目标构建互相覆盖（build/ 已在 .gitignore）
 # platform 可能带后缀（如 unix-armv7-hardfloat-neon），空格/斜杠会破坏路径，
 # 统一压成 - 分隔的目录名
 empty      :=
 space      := $(empty) $(empty)
-BUILD_TAG  := $(subst $(space),-,$(strip $(platform)))
+BUILD_TAG  := $(subst $(space),-,$(strip $(platform)))$(SAN_TAG)
 BUILD_DIR  := $(CORE_DIR)/build/make/$(BUILD_TAG)
 OBJ_DIR    := $(BUILD_DIR)/obj
 
@@ -68,9 +75,11 @@ CXXFLAGS  += $(COMMON_FLAGS) -fno-rtti -fno-exceptions -fno-unwind-tables
 CXXFLAGS  += -fno-threadsafe-statics
 CXXFLAGS  += -Wno-unused-parameter -Wno-unused-private-field -Wno-vla-cxx-extension
 CFLAGS    += $(COMMON_FLAGS) -std=c99
+CXXFLAGS  += $(SANFLAGS)
+CFLAGS    += $(SANFLAGS)
+LDFLAGS   += $(SANFLAGS)
 
-INCFLAGS := -I$(CORE_DIR)/src -I$(CORE_DIR)/third_party/miniz \
-            -I$(CORE_DIR)/third_party/lzma -I$(PXTAPP_DIR)
+INCFLAGS := -I$(CORE_DIR)/src -I$(PXTAPP_DIR)
 
 # ---------------------------------------------------------------- 目标形态
 ifneq (,$(findstring libnx,$(platform)))
@@ -150,20 +159,16 @@ VM_DIRS    := base core---vm game mixer---ext screen---ext settings---files
 VM_SOURCES := $(foreach d,$(VM_DIRS),$(sort $(wildcard $(PXTAPP_DIR)/$(d)/*.cpp)))
 VM_SOURCES += $(PXTAPP_DIR)/pointers.cpp
 
-# core 自身：C 组件（cart/decompress 自 mcarcade-core，MIT）+ C++ 宿主
+# core 自身：只有两个 C++ 源。卡带侧不做任何解码（v0.3.5 起 PNG 入口与
+# cart/miniz/lzma 一并删除，只认 .pxt64 镜像）。
 # 一律用 $(CORE_DIR) 前缀，使规则不依赖当前工作目录
-CORE_C_SOURCES   := $(CORE_DIR)/src/cart.c $(CORE_DIR)/src/decompress.c \
-                    $(CORE_DIR)/third_party/miniz/miniz_tinfl.c \
-                    $(CORE_DIR)/third_party/lzma/LzmaDec.c
-CORE_CPP_SOURCES := $(CORE_DIR)/src/libretro_core.cpp $(CORE_DIR)/src/png_loader.cpp \
-                    $(CORE_DIR)/src/vm_host.cpp
+CORE_CPP_SOURCES := $(CORE_DIR)/src/libretro_core.cpp $(CORE_DIR)/src/vm_host.cpp
 
 # pxtapp 用 C++11（上游如此），core 宿主用 C++14
 # 对象路径去掉源码前缀（pxtapp 在 ../ 下，直接拼会产生带 .. 的目标名）
 VM_OBJS   := $(patsubst $(PXTAPP_DIR)/%.cpp,$(OBJ_DIR)/vm/%.o,$(VM_SOURCES))
-CORE_COBJ := $(patsubst $(CORE_DIR)/%.c,$(OBJ_DIR)/core/%.o,$(CORE_C_SOURCES))
 CORE_OBJ  := $(patsubst $(CORE_DIR)/%.cpp,$(OBJ_DIR)/core/%.o,$(CORE_CPP_SOURCES))
-OBJECTS   := $(VM_OBJS) $(CORE_COBJ) $(CORE_OBJ)
+OBJECTS   := $(VM_OBJS) $(CORE_OBJ)
 DEPS      := $(OBJECTS:.o=.d)
 
 # ---------------------------------------------------------------- 规则
@@ -201,6 +206,29 @@ $(OBJ_DIR)/core/%.o: $(CORE_DIR)/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) $(INCFLAGS) -MMD -MP -c -o $@ $<
 
+# ------------------------------------------------------- 契约自检（假前端）
+# 不需要卡带：校验 get_system_info、环境调用顺序（像素格式必须在 load 前协商）、
+# descriptor / controller / variables 三个数组的终止哨兵，以及"非 .pxt64 必须
+# load 失败"。CI 在 buildbot 同构型（gcc/make）和 UBSan 构型各跑一次。
+# 只对会产动态库的 unix 目标开放：libnx 是静态库、win64 上的可执行文件另有用途。
+#
+# 两个实现细节：
+#   * 链接不用 $(LDFLAGS)：unix 分支里有 -shared，会把测试程序链成 .so
+#   * 运行放到 build 目录：核心会在 CWD 落 mca_trace.log，别污染源码树
+ifneq ($(STATIC_LINKING),1)
+ifneq (,$(findstring unix,$(platform)))
+CONTRACT_BIN := $(BUILD_DIR)/contract_test
+
+contract-test: $(CONTRACT_BIN)
+	cd $(BUILD_DIR) && ./contract_test
+
+$(CONTRACT_BIN): $(OBJECTS) $(CORE_DIR)/tests/contract_test.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) -std=c++14 $(INCFLAGS) -o $@ \
+	   $(CORE_DIR)/tests/contract_test.cpp $(OBJECTS) $(SANFLAGS) -lpthread
+endif
+endif
+
 # 本地快捷方式：用 zig 当编译器驱动（本机无 gcc/mingw 时）
 #   make platform=win64 CC="zig cc -target x86_64-windows-gnu" \
 #                      CXX="zig c++ -target x86_64-windows-gnu"
@@ -213,4 +241,4 @@ clean:
 
 -include $(DEPS)
 
-.PHONY: all clean
+.PHONY: all clean contract-test

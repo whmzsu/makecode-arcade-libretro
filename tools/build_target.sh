@@ -129,7 +129,7 @@ CXXFLAGS=(
   -Wno-unused-parameter -Wno-unused-private-field -Wno-vla-cxx-extension
 )
 CFLAGS=("${TARGET_FLAGS[@]}" "${PIC[@]}" "${WIN_BASELINE[@]}" -O2 "${UNWIND[@]}")
-INC=(-I"$CORE/src" -I"$CORE/third_party/miniz" -I"$CORE/third_party/lzma")
+INC=(-I"$CORE/src" -I"$PXTAPP")
 
 needs_build() { [ ! -f "$2" ] || [ "$1" -nt "$2" ]; }
 
@@ -151,14 +151,8 @@ done
 echo "  编译 $n 个 / 跳过 $skipped 个"
 
 echo "[$TAG] core 源码"
-for f in "$CORE"/src/cart.c "$CORE"/src/decompress.c \
-         "$CORE"/third_party/miniz/miniz_tinfl.c "$CORE"/third_party/lzma/LzmaDec.c; do
-  out="$OBJC/$(basename "$f" .c).o"
-  if needs_build "$f" "$out"; then
-    "$CCC" $CCMODE "${CFLAGS[@]}" "${INC[@]}" -c "$f" -o "$out"
-  fi
-done
-for f in "$CORE"/src/libretro_core.cpp "$CORE"/src/png_loader.cpp "$CORE"/src/vm_host.cpp; do
+# 只有两个 C++ 源：PNG 解码链路（cart/decompress/miniz/lzma）已在 v0.3.5 移除
+for f in "$CORE"/src/libretro_core.cpp "$CORE"/src/vm_host.cpp; do
   out="$OBJC/$(basename "$f" .cpp).o"
   if needs_build "$f" "$out"; then
     "$CXX" $CXXMODE "${CXXFLAGS[@]}" -std=c++14 "${INC[@]}" -c "$f" -o "$out"
@@ -167,6 +161,9 @@ done
 
 echo "[$TAG] 链接 -> $DIST/makecode_arcade_libretro.$EXT"
 rm -f "$DIST/makecode_arcade_libretro.$EXT"   # 避免上次失败残留被误判为成功
+# 用显式对象列表而不是 "$OBJC"/*.o：老构建目录里可能还躺着已删除源码的 .o
+# （cart.o / png_loader.o / LzmaDec.o…），glob 会把它们静默链进产物。
+CORE_OBJS=("$OBJC/libretro_core.o" "$OBJC/vm_host.o")
 "$CXX" $CXXMODE "${TARGET_FLAGS[@]}" "${PIC[@]}" "${LINK_EXTRA[@]}" \
-  -o "$DIST/makecode_arcade_libretro.$EXT" "$OBJC"/*.o "$OBJV"/*.o
+  -o "$DIST/makecode_arcade_libretro.$EXT" "${CORE_OBJS[@]}" "$OBJV"/*.o
 ls -l "$DIST/makecode_arcade_libretro.$EXT" | awk '{print "  " $5 " bytes"}'

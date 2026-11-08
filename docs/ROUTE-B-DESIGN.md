@@ -1,6 +1,15 @@
 # 路线 B 总体设计：pxt VM 字节码 + C++ 运行时的 libretro core
 
-日期：2026-11-01　状态：定稿（骨架阶段）
+日期：2026-11-01　状态：**历史设计文档（已实现，勿按本文实施）**
+
+> ⚠️ 本文记录的是立项时的设想，里面有若干**后来被否决或改掉**的内容，读的时候
+> 以现状为准：
+> - **不做 core 内 PNG 解码，也不做旁载**。v0.3.5 起核心只接受 `.pxt64`，
+>   `cart.c` / `decompress.c` / `miniz` / `LzmaDec` 已从 core 删除；`.png` 卡带
+>   一律先用 cartconv 转换（见 README「RetroArch 使用」）。
+> - 下文出现的 `.mka` 字节码包、"ROM 双格式"、"MVP 接受 .png" 都是**废弃方案**。
+> - "骨架阶段""尚未编译验证"之类的描述均已过时：当前是 v0.3.5，5 个 64 位
+>   目标 + Windows/Android/Linux 全矩阵在发版。
 
 ## 0. 目标与非目标
 
@@ -79,9 +88,10 @@ pxt 的 bytecode/VM 目标与 libSDL 原生版（iOS/Android/桌面）同源，
 
 关键决策：
 
-1. **ROM 双格式**：MVP 同时接受 .png（core 内解码到 JSON）与 .mka
-   （预转换字节码）。字节码编译器（pxt toolchain 需要 Node）放离线
-   转换器，core 保持零重型依赖。
+1. ~~**ROM 双格式**：MVP 同时接受 .png（core 内解码到 JSON）与 .mka
+   （预转换字节码）。~~ **已废弃**：最终只接受 `.pxt64` 一种格式（离线转换
+   产物），core 内不做 PNG 解码、也不做旁载；字节码编译器（需要 Node）留在
+   离线工具链 cartconv 里，core 保持零重型依赖。
 2. **帧模型**：pxt 运行时是事件驱动 + fiber 协作调度（codal 风格）。
    core 把它改造成"每帧一步"：`retro_run` → advance timers(16.639ms)
    → 恢复/让出 fiber → 渲染 → 输出音频。这是路线 B 最大的一处运行时
@@ -93,22 +103,20 @@ pxt 的 bytecode/VM 目标与 libSDL 原生版（iOS/Android/桌面）同源，
 
 | 模块 | 职责 | 来源 |
 |---|---|---|
-| libretro_core.cpp | libretro 入口、帧循环、音视频输入接线 | 自写（骨架已完成） |
-| cart.c / decompress.c | PNG 卡带解析 + LZMA（**已 vendor**） | 姊妹 core mcarcade-core（MIT） |
-| png_loader.cpp | cart.c 的 C++ 封装 | 自写（已完成） |
-| platform.h | HAL 接口（screen/sound/input/timer） | 自写（接口已定义） |
+| libretro_core.cpp | libretro 入口、帧循环、音视频输入接线 | 自写 |
+| ~~cart.c / decompress.c / png_loader.cpp~~ | ~~PNG 卡带解析 + LZMA~~ **v0.3.5 已删除**（core 只认 `.pxt64`） | 曾 vendor 自 mcarcade-core（MIT） |
+| platform.h | HAL 接口（screen/sound/input/timer） | 自写 |
 | pxtvm/ | pxt VM 字节码解释器 | vendor 自 microsoft/pxt（M3） |
 | engine/ | pxt-arcade C++ 引擎（screen/sprite/sound） | vendor（M2，具体 repo 见 VENDORING.md） |
 | convert/（tools） | PNG→bytecode 离线转换器 | 依赖 pxt toolchain（Node），可复用姊妹 core 内嵌 pxtc 的工程经验 |
 
 ## 4. 里程碑与验收标准
 
-- **M0 骨架**（当前）：core 编译通过；RetroArch 手动加载显示动态测试画面；
-  日志接口、像素格式协商（RGB565 优先）、RetroPad 轮询就绪。
-  （注意：本机暂无 C 编译器，骨架尚未编译验证。）
-- **M1 PNG 解码**（✅ 代码就位）：vendor 姊妹 core 的 cart.c/decompress.c
-  并接入 retro_load_game；tools/extract_png_meta.py 用 ≥3 个真实卡带
-  验证输出与姊妹 core 一致（source 文件表内容逐字节相同）。
+- **M0 骨架**（已完成）：core 编译通过；RetroArch 手动加载显示动态测试画面；
+  日志接口、像素格式协商（RGB565 优先，失败退 0RGB1555）、RetroPad 轮询就绪。
+- **M1 PNG 解码**（✅ 已完成，**v0.3.5 已从 core 移除**）：曾 vendor 姊妹 core
+  的 cart.c/decompress.c 接入 retro_load_game；PNG 解析现在只在工具链
+  （cartconv / `tools/extract_png_meta.py`）里保留。
 - **M2 运行时 vendor**：引擎 C++ 代码在 core 构建体系内独立编译通过，
   用一个单元测试把静态场景渲染到 framebuffer 存 PNG 对拍。
 - **M3 VM 接入**：手动用 pxt 编一个小游戏得到字节码，VM 解释执行、

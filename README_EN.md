@@ -48,12 +48,8 @@ makecode_arcade/
 │   ├── src/
 │   │   ├── libretro_core.cpp   libretro entry points + frame loop + video/audio/input wiring
 │   │   ├── vm_host.cpp         pxt VM host wrapper (image load / button edges / frame+audio pulls)
-│   │   ├── png_loader.h/.cpp   C++ wrapper for cartridge decoding
-│   │   ├── cart.c/.h           Cartridge parsing (vendored from mcarcade-core, MIT)
-│   │   ├── decompress.c/.h     LZMA-alone decompression (vendored, MIT)
 │   │   └── platform.h          pxt VM host ABI (mirrors the official sdlmain.cpp)
-│   ├── tests/              Fake-frontend core_test / VM smoke vm_smoke / decode smoke cart_smoke
-│   └── third_party/            miniz (tinfl) + LzmaDec (vendored)
+│   ├── tests/              Fake-frontend core_test / contract self-check contract_test / VM smoke vm_smoke
 ├── runtime/
 │   ├── pxtapp/             Official pxt VM kernel + engine primitives (vendored, 3 patches applied, game-agnostic)
 │   └── VENDORING.md
@@ -82,7 +78,7 @@ for cross-referencing.
 | Milestone | Scope | Status |
 |---|---|---|
 | M0 | Core skeleton compiles, loads in RetroArch, shows a test screen | ✅ Compile-verified (zig 0.17.0) |
-| M1 | .png cartridge decoding (pixel decode + blob bitstream + LZMA + project JSON) | ✅ cart.c integrated; 3 real cartridges smoke-pass (source byte counts match the Python decoder / production logs) |
+| M1 | .png cartridge decoding (pixel decode + blob bitstream + LZMA + project JSON) | ✅ Once wired through cart.c; 3 real cartridges smoke-pass. **The whole path was removed from the core in v0.3.5** (only `.pxt64` is accepted); PNG parsing now lives in the toolchain only (cartconv / `tools/extract_png_meta.py`) |
 | M2 | Vendor the pxt C++ runtime (screen/sprite/engine), standalone build | ✅ pxtapp vendored into runtime/pxtapp (33 game-agnostic TUs; ping/jumpy/cube-land verified against one binary) |
 | M3 | Hook up the pxt VM bytecode interpreter, run the first game | ✅ **All three games pass**: vm_smoke (official ABI, direct calls) + the libretro fake-frontend path (RGB565 / button edges / audio) |
 | M4 | Input / audio synthesis / complete 60 fps frame model | ✅ Every host interface wired: button descriptors / per-button rebinding, audio synthesis with peak regression, frame-driven virtual clock (one frontend poll = one frame; fast-forward = the frontend polling faster), panic banner, save-directory hookup (trace/data go to `GET_SAVE_DIRECTORY`), panic self-healing — see `test_lifecycle`. **v0.3.0 scope cut: no savestates / rewind (`retro_serialize*` are stubs, the frontend auto-disables them); the core only does what the official emulator does** |
@@ -151,7 +147,7 @@ pollute the source tree.
 One-shot native build + the three test programs:
 
 ```bash
-tools/build_core.sh   # DLL + core_test + vm_smoke + cart_smoke
+tools/build_core.sh   # DLL + core_test + contract_test + vm_smoke
 ```
 
 ### Cartridge conversion (split into a separate project)
@@ -392,7 +388,7 @@ attach the zips.
   `contents: write`; globally still read-only). **No PAT needed.** Release
   objects and asset uploads only exist over the HTTPS API — git/SSH can't
   reach that layer; the SSH key only pushes commits and tags.
-- Hard assertions before release: exactly 5 packages, every package's `.info`
+- Hard assertions before release: exactly 6 packages, every package's `.info`
   `display_version` must equal the tag — one short or mismatched version
   turns the job red, so a partial release can't ship.
 - Release notes come from `.github/release-notes/<tag>.md`; falls back to
@@ -420,22 +416,20 @@ python tools/png2pxt64.py png_examples/arcade-ping.png out/ping.pxt64
 #    no files are created in the project root
 core/core_test.exe out/ping.pxt64 out/ping.bmp 120 --press=LEFT --every=40
 
-# 3) .png cartridge + side-loaded .pxt64 (same directory, same stem; only test programs
-#    can take this path — the RetroArch core only accepts .pxt64)
-core/core_test.exe png_examples/arcade-ping.png out/ping2.bmp 60   # shows the test screen without side-load
+# 3) Contract self-check (no cartridge needed: system_info / environment ordering /
+#    terminators of the three arrays / non-.pxt64 must fail to load)
+core/contract_test.exe
+#    CI runs the same assertions once more under UBSan: make -C core platform=unix SANITIZE=undefined contract-test
 
-# 4) Regression
-core/build/cart_smoke.exe png_examples/*.png        # cartridge decoding
-
-# 5) Button mapping regression (probe cartridge + color assertions, 16 cases)
+# 4) Button mapping regression (probe cartridge + color assertions, 16 cases)
 python tools/make_probe_cartridge.py                # generates out/pxt64/probe.pxt64
 python tools/test_buttons.py
 
-# 6) Lifecycle regression (three game switches / dlclose after close / audio recovery after reset)
+# 5) Lifecycle regression (three game switches / dlclose after close / audio recovery after reset)
 python tools/make_probe_cartridge.py --audio        # generates out/pxt64/audio_probe.pxt64
 python tools/test_lifecycle.py
 
-# 7) Independent frontend cross smoke (also in CI): miniretro loads the core and runs 900 frames
+# 6) Independent frontend cross smoke (also in CI): miniretro loads the core and runs 900 frames
 #    (see the behavior-miniretro job in .github/workflows/build.yml)
 ```
 
@@ -558,10 +552,11 @@ See docs/ROUTE-B-DESIGN.md for the full design.
 ## License
 
 This project is released under the [MIT](LICENSE) license. Vendored
-components keep their original licenses: `core/libretro.h`,
-`core/third_party/miniz/`, `runtime/pxtapp/` (the Microsoft pxt runtime) are
-MIT; `core/third_party/lzma/` (LzmaDec) is public domain — sources and
-provenance in `runtime/VENDORING.md`. The cartridge converter and its pxt
+components keep their original licenses: `core/libretro.h` and
+`runtime/pxtapp/` (the Microsoft pxt runtime) are MIT — sources and
+provenance in `runtime/VENDORING.md`. (The miniz / LzmaDec copies under
+`core/third_party/` were only used for PNG decoding and were removed together
+with that path in v0.3.5.) The cartridge converter and its pxt
 toolchain live in the
 [makecode-arcade-cartconv](https://github.com/whmzsu/makecode-arcade-cartconv)
 repo; pxt dependencies come via `npm install` and are likewise Microsoft MIT.

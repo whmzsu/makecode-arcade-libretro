@@ -590,6 +590,18 @@ jobs:
           test -f core/makecode_arcade_libretro.so
           file -b core/makecode_arcade_libretro.so | grep -q x86-64
 
+      # 契约自检（假前端）：不需要卡带。校验 system_info、像素格式协商时机、
+      # descriptor/controller/variables 的终止哨兵、非 .pxt64 必须 load 失败。
+      # 0.3.4 的 SET_CONTROLLER_INFO 缺哨兵就是"只有干净 gcc 才炸"，在这里
+      # 能提前拦住，不必再等真机 SIGSEGV。
+      - name: 契约自检（gcc/make 构型）
+        run: make -C core -f Makefile platform=unix contract-test
+
+      # UBSan 构型：同一套断言在 -fsanitize=undefined 下再跑一遍，对象落
+      # 独立目录（build/make/unix-san），与上面的普通构建互不覆盖。
+      - name: 契约自检（UBSan 构型）
+        run: make -C core -f Makefile platform=unix SANITIZE=undefined contract-test
+
       - name: platform=win64（mingw-w64 交叉）
         run: |
           set -u

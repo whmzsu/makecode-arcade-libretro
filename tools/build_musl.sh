@@ -58,7 +58,7 @@ COMMON=(-O2 -fPIC -fwrapv -fno-strict-aliasing -ffunction-sections
 CXXFLAGS=("${COMMON[@]}" -std=c++11)
 CORECXXFLAGS=("${COMMON[@]}" -std=c++14)
 CFLAGS=("${COMMON[@]}" -std=c99)
-INC=(-I"$CORE/src" -I"$CORE/third_party/miniz" -I"$CORE/third_party/lzma" -I"$PXTAPP")
+INC=(-I"$CORE/src" -I"$PXTAPP")
 
 needs_build() { [ ! -f "$2" ] || [ "$1" -nt "$2" ]; }
 
@@ -79,13 +79,8 @@ done
 echo "  编译 $n 个 / 跳过 $skipped 个"
 
 echo "[$TAG] core 源码"
-for f in "$CORE"/src/cart.c "$CORE"/src/decompress.c \
-         "$CORE"/third_party/miniz/miniz_tinfl.c "$CORE"/third_party/lzma/LzmaDec.c; do
-  out="$OBJC/$(basename "$f" .c).o"
-  needs_build "$f" "$out" && "$CC" "${CFLAGS[@]}" "${INC[@]}" -c "$f" -o "$out"
-done
 # musl.cc 是完整官方 musl，不需要 musl_missing.c（zig musl 裁剪补丁）
-for f in "$CORE"/src/libretro_core.cpp "$CORE"/src/png_loader.cpp "$CORE"/src/vm_host.cpp; do
+for f in "$CORE"/src/libretro_core.cpp "$CORE"/src/vm_host.cpp; do
   out="$OBJC/$(basename "$f" .cpp).o"
   needs_build "$f" "$out" && "$CXX" "${CORECXXFLAGS[@]}" "${INC[@]}" -c "$f" -o "$out"
 done
@@ -94,9 +89,11 @@ echo "[$TAG] 链接（全静态 DSO）"
 # GNU ld 的 -shared -static：musl libc.a/libm 全部静态链入，产物零 NEEDED。
 # C++ 运行库也要静态（-static 已覆盖 libc/libstdc++/libgcc，musl gcc 的
 # libstdc++.a 本身就是 musl 版）。
+# 显式对象列表：老构建目录里可能还有已删源码的 .o（cart/png_loader/LzmaDec），
+# glob 会把它们静默链进产物。
 "$CXX" -shared -static -Wl,--build-id=none \
   -o "$DIST/makecode_arcade_libretro.so" \
-  "$OBJC"/*.o "$OBJV"/*.o
+  "$OBJC"/libretro_core.o "$OBJC"/vm_host.o "$OBJV"/*.o
 ls -l "$DIST/makecode_arcade_libretro.so" | awk '{print "  " $5 " bytes"}'
 
 # 自检：必须是零 NEEDED 的 AArch64 ELF DSO

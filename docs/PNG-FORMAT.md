@@ -2,8 +2,9 @@
 
 来源：以 jan4984 原型的 Rust 实现为准（`loadPNG`），
 其注释标明移植自 microsoft/pxt 的 `pxtlib/util.ts decodeBlobAsync`。
-core 内的 C++ 实现（core/src/png_loader.cpp）与本工具（tools/extract_png_meta.py）
-均按本规格编写。
+core 侧的 C++ 实现（`core/src/png_loader.cpp` + cart.c）**已于 v0.3.5 删除**——
+核心只接受 `.pxt64`，不再解码 PNG。现在按本规格实现的只有工具链：
+`tools/extract_png_meta.py`（纯 Python 参照实现）与 cartconv 仓库的转换器。
 
 ## 总体结构
 

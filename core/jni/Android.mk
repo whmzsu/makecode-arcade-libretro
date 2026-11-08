@@ -28,23 +28,17 @@ VM_DIRS    := base core---vm game mixer---ext screen---ext settings---files
 VM_SOURCES := $(foreach d,$(VM_DIRS),$(sort $(wildcard $(PXTAPP_DIR)/$(d)/*.cpp)))
 VM_SOURCES += $(PXTAPP_DIR)/pointers.cpp
 
-# core 自身：C 组件 + C++ 宿主
-CORE_C_SOURCES   := $(CORE_DIR)/src/cart.c $(CORE_DIR)/src/decompress.c \
-                    $(CORE_DIR)/third_party/miniz/miniz_tinfl.c \
-                    $(CORE_DIR)/third_party/lzma/LzmaDec.c
-CORE_CPP_SOURCES := $(CORE_DIR)/src/libretro_core.cpp $(CORE_DIR)/src/png_loader.cpp \
-                    $(CORE_DIR)/src/vm_host.cpp
+# core 自身：只有两个 C++ 源（v0.3.5 起 PNG 解码链路整体移除，只认 .pxt64）
+CORE_CPP_SOURCES := $(CORE_DIR)/src/libretro_core.cpp $(CORE_DIR)/src/vm_host.cpp
 
-LOCAL_SRC_FILES  := $(VM_SOURCES) $(CORE_C_SOURCES) $(CORE_CPP_SOURCES)
-LOCAL_C_INCLUDES := $(CORE_DIR)/src $(CORE_DIR)/third_party/miniz \
-                    $(CORE_DIR)/third_party/lzma $(PXTAPP_DIR)
+LOCAL_SRC_FILES  := $(VM_SOURCES) $(CORE_CPP_SOURCES)
+LOCAL_C_INCLUDES := $(CORE_DIR)/src $(PXTAPP_DIR)
 
 # 与 core/Makefile 保持同一套开关：
 #   -fno-rtti/-fno-exceptions：pxt VM 不用异常/RTTI
 #   -fwrapv：VM 依赖有符号整数回绕语义
 #   -fno-threadsafe-statics：pxt 的 SINGLETON 是裸 static，防引入 __cxa_guard
 COMMON_FLAGS := -O2 -fwrapv -fno-strict-aliasing -ffunction-sections
-LOCAL_CFLAGS   := $(COMMON_FLAGS) -std=c99
 LOCAL_CPPFLAGS := $(COMMON_FLAGS) -fno-rtti -fno-exceptions -fno-unwind-tables \
                   -fno-threadsafe-statics -std=c++14 -Wno-unused-parameter
 
