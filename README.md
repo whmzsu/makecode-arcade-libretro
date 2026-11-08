@@ -91,10 +91,11 @@ makecode_arcade/
 | node + npm | 转换卡带（在 **makecode-arcade-cartconv** 仓库，见下行） | 依赖清单在其 `vm-build/`（锁文件锁定 pxt-arcade@4.2.1 + pxt-core@13.2.1；node_modules 不入库） |
 | Android NDK | 仅交叉编译 Android 目标 | r27c 验证过。`ANDROID_NDK_HOME` 环境变量，或放 `<项目父目录>/common tools/android-ndk-r27c` |
 
-即：**只想编译 core 跑测试** → zig 就够；**想转换自己的卡带** → 用
+即：**只想编译 core 跑测试** → zig 就够；**想把自己的游戏变成 `.pxt64`** →
+官方在线 IDE 配一次就能直接导出（见〈拿到 `.pxt64`〉，什么都不用装）；
+**要批量转换一堆 `.png`** → 用
 [makecode-arcade-cartconv](https://github.com/whmzsu/makecode-arcade-cartconv)
-便携包（免安装）；**只想玩** → 下 release zip + 转好的 .pxt64，
-什么都不用装。
+便携包；**只想玩** → 下 release zip + 转好的 .pxt64。
 
 ## 构建工具链
 
@@ -156,10 +157,19 @@ python tools/check_pxt_patches.py --strict              # vendored pxt 树的 9 
 `tools/build_{core,target,musl}.sh` 读的都是它）。加/删源文件只改这一个地方——
 以前 5 处各列一份，删 `cart.c` 那轮漏改了两处，靠 CI 链接失败才发现。
 
-### 卡带转换（已拆分为独立项目）
+### 拿到 `.pxt64`：官方 IDE 直接导出（推荐）/ cartconv 批量转换
 
-卡带转换器 **cartconv**（`.png` 卡带 → `.pxt64` 字节码，Node.js，玩家用）与
-pxt 编译链已拆分到独立仓库：
+官方在线 IDE 自带 **VM 目标**：在 About → Experiments 里启用 **Experimental
+Hardware**，再把硬件切到 **VM**，同一个 Download 按钮就直接产出 `.pxt64` ——
+官方编译器的输出，不用装任何东西（开关存在浏览器本地，配一次长期有效）。
+
+逐步截图教程（中英双语，含常见问题）：
+[《官方导出 pxt64 指导》](https://github.com/whmzsu/makecode-arcade-cartconv/blob/main/MakeCode%20Arcade%20%E5%A6%82%E4%BD%95%E5%AE%98%E6%96%B9%E5%AF%BC%E5%87%BApxt64/%E5%AE%98%E6%96%B9%E5%AF%BC%E5%87%BApxt64%E6%8C%87%E5%AF%BC.md)
+· [English](https://github.com/whmzsu/makecode-arcade-cartconv/blob/main/MakeCode%20Arcade%20%E5%A6%82%E4%BD%95%E5%AE%98%E6%96%B9%E5%AF%BC%E5%87%BApxt64/%E5%AE%98%E6%96%B9%E5%AF%BC%E5%87%BApxt64%E6%8C%87%E5%AF%BC.en.md)
+
+要**批量**转（整个目录的 `.png` 卡带），或者需要离线 / 无人值守时，用下面这个
+转换器（`.png` → `.pxt64`，Node.js；产物与官方 IDE 逐字节一致），它和 pxt
+编译链已拆分到独立仓库：
 **https://github.com/whmzsu/makecode-arcade-cartconv**
 
 - 免安装便携包（自带 node 运行时 + pxt 编译链，约 85MB）在其 Releases 下载，
@@ -406,9 +416,9 @@ functions.json 逐字节一致）。
 ## RetroArch 使用
 
 > **核心只运行 `.pxt64` 字节码，文件浏览器也只列出 `.pxt64`。** `.png` 卡带里
-> 只有**源码**（meta + source），不是可直接运行的游戏——**必须先用 cartconv
-> 转换成 `.pxt64`**（见
-> [makecode-arcade-cartconv](https://github.com/whmzsu/makecode-arcade-cartconv)）。
+> 只有**源码**（meta + source），不是可直接运行的游戏——拿到 `.pxt64` 有两条路：
+> 用官方 IDE 直接导出（推荐，不用装任何东西，见上文「拿到 `.pxt64`」），或用
+> [cartconv](https://github.com/whmzsu/makecode-arcade-cartconv) 批量转换。
 > 核心不接受 `.png` 作为加载内容。
 
 1. 取 `core/dist/release/makecode_arcade_<platform>.zip`，**先解压**，把其中的

@@ -97,10 +97,12 @@ for cross-referencing.
 | Android NDK | Cross-compiling Android targets only | Verified with r27c. Set `ANDROID_NDK_HOME`, or place it at `<project parent>/common tools/android-ndk-r27c` |
 
 In short: **just want to build the core and run tests** → zig is enough;
-**want to convert your own cartridges** → grab the
+**want your own game as a `.pxt64`** → export it from the official IDE (one-time
+setup, nothing to install; see "Getting a `.pxt64`"); **need to batch-convert a
+pile of `.png`** → grab the
 [makecode-arcade-cartconv](https://github.com/whmzsu/makecode-arcade-cartconv)
-portable package (zero install); **just want to play** → download a release
-zip + converted .pxt64 files, nothing to install.
+portable package; **just want to play** → download a release zip + converted
+.pxt64 files, nothing to install.
 
 ## Build toolchain
 
@@ -150,10 +152,21 @@ One-shot native build + the three test programs:
 tools/build_core.sh   # DLL + core_test + contract_test + vm_smoke
 ```
 
-### Cartridge conversion (split into a separate project)
+### Getting a `.pxt64`: export from the official IDE (recommended) / batch-convert with cartconv
 
-The cartridge converter **cartconv** (`.png` cartridge → `.pxt64` bytecode,
-Node.js, for players) and the pxt compile chain live in their own repo:
+The official web IDE ships a **VM target**: enable **Experimental Hardware**
+under About → Experiments, pick **VM** as the hardware, and the same Download
+button produces a `.pxt64` — straight from the official compiler, nothing to
+install (the toggle lives in browser storage, so it is a one-time setup).
+
+Step-by-step, with screenshots and troubleshooting (English / Chinese):
+[Exporting pxt64 from the official IDE](https://github.com/whmzsu/makecode-arcade-cartconv/blob/main/MakeCode%20Arcade%20%E5%A6%82%E4%BD%95%E5%AE%98%E6%96%B9%E5%AF%BC%E5%87%BApxt64/%E5%AE%98%E6%96%B9%E5%AF%BC%E5%87%BApxt64%E6%8C%87%E5%AF%BC.en.md)
+· [简体中文](https://github.com/whmzsu/makecode-arcade-cartconv/blob/main/MakeCode%20Arcade%20%E5%A6%82%E4%BD%95%E5%AE%98%E6%96%B9%E5%AF%BC%E5%87%BApxt64/%E5%AE%98%E6%96%B9%E5%AF%BC%E5%87%BApxt64%E6%8C%87%E5%AF%BC.md)
+
+To **batch**-convert (a whole directory of `.png` cartridges), or for offline /
+unattended use, there is the converter (**cartconv**, `.png` → `.pxt64`,
+Node.js; byte-identical output to the official IDE). It and the pxt compile
+chain live in their own repo:
 **https://github.com/whmzsu/makecode-arcade-cartconv**
 
 - A zero-install portable package (bundled node runtime + pxt compile chain,
@@ -441,9 +454,10 @@ is game-agnostic; functions.json is byte-identical).
 
 > **The core only runs `.pxt64` bytecode, and the file browser only lists
 > `.pxt64`.** A `.png` cartridge contains only **source code** (meta +
-> source), not a runnable game — **you must convert it to `.pxt64` with
-> cartconv first** (see
-> [makecode-arcade-cartconv](https://github.com/whmzsu/makecode-arcade-cartconv)).
+> source), not a runnable game — get a `.pxt64` either by exporting it from the
+> official IDE (recommended, nothing to install; see "Getting a `.pxt64`"
+> above) or by batch-converting with
+> [cartconv](https://github.com/whmzsu/makecode-arcade-cartconv).
 > The core does not accept `.png` as load content.
 
 1. Take `core/dist/release/makecode_arcade_<platform>.zip`, **unzip it
