@@ -6,21 +6,18 @@
 #   ra_stubcore.nro RetroArch + 空核心（只为验证静态核心这条机制）
 #   mca_boot.nro    RetroArch + 我们的核心，带开机 trace 到 sdmc:/switch/mca_boot.log
 #
-# 触发：手动 workflow_dispatch，或 push 改了 tools/nx-probe/**、核心源码与本文件。
+# 触发：**只有手动 workflow_dispatch**。
+#
+# 曾经跟着 push 自动跑（paths 命中 core/src/**、runtime/** 等），2026-11-08 收掉：
+# 取证目的已经达成 —— 根因定案在系统侧（fw 21.2/22 的 mesa nv50_ir 着色器编译器
+# 读野指针，我们的核心从未上栈），上游 libretro/RetroArch#18905 仍未修复，这条线
+# 在恢复之前不会有新证据。而它每次要装 portlibs + 克隆 RetroArch + 编 4 个 NRO，
+# 成本十几分钟 ×2，还会用 --clobber 覆盖 nx-diag 预发布页。
+# 需要再取证时手动点一次即可（GitHub Actions 页面 → NX diag (probe) → Run workflow）。
 name: NX diag (probe)
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-    paths:
-      - "tools/nx-probe/**"
-      - ".github/workflows/nx-diag.yml"
-      - "core/src/**"
-      - "core/Makefile"
-      - "core/sources.mk"   # 源文件清单唯一真源
-      - "runtime/**"
 
 concurrency:
   group: nx-diag-${{ github.ref }}

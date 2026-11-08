@@ -4,7 +4,7 @@
 // 列在构建清单里，不需要任何平台条件；条件只在下面的 #if 里出现一次。
 //
 // 两条日志各管一段，别混：
-//   mca_boot.log —— 启动阶段（ctor / set_environment / init / load_game / 首帧）。
+//   mca_boot.log —— 启动阶段（set_environment / init / load_game / 首帧）。
 //                   stdio，写一行 flush 一行。进程崩在下一行之前，最后一行
 //                   就是最后到达的位置。
 //   mca_run.log  —— 运行期（每 30 帧一行，只在 -DMCA_NX_DIAG=1 的诊断构建里）。
@@ -85,11 +85,11 @@ void nxBoot(const char* fmt, ...) {
     std::fflush(g_nx_boot);
 }
 
-namespace {
-// 构造函数：只要本文件的目标文件被链进 NRO，这个函数就在 main 之前跑。
-// 日志里有这一行 = 我们的代码真的被执行了，而不只是被链进来。
-__attribute__((constructor)) void nxBootCtor(void) { nxBoot("[boot] ctor"); }
-}  // namespace
+// 这里曾有一个 __attribute__((constructor)) 打 "[boot] ctor"：它是为了验证
+// "本文件的目标文件真的被链进 NRO，而不只是躺在 .a 里"。这个疑问已经由
+// nx.yml 的符号断言回答（retro_load_game / pxt_vm_start_buffer / mca_tick_init
+// 三个符号必须在 NRO 的 ELF 里），真机上第一行 [boot] set_environment 也能
+// 证明代码在跑。constructor 本身是纯副作用（每次启动写一次 SD 卡），去掉。
 
 #if defined(MCA_NX_DIAG)
 void nxRunLog(const char* fmt, ...) {
