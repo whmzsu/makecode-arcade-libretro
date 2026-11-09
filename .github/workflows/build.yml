@@ -545,6 +545,10 @@ jobs:
             || { echo "::error::产物不是 aarch64 ELF"; file "$so"; exit 1; }
           n=$(readelf -d "$so" | grep -c NEEDED || true)
           [ "$n" = "0" ] || { echo "::error::NEEDED=$n，全静态失败"; exit 1; }
+          # 零 NEEDED ≠ 带 DF_1_NODELETE：0.3.8 首版就是漏了这个标志，Lakka 上
+          # 退出前端仍会 139（verify_release.py 发的体检抓出来的）
+          readelf -d "$so" | grep -q NODELETE \
+            || { echo "::error file=tools/build_musl.sh::缺 DF_1_NODELETE，退出前端可能 139"; exit 1; }
           for sym in retro_init retro_run retro_load_game retro_get_system_info; do
             readelf --dyn-syms -W "$so" | grep -qw "$sym" \
               || { echo "::error::缺少导出符号 $sym"; exit 1; }
@@ -992,6 +996,15 @@ jobs:
               || { echo "::error file=$z::包里没有核心二进制"; exit 1; }
             echo "  $(basename "$z") -> $got"
           done
+
+      # 「装一遍再发」：数量与版本对了不代表平台级选项对了。0.3.8 首版就是
+      # 数量/版本全过、但 lakka 包缺 DF_1_NODELETE（退出即 139 的修复没吃到），
+      # 靠这份体检才发现。它有 FAIL 就 exit 1，把问题挡在发布之前。
+      - name: 发行包体检（verify_release.py）
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet --disable-pip-version-check pefile
+          python3 tools/verify_release.py core/dist/release core/src/libretro_core.cpp
 
       - name: 创建 Release 并上传
         env:

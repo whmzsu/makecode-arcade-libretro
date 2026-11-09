@@ -104,7 +104,11 @@ echo "[$TAG] 链接（全静态 DSO）"
 # 能把用户报的崩溃地址对回源码行（musl 侧没有 ndk-stack 这类工具，用
 # aarch64-linux-gnu-addr2line -e 对应的 debug 文件即可）。build-id 是 note 段，
 # 不是动态依赖，产物仍然零 NEEDED；sha1 是内容哈希，不破坏可复现构建。
-"$CXX" -shared -static -Wl,--build-id=sha1 \
+#
+# -z nodelete（DF_1_NODELETE）：与 core/Makefile / build_target.sh / Android.mk
+# 同一个理由——pxt 运行时带 static 析构，前端 dlclose 后进程退出仍会跳进已解除
+# 映射的代码段（退出即 139）。这个标志不影响零 NEEDED，也不依赖 libc 版本。
+"$CXX" -shared -static -Wl,--build-id=sha1 -Wl,-z,nodelete \
   -o "$DIST/makecode_arcade_libretro.so" \
   "${CORE_OBJS[@]}" "${VM_OBJS[@]}"
 ls -l "$DIST/makecode_arcade_libretro.so" | awk '{print "  " $5 " bytes"}'
@@ -117,4 +121,7 @@ if command -v readelf >/dev/null 2>&1; then
   n_retro=$(readelf --dyn-syms -W "$so" | grep -c " retro_" || true)
   echo "  自检通过：NEEDED=0，导出 retro_* $n_retro 个"
   [ "$n_retro" -ge 20 ] || { echo "错误：retro_* 导出不足" >&2; exit 1; }
+  # 退出 139 的修复：零 NEEDED 不代表带 DF_1_NODELETE，必须单独断言
+  readelf -d "$so" | grep -q NODELETE \
+    || { echo "错误：产物缺 DF_1_NODELETE，Lakka 上退出前端可能 139" >&2; exit 1; }
 fi
