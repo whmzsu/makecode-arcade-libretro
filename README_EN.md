@@ -8,6 +8,17 @@ Run MakeCode Arcade games as "cartridges" inside RetroArch. The main
 technical route is the **pxt VM bytecode + C++ runtime** (Route B), targeting
 PCs and low-end ARM handhelds (RK3326 / RK3566 and similar).
 
+## Demo
+
+![Jumpy Platformer running on a Powkiddy RGB30](docs/media/demo-rgb30.gif)
+
+*Jumpy Platformer on a Powkiddy RGB30 (RK3566) — ArkOS + RetroArch, loading a
+`.pxt64` cartridge exported straight from the official IDE.*
+
+| Jump | Coins |
+|---|---|
+| ![jumping onto bricks](docs/media/photo-jump.jpg) | ![collecting a coin](docs/media/photo-coin.jpg) |
+
 ## Relationship to the two existing cores
 
 Related sibling repositories (all owned by whmzsu, all in production use):

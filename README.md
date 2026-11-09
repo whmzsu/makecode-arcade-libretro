@@ -8,6 +8,17 @@
 **pxt VM 字节码 + C++ 运行时**（路线 B），目标平台包括 PC 与低端 ARM 掌机
 （RK3326 / RK3566 等）。
 
+## 实机演示
+
+![Jumpy Platformer 跑在 Powkiddy RGB30 上](docs/media/demo-rgb30.gif)
+
+*《Jumpy Platformer》跑在 Powkiddy RGB30（RK3566）· ArkOS + RetroArch，
+卡带是官方 IDE 直接导出的 `.pxt64`。*
+
+| 跳跃 | 吃金币 |
+|---|---|
+| ![跳到砖块上](docs/media/photo-jump.jpg) | ![金币入袋](docs/media/photo-coin.jpg) |
+
 ## 与既有两个 core 的关系
 
 本项目相关姊妹仓库（同为 whmzsu 所有，均已在生产使用）：
