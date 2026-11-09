@@ -169,6 +169,12 @@ def main() -> int:
                     # package_release.sh strip；两者都不该再带 .debug_info。
                     if has_debug_info(f.name):
                         notes.append("未 strip（带 .debug_info）")
+                    # 退出 139 的修复靠 DF_1_NODELETE（pxt 运行时带 static 析构，
+                    # 前端 dlclose 后退出仍会跳进已解除映射的代码段）。三个 ELF
+                    # 平台都得带：0.3.7 只在 Makefile/build_target.sh 加了，Android
+                    # 走 ndk-build 漏了，所以这里对 Android 也设断言。
+                    if "NODELETE" not in out.upper():
+                        notes.append("缺 DF_1_NODELETE（退出前端可能 139）")
                     main_bid[plat] = build_id(f.name)
                 elif fmt == "PE":
                     out = sh(["objdump", "-p", f.name])

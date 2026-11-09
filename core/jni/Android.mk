@@ -47,6 +47,10 @@ LOCAL_CPPFLAGS := $(COMMON_FLAGS) -fno-rtti -fno-exceptions -fno-unwind-tables \
 # max-page-size=16384：Android 15 起有 16KB 页设备，4KB 对齐的 .so 无法 dlopen
 # build-id：ndk-build 安装时会 strip 掉 .so，只有 build-id 能把崩溃地址
 # 对回源码行（ndk-stack 依赖它）。与 core/Makefile / build_target.sh 保持一致。
-LOCAL_LDFLAGS := -Wl,-z,max-page-size=16384 -Wl,--build-id=sha1
+# -z nodelete（DF_1_NODELETE）：pxt 运行时带 static 析构，RetroArch 卸载核心时
+# dlclose 之后退出进程仍会跳进已解除映射的代码段 → 退出即 139（0.3.7 修的就是
+# 这个）。**这里是第四个链接入口**：Android 发行包走 ndk-build，前三个都管不到，
+# 0.3.7 当时漏了这处，Android 包仍会崩。
+LOCAL_LDFLAGS := -Wl,-z,max-page-size=16384 -Wl,--build-id=sha1 -Wl,-z,nodelete
 
 include $(BUILD_SHARED_LIBRARY)

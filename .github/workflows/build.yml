@@ -291,6 +291,15 @@ jobs:
             echo "::error file=core/jni/Android.mk::LOAD 段不是 16KB 对齐，16KB 页设备无法 dlopen"
             exit 1
           fi
+          # 退出 139 的修复必须在 Android 包上也在：pxt static 析构 + RA 的
+          # dlclose → 需要一个 DF_1_NODELETE 标志（ndk-build 走自己的 LDFLAGS，
+          # 0.3.7 漏过这一处，0.3.8 补上并在此设断言防回归）
+          echo "== FLAGS_1 =="
+          readelf -d "$so" | grep -E 'FLAGS_1' || true
+          if ! readelf -d "$so" | grep -q 'NODELETE'; then
+            echo "::error file=core/jni/Android.mk::缺 DF_1_NODELETE，退出前端仍会 139"
+            exit 1
+          fi
 
       # 发行包里的 Android 产物叫 makecode_arcade_libretro.so（无 lib 前缀），
       # 与 package_release.sh 的 glob 对齐
