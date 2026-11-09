@@ -45,15 +45,31 @@ readelf -n makecode_arcade_libretro.so | grep 'Build ID'
 build-id 是文件内容的哈希，同样输入仍得同样结果，不影响可复现构建。SHA-1 是
 20 字节固定长度，不影响产物尺寸。
 
-## 3. 补上 0.3.7 漏掉的 Android 链接选项
+## 3. 补上 0.3.7 漏掉的两处链接选项（Android / musl）
 
 0.3.7 修「退出 RetroArch 即 139」靠的是链接期 `-Wl,-z,nodelete`，当时改了
-`core/Makefile` 与 `tools/build_target.sh`，但 **`core/jni/Android.mk` 是第四个
-链接入口**——Android 发行包走 `ndk-build`，前三个都管不到它，于是 Android 包
-仍然没有 `DF_1_NODELETE`。本版补上，并在两处设了断言防回归：
+`core/Makefile` 与 `tools/build_target.sh`。但链接入口一共**五个**：
+
+| 链接入口 | 管谁 | 0.3.7 | 0.3.8 |
+|---|---|---|---|
+| `core/Makefile` | unix / android 本地构建 | 有 | 有 |
+| `tools/build_target.sh` | zig 发版矩阵 | 有 | 有 |
+| `tools/build_musl.sh` | **Lakka（musl 全静态）** | **漏** | 已补 |
+| `core/jni/Android.mk` | **Android 发行包（ndk-build）** | **漏** | 已补 |
+| `tools/package_release.sh` | 只打包，不链接 | — | — |
+
+也就是说 0.3.7 的 Android 包和 Lakka 包**都没有** `DF_1_NODELETE`，只有三个
+glibc 平台吃到了修复。本版补上，并在四个地方设断言防回归：
 
 - CI 的 `android-arm64` job 编完就 `readelf -d` 查 `FLAGS_1 ... NODELETE`；
-- `tools/verify_release.py` 对**所有 ELF 包**查同一个标志（Windows 是 PE，跳过）。
+- CI 的 `lakka-musl` job 产物检查里同查（**零 NEEDED ≠ 带 NODELETE**，必须单独查）；
+- `tools/build_musl.sh` 自检里也查，本地手跑同样挡得住；
+- `tools/verify_release.py` 对**所有 ELF 包**查同一个标志（Windows 是 PE，跳过），
+  且这个体检现在是 release job 的硬门槛：有 FAIL 就不建 Release。
+
+> 说句实话：这条是发出去之后才发现的——第一版 0.3.8 已经上传，`verify_release.py`
+> 一跑就报 `lakka-arm64 缺 DF_1_NODELETE`，于是撤回 Release 与 tag、补链接选项和
+> 断言、重新构建重发。现在这道体检挡在发布之前，同类问题不会再出厂。
 
 ## 4. 验证
 
@@ -67,9 +83,11 @@ build-id 是文件内容的哈希，同样输入仍得同样结果，不影响�
 
 - **发行包体检**：`tools/verify_release.py` 6 个主包 + 3 个调试包全 PASS
   （已 strip、架构/机器类型正确、glibc ≤ 2.17、无 `libc++_shared`、
-  16KB 页对齐、debug-info 与 build-id 配对）。
+  16KB 页对齐、带 `DF_1_NODELETE`、debug-info 与 build-id 配对）。
+- **发版二进制本身**：发行包里的 `linux-arm64`（732 496 B，md5 `eb4eb217…`）
+  放进 aarch64 chroot 用 qemu 跑上面三条用例，逐位一致——不是"CI 绿了就算"。
 - **CI**：`package` job 末尾会把打好的包解开 dlopen 跑 60 帧；`golden-hash`
-  守像素；`pxt-patches` 校验 11 条补丁。
+  守像素；`pxt-patches` 校验 11 条补丁；`release` job 在发布前跑上面那份体检。
 
 ## 已知限制（未变）
 
