@@ -377,11 +377,19 @@ RetroArch 源码 + 装 portlibs，十几分钟，绑进主流水线会拖慢每�
 `android-*` 编完，用与本地同一份 `tools/package_release.sh` 打 **6 个包**（仅 64 位），
 再创建 GitHub Release 并把 zip 挂上去。
 
+- 打包时对 Linux/ELF 核心做 `strip`（未 strip 的 linux-arm64 是 5.0 MB，其中
+  4.3 MB 是 `.debug_*`；strip 后 732 KB，末帧哈希逐位不变）。三个 ELF 平台
+  （linux-x64 / linux-arm64 / lakka-arm64）另出一个
+  `makecode_arcade_<platform>-debuginfo.zip`，内含未 strip 的原件，只在需要把
+  崩溃地址翻译回源码行时才下载。两个包靠 `-Wl,--build-id=sha1` 生成的
+  build-id 对齐，所以总共是 **9 个资产**（6 主包 + 3 调试包）。
 - 凭据用仓库内置 `GITHUB_TOKEN`（job 级 `contents: write`，全局仍是只读），
   **不需要 PAT**。Release 对象与附件上传只有 HTTPS API 提供，git/SSH 到不了
   这一层——SSH key 只能推 commit 和 tag。
-- 发版前硬断言：包数必须 6、每个包 `.info` 的 `display_version` 必须等于 tag，
-  少一个或版本对不上就红，不会发出半套包。
+- 发版前硬断言：主包必须 6 个、调试包必须 3 个、每个主包 `.info` 的
+  `display_version` 必须等于 tag，少一个或版本对不上就红，不会发出半套包。
+  `package` job 还会断言发行包里的核心确实不含 `.debug_info`（防止打包时静默
+  跳过 strip）。
 - 说明文本取 `.github/release-notes/<tag>.md`；没写就退回 `--generate-notes`。
 - 重跑安全：Release 已存在时走 `upload --clobber` + `edit`，不报错。
 

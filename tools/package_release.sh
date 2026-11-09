@@ -19,6 +19,7 @@ PROJ="$(cd "$HERE/.." && pwd)"
 DIST="$PROJ/core/dist"
 OUT="$DIST/release"
 STAGE_ROOT="$OUT/.stage"
+DBG_ROOT="$OUT/.debuginfo"
 mkdir -p "$OUT"
 
 # zip 用 python 的 zipfile 生成（保证跨平台确定性、无额外依赖）。
@@ -107,6 +108,42 @@ pick_core() { # $1=目录  → 打印核心文件路径（找不到则空）
   return 1
 }
 
+# ---------------------------------------------------------------- strip
+# 为什么发行包要 strip：未 strip 的 linux/arm64 核心 5.0 MB，其中 4.3 MB 是
+# .debug_*；strip 后 732 KB（zip 从 1.38 MB 降到 287 KB），而末帧哈希逐位
+# 不变（0.3.7 三构型实测）。所以玩家拿到的是 strip 版，符号另发 debuginfo。
+# Android 由 NDK 打包时已 strip，Windows 产物本来就没有符号表，两者跳过。
+#
+# strip 工具按目标架构挑：GNU 交叉 binutils 优先，其次 llvm-strip（全架构），
+# 最后才试宿主 strip —— 宿主 strip 若是单目标 BFD 会直接报格式错误，所以
+# 每个候选都要实际执行并用 readelf 验一下产物，不能只看命令存在。
+do_strip() { # $1=源 $2=目标 $3=triple  → 成功返回 0
+  local src="$1" dst="$2" t="$3" c
+  local -a cands
+  case "$t" in
+    x86_64-*)  cands=(x86_64-linux-gnu-strip llvm-strip strip) ;;
+    aarch64-*) cands=(aarch64-linux-gnu-strip llvm-strip strip) ;;
+    *)         cands=(llvm-strip strip) ;;
+  esac
+  for c in "${cands[@]}"; do
+    command -v "$c" >/dev/null 2>&1 || continue
+    cp "$src" "$dst" || return 1
+    if "$c" --strip-unneeded "$dst" 2>/dev/null && [ -s "$dst" ] \
+       && readelf -h "$dst" >/dev/null 2>&1; then
+      echo "  strip: $c ($(basename "$src") $(stat -c%s "$src") -> $(stat -c%s "$dst") B)"
+      return 0
+    fi
+    rm -f "$dst"
+  done
+  echo "  找不到能处理 $t 的 strip 工具（试过 ${cands[*]}）" >&2
+  return 1
+}
+
+# 从 ELF 的 .note.gnu.build-id 取出 build-id；没有就输出空字符串。
+build_id_of() {
+  readelf -n "$1" 2>/dev/null | sed -n 's/.*Build ID: *\([0-9a-fA-F]*\).*/\1/p' | head -1
+}
+
 ok=0; skipped=0
 for t in "${TARGETS[@]}"; do
   dir="$DIST/$t"
@@ -125,7 +162,36 @@ for t in "${TARGETS[@]}"; do
   stag="$STAGE_ROOT/$plat"
   rm -rf "$stag"
   mkdir -p "$stag"
-  cp "$core" "$stag/"
+
+  # 谁需要 strip：只有 Linux/ELF 共享库。Android 的 .so 由 NDK 打包时已经
+  # strip 过，Windows 的 PE 产物本来就不带符号表（llvm-nm 数为 0），
+  # 对它们再 strip 没有收益，跳过。
+  want_strip=0
+  case "$t" in
+    *android*|*windows*) want_strip=0 ;;
+    *) [ "$ext" = "so" ] && want_strip=1 ;;
+  esac
+
+  dbg_dir=""
+  if [ "$want_strip" = 1 ]; then
+    if do_strip "$core" "$stag/$(basename "$core")" "$t"; then
+      # 原件留一份，稍后单独打成 -debuginfo.zip
+      dbg_dir="$DBG_ROOT/$plat"
+      rm -rf "$dbg_dir"
+      mkdir -p "$dbg_dir"
+      cp "$core" "$dbg_dir/$(basename "$core")"
+    elif [ "${MCA_REQUIRE_STRIP:-0}" = 1 ]; then
+      # 发版环境（CI）里 strip 失败必须红：否则又会静默发出 5 MB 的包，
+      # 与固件仓库要求的 strip 产物不一致，事后只能重发。
+      echo "::error file=$core::$t 找不到可用的 strip 工具，拒绝打包" >&2
+      exit 1
+    else
+      echo "打包警告：$t 未能 strip，发行包将带上调试信息（体积约 5 倍）" >&2
+      cp "$core" "$stag/"
+    fi
+  else
+    cp "$core" "$stag/"
+  fi
   printf '%s\n' "$INFO_META" > "$stag/makecode_arcade_libretro.info"
   case "$plat" in
     android-*)
@@ -228,6 +294,10 @@ MakeCode Arcade — libretro core ($plat)
     [MCA] core version $VERSION, trace -> <路径>
   <路径> 就是 mca_trace.log，记录 VM 启动/重置/卸载的每一步。
 
+  本包里的核心已 strip（去掉调试信息，体积约为原件的 1/5）。如果要把崩溃
+  地址翻译回源码行，请下载同版本的 makecode_arcade_$plat-debuginfo.zip，
+  按包内 BUILD.txt 用 build-id 对齐后再 addr2line。
+
 目标平台：$t
 core 版本：$VERSION
 构建时间：$(date -u +"%Y-%m-%d %H:%M UTC")
@@ -259,10 +329,56 @@ if not got or got.group(1) != version:
              f"{got.group(1) if got else '缺失'} != {version}")
 PY
   echo "  $(printf '%-32s' "$t") -> makecode_arcade_$plat.zip  ($((size / 1024)) KB, 含 $ext)"
+
+  # 调试符号单独成包：玩家下载主包（strip，小 5 倍），
+  # 真出崩溃时再取 debuginfo 包对地址。两个包必须来自同一份构建，
+  # build-id 就是这条绑定关系（这也是 0.3.8 起加 -Wl,--build-id=sha1 的原因）。
+  if [ -n "$dbg_dir" ]; then
+    bid="$(build_id_of "$stag/makecode_arcade_libretro.$ext")"
+    hash="$("$PYTHON_BIN" - "$stag/makecode_arcade_libretro.$ext" <<'PY'
+import hashlib, sys
+print(hashlib.md5(open(sys.argv[1], "rb").read()).hexdigest())
+PY
+)"
+    cat > "$dbg_dir/BUILD.txt" <<EOF
+MakeCode Arcade — 调试符号（$plat）
+================================================
+本包里的 makecode_arcade_libretro.$ext 是「未 strip」的原件，
+只用于把崩溃地址翻译回源码行，不能当核心加载。
+
+core 版本：$VERSION
+目标三元组：$t
+build-id：$( [ -n "$bid" ] && printf '%s' "$bid" || printf '(未生成)' )
+strip 后主件 md5：$hash
+
+用法：
+  1) 从 makecode_arcade_$plat.zip 解出 strip 过的核心，确认两边同一份构建：
+       readelf -n makecode_arcade_libretro.$ext | grep 'Build ID'
+     应当等于上面的 build-id。
+  2) 把崩溃日志里的地址翻译成源码位置：
+       addr2line -e <本包里的 makecode_arcade_libretro.$ext> -f -C 0x<地址>
+     （aarch64 用 aarch64-linux-gnu-addr2line，x86_64 用 addr2line）
+  3) build-id 对不上说明主包与本包不是同一次构建，先换同一版本重试。
+
+构建时间：$(date -u +"%Y-%m-%d %H:%M UTC")
+EOF
+    dbgzip="$OUT/makecode_arcade_$plat-debuginfo.zip"
+    rm -f "$dbgzip"
+    "$PYTHON_BIN" - "$dbg_dir" "$dbgzip" <<'PY'
+import os, sys, zipfile
+src, dst = sys.argv[1], sys.argv[2]
+with zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as z:
+    for name in sorted(os.listdir(src)):
+        z.write(os.path.join(src, name), name)
+PY
+    dsize=$(stat -c%s "$dbgzip" 2>/dev/null || echo 0)
+    echo "  $(printf '%-32s' "$t") -> makecode_arcade_$plat-debuginfo.zip  ($((dsize / 1024)) KB, build-id ${bid:0:12}…)"
+  fi
   ok=$((ok + 1))
 done
 
-rm -rf "$STAGE_ROOT"
+rm -rf "$STAGE_ROOT" "$DBG_ROOT"
 echo
-echo "打包完成：$ok 个发行包 -> $OUT"
+dbgn=$(ls "$OUT"/*-debuginfo.zip 2>/dev/null | wc -l)
+echo "打包完成：$ok 个发行包（另 $dbgn 个 debuginfo 包）-> $OUT"
 [ "$ok" -gt 0 ]

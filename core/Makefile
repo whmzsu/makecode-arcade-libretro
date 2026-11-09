@@ -160,6 +160,10 @@ else ifneq (,$(findstring android,$(platform)))
    # max-page-size=16384：Android 15 起有 16KB 页设备，4KB 对齐无法 dlopen
    LDFLAGS += -shared -static-libstdc++ -Wl,-z,max-page-size=16384
    LDFLAGS += -Wl,-soname,$(TARGET_NAME).so
+   # build-id：NDK 打包时会把 .so strip 掉，符号只能靠 build-id 才能与
+   # 对应的调试文件对上（ndk-stack / addr2line 都用它）。不加这个段，
+   # strip 之后崩溃地址就没法回溯到源码行。
+   LDFLAGS += -Wl,--build-id=sha1
 else
    # Linux 及其它 POSIX。不加 --no-undefined：libc++ 里未用到的代码可能引用
    # 目标 glibc 没有的符号（如 ppc64le 的 __vsnprintfieee128），动态链接下无害。
@@ -169,6 +173,10 @@ else
    # atexit 链，析构函数会跳进已解除映射的代码段 —— 用户侧表现就是"退出即 139"。
    # 让 ld.so 保留映射即可；代价是换核心时不回收，单次会话可忽略。
    LDFLAGS += -Wl,-z,nodelete
+   # build-id：发行包里的 ELF 会 strip 掉调试信息（体积差 5 倍），strip 后
+   # 只剩 build-id 能把"用户报的崩溃地址"对回源码行。sha1 是内容哈希，
+   # 不破坏可复现构建：同样输入仍然得到同样的 build-id。
+   LDFLAGS += -Wl,--build-id=sha1
 endif
 
 # 插桩产物别覆盖 core/ 根下那个"当前正式可用"的 .so：覆盖率构型改落对象目录

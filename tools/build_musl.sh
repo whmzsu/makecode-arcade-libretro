@@ -99,7 +99,12 @@ echo "[$TAG] 链接（全静态 DSO）"
 # libstdc++.a 本身就是 musl 版）。
 # 对象列表由清单推出，不用 "$OBJV"/*.o：老构建目录里可能还有已删源码的 .o
 # （cart/png_loader/LzmaDec），glob 会把它们静默链进产物。
-"$CXX" -shared -static -Wl,--build-id=none \
+#
+# build-id 从 none 改成 sha1：发行包会 strip 调试信息，strip 之后只剩 build-id
+# 能把用户报的崩溃地址对回源码行（musl 侧没有 ndk-stack 这类工具，用
+# aarch64-linux-gnu-addr2line -e 对应的 debug 文件即可）。build-id 是 note 段，
+# 不是动态依赖，产物仍然零 NEEDED；sha1 是内容哈希，不破坏可复现构建。
+"$CXX" -shared -static -Wl,--build-id=sha1 \
   -o "$DIST/makecode_arcade_libretro.so" \
   "${CORE_OBJS[@]}" "${VM_OBJS[@]}"
 ls -l "$DIST/makecode_arcade_libretro.so" | awk '{print "  " $5 " bytes"}'

@@ -836,11 +836,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # 发行包要 strip（见 tools/package_release.sh 顶部说明）。x86_64 用宿主
+      # 自带的 strip，aarch64 必须装交叉 binutils —— 宿主 binutils 是单目标
+      # BFD，对 AArch64 ELF 直接报格式错误。
+      - name: 安装交叉 binutils（strip 用）
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq binutils-aarch64-linux-gnu
+
       - uses: actions/download-artifact@v4
         with:
           path: core/dist
 
       - name: 打成 RetroArch 发行包
+        env:
+          MCA_REQUIRE_STRIP: "1"
         run: |
           tools/package_release.sh \
             x86_64-linux-gnu aarch64-linux-gnu \
@@ -868,6 +878,12 @@ jobs:
           so=$(find out/pkg -name 'makecode_arcade_libretro.so' | head -1)
           [ -n "$so" ] || { echo "::error file=$z::解包后没有 .so"; find out/pkg -type f; exit 1; }
           echo "包内核心：$so（$(stat -c%s "$so") 字节）"
+          # 防回归：打包脚本必须真的 strip 过。曾经 5 MB 的带 .debug_* 的
+          # 核心直接发出去，玩家多下 4 MB 无用数据，固件仓库也要求 strip 版。
+          if readelf -S "$so" | grep -q '\.debug_info'; then
+            echo "::error file=$z::发行包里的核心仍带 .debug_info，打包时没有 strip"
+            exit 1
+          fi
           # 退出码：2 缺符号 / 3 load_game 失败 / 4 帧循环异常，任一都算红
           python3 tools/libretro_host.py "$so" tools/fixtures/ping.pxt64 60 \
             --turbo --data-dir=out/pkg-data | tail -12
@@ -899,6 +915,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: 安装交叉 binutils（strip 用）
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq binutils-aarch64-linux-gnu
+
       - uses: actions/download-artifact@v4
         with:
           path: art
@@ -920,6 +941,8 @@ jobs:
           ls -d core/dist/*/ | sed 's/^/  /'
 
       - name: 打发行包（6 平台，仅 64 位）
+        env:
+          MCA_REQUIRE_STRIP: "1"
         run: |
           set -euo pipefail
           # 只出 64 位包：32 位目标已整体移除（PXT64 镜像在 32 位 VM 下跑不了
@@ -937,9 +960,20 @@ jobs:
           set -euo pipefail
           tag="${GITHUB_REF#refs/tags/}"
           ver="${tag#core-v}"
-          n=$(ls core/dist/release/*.zip | wc -l)
-          [ "$n" -eq 6 ] || { echo "::error::期望 6 个包，实际 $n"; exit 1; }
+          # 主包 6 个；三个 ELF 平台（linux-x64/linux-arm64/lakka-arm64）各带
+          # 一个 -debuginfo.zip。分开计数，数量不对就红。
+          n_main=0; n_dbg=0
           for z in core/dist/release/*.zip; do
+            case "$z" in
+              *-debuginfo.zip) n_dbg=$((n_dbg + 1)) ;;
+              *)               n_main=$((n_main + 1)) ;;
+            esac
+          done
+          [ "$n_main" -eq 6 ] || { echo "::error::期望 6 个主包，实际 $n_main"; exit 1; }
+          [ "$n_dbg" -eq 3 ] || { echo "::error::期望 3 个 debuginfo 包，实际 $n_dbg"; exit 1; }
+          for z in core/dist/release/*.zip; do
+            # debuginfo 包没有 .info（它只是符号原件），单独计数，别混进版本断言
+            case "$z" in *-debuginfo.zip) continue ;; esac
             got=$(python3 -c "import sys,zipfile,re;d=zipfile.ZipFile(sys.argv[1]).read('makecode_arcade_libretro.info').decode();print(re.search(r'display_version = \"([^\"]+)\"',d).group(1))" "$z")
             [ "$got" = "$ver" ] || { echo "::error file=$z::.info 版本 $got 与 tag $ver 不符"; exit 1; }
             # 包里必须真有一个可加载的核心二进制：只校验版本/数量曾经放过了

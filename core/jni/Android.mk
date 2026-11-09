@@ -45,6 +45,8 @@ LOCAL_CPPFLAGS := $(COMMON_FLAGS) -fno-rtti -fno-exceptions -fno-unwind-tables \
                   -fno-threadsafe-statics -std=c++14 -Wno-unused-parameter
 
 # max-page-size=16384：Android 15 起有 16KB 页设备，4KB 对齐的 .so 无法 dlopen
-LOCAL_LDFLAGS := -Wl,-z,max-page-size=16384
+# build-id：ndk-build 安装时会 strip 掉 .so，只有 build-id 能把崩溃地址
+# 对回源码行（ndk-stack 依赖它）。与 core/Makefile / build_target.sh 保持一致。
+LOCAL_LDFLAGS := -Wl,-z,max-page-size=16384 -Wl,--build-id=sha1
 
 include $(BUILD_SHARED_LIBRARY)

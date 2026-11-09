@@ -106,6 +106,7 @@ case "$TAG" in
              EXT="so"
              LINK_EXTRA=(-shared -static-libstdc++ -Wl,-z,max-page-size=16384
                          -Wl,-z,nodelete
+                         -Wl,--build-id=sha1
                          -Wl,-soname,libmakecode_arcade_libretro.so) ;;
   *)         # 不加 --no-undefined：libc++ 里未用到的代码可能引用目标 glibc 没有的
              # 符号（如 ppc64le 的 __vsnprintfieee128），动态链接下无害；
@@ -114,7 +115,8 @@ case "$TAG" in
              # 退出时先 dlclose 再走 atexit 链，跳进已解除映射的段 = 用户侧
              # "退出即 139"。保留映射即可，代价是换核心时不回收。
              EXT="so"; LINK_EXTRA=(-shared -Wl,-soname,makecode_arcade_libretro.so
-                                   -Wl,-z,nodelete) ;;
+                                   -Wl,-z,nodelete
+                                   -Wl,--build-id=sha1) ;;
 esac
 
 # -fPIC：非 Windows 的共享库必须；MSVC 风格 PE 不需要（也不接受）
