@@ -39,9 +39,13 @@
 |---|---|---|---|---|---|---|
 | G Cloud | `2429TNR40628` | 罗技 G Cloud `GR0006` | Android 11 / SDK 30 | 1080×1920 @320 | 0.3.5 | 无 root，RA 里能跑；shell 宿主必 906 |
 | `rtwo` | `ZY22GCKKB4` | Motorola XT2301-5（骁龙 8 Gen 2） | **Android 16 / SDK 36** | — | 0.3.5 | RA 1.21.0 是 `targetSdk=28` 才跑得起来 |
-| `oxygen` | `b2aec2db` | Xiaomi Mi Max 2（骁龙 625） | **Android 7.1.1 / SDK 25** | — | 0.3.5 | **常规长测机**：3.7GB / data 43GB |
+| `oxygen` | `b2aec2db` | Xiaomi Mi Max 2（骁龙 625） | **Android 7.1.1 / SDK 25** | — | **0.3.7** | **常规长测机**：3.7GB / data 43GB |
 
 合计 **14 台**：9 台 Linux 掌机 + 1 台 Switch(Lakka) + 1 台送修 + 3 台 Android。
+
+2026-11-09 用 0.3.7 的 `android-arm64` 核心（md5 `8e3e37c383cd290a72cf34f901aa5935`，
+455 136 B）在 Mi Max 2 上跑 21 张卡带 ×600 帧：**21/21 与桌面 x86_64 基线逐位一致**，
+单个卡带 0–3 s。这条链路是改核心后的首选快速回归，G Cloud / Moto 那两台仍停在 0.3.5。
 
 ## 4. 版本登记（linux-arm64 核心）
 
