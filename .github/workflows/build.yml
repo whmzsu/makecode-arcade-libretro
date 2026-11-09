@@ -602,7 +602,8 @@ jobs:
         run: make -C core -f Makefile platform=unix contract-test
 
       # UBSan 构型：同一套断言在 -fsanitize=undefined 下再跑一遍，对象落
-      # 独立目录（build/make/unix-san），与上面的普通构建互不覆盖。
+      # 独立目录（build/make/unix-san-undefined；目录名带 sanitizer 名，
+      # 否则 address 与 undefined 会复用彼此的 .o），与上面的普通构建互不覆盖。
       - name: 契约自检（UBSan 构型）
         run: make -C core -f Makefile platform=unix SANITIZE=undefined contract-test
 
@@ -678,7 +679,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
-      - name: 校验 9 个 pxt 上游补丁（--strict 还查未登记编号）
+      - name: 校验 11 个 pxt 上游补丁（--strict 还查未登记编号）
         run: python3 tools/check_pxt_patches.py --strict
 
   # --------------------------------------------------- 末帧哈希（golden hash）
@@ -714,6 +715,61 @@ jobs:
           path: out/ci_bmp/*.bmp
           if-no-files-found: ignore
           retention-days: 14
+
+  # ----------------------------------------------- RetroArch 真前端无头冒烟
+  # golden hash 用的是自研 ctypes 宿主（tools/libretro_host.py），验的是"我们
+  # 理解的契约"；RetroArch 验的是"真实前端怎么用它"：dlopen 路径、.info 解析、
+  # SET_PIXEL_FORMAT 协商、SAVE_DIRECTORY、退出时的 dlclose —— 前者全测不到。
+  #
+  # 首次实跑（2026-11-09）就抓到"退出即 139"：pxt 运行时带 static 析构，
+  # RetroArch 先 dlclose 再走 atexit 链，跳进已解除映射的代码段。现由链接期
+  # `-Wl,-z,nodelete`（DF_1_NODELETE）解决，本 job 就是守这条线。
+  #
+  # 只跑 2 张夹具卡带（ping 静态场景 + probe 纯白场景），各 120 帧：
+  # 真前端起停一次约 3 秒，多跑无收益。
+  retroarch-smoke:
+    name: retroarch-smoke
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 zig 0.17.0（x86_64-linux 本机版）
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          ok=0
+          for base in "https://ziglang.org/download/0.17.0" \
+                      "https://pkg.machengine.org/zig"; do
+            if curl -fsSLo zig.tar.xz "$base/zig-x86_64-linux-0.17.0.tar.xz" 2>curl.err; then
+              tar -tf zig.tar.xz >/dev/null 2>tar.err && { ok=1; break; }
+              echo "::error::$base 返回的不是合法 tar.xz：$(file -b zig.tar.xz | cut -c1-80)"
+            else
+              echo "::error::$base 下载失败："
+              tail -3 curl.err | sed 's/^/::error::  /'
+            fi
+          done
+          [ "$ok" = 1 ] || { echo "::error::所有源都取不到 zig 0.17.0"; exit 1; }
+          listing="$(tar -tf zig.tar.xz)"
+          zigdir="${listing%%/*}"
+          tar -xJf zig.tar.xz
+          echo "$RUNNER_TEMP/$zigdir" >> "$GITHUB_PATH"
+
+      - name: 编译（与发版同构型）
+        run: ZIG=zig tools/build_target.sh x86_64-linux-gnu.2.17
+
+      # retroarch 走发行版包（24.04 = universe 1.19），不自己编：这个 job 要验的
+      # 是"发行版前端怎么加载我们"，换成自编前端就失去意义。
+      - name: 安装 retroarch / xvfb
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends retroarch xvfb xauth python3-pil
+          retroarch --version | head -2
+
+      # video/audio/input 全 null + 独立 HOME，不需要窗口也不需要声卡；
+      # 退出码 0 / 有截图 / 日志里 Validation OK + SET_PIXEL_FORMAT + 160x120
+      # 全部由脚本断言（含"退出即 139"这种只有真前端才暴露的失败）。
+      - name: 无头加载夹具卡带各 120 帧
+        run: xvfb-run -a tools/retroarch_smoke.sh --frames 120
 
   # ------------------------------------------------------------------ macOS
   # 实验：Makefile 支持 osx，但本机没有 macOS 工具链，作者未在真机验证过

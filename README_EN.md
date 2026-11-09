@@ -457,6 +457,25 @@ python tools/test_lifecycle.py
 #    (see the behavior-miniretro job in .github/workflows/build.yml)
 ```
 
+### Three "flashlights" (not regression tests)
+
+| Tool | What it looks at | Time |
+|---|---|---|
+| `tools/retroarch_smoke.sh` | **Real frontend**: dlopen, `.info` parsing, pixel-format negotiation, SAVE_DIRECTORY, screenshot, teardown | ~20 s for 3 carts |
+| `tools/fuzz_pxt.sh` | OOB reads / UB in the pxt64 parse+verify layer (clang libFuzzer + ASAN) | 150–300 s per round |
+| `tools/coverage.sh` | Which lines never execute (`-O0 --coverage` + gcovr, HTML report) | ~2 min |
+
+```bash
+xvfb-run -a tools/retroarch_smoke.sh              # headless; skip xvfb-run if you have X
+tools/fuzz_pxt.sh -max_total_time=300             # crash samples land in out/fuzz/crash-*
+tools/coverage.sh --corpus /path/to/carts         # report in out/coverage/
+```
+
+These do not "remember a result" — they surface problems. `retroarch_smoke.sh` found
+"exit 139 on quit" (pxt static destructors + dlclose, fixed with `DF_1_NODELETE`) on its
+very first run, and `fuzz_pxt.sh` found the section-table OOB read (PATCH 12) in its first
+round. Running them occasionally beats meeting the same bugs on a handheld.
+
 Verified: ping / jumpy / cube-land all run as VM bytecode and render
 correctly on **the same prebuilt core binary** (the vendored pxtapp C++ tree
 is game-agnostic; functions.json is byte-identical).

@@ -157,7 +157,7 @@ tools/build_core.sh   # DLL + core_test + contract_test + vm_smoke
 
 ```bash
 tools/ci_regress.sh core/makecode_arcade_libretro.dll   # 末帧 MD5 比对（2 卡带 3 用例）
-python tools/check_pxt_patches.py --strict              # vendored pxt 树的 9 个补丁是否还在
+python tools/check_pxt_patches.py --strict              # vendored pxt 树的 11 个补丁是否还在
 ```
 
 `ci_regress.sh` 的基线在 `tools/fixtures/golden-frames.txt`；改核心或改帧数后
@@ -419,6 +419,24 @@ python tools/test_lifecycle.py
 # 6) 独立前端交叉冒烟（CI 也在跑）：miniretro 加载 core 跑 900 帧
 #    （见 .github/workflows/build.yml 的 behavior-miniretro job）
 ```
+
+### 三个"体检"工具（不是回归，是探照灯）
+
+| 工具 | 测什么 | 耗时 |
+|---|---|---|
+| `tools/retroarch_smoke.sh` | **真前端**：dlopen、`.info` 解析、像素格式协商、SAVE_DIRECTORY、截图、退出清理 | 3 张卡带约 20 秒 |
+| `tools/fuzz_pxt.sh` | pxt64 解析/校验层的越界与 UB（clang libFuzzer + ASAN） | 150~300 秒一轮 |
+| `tools/coverage.sh` | 哪些行从没被执行（`-O0 --coverage` + gcovr，出 HTML） | 约 2 分钟 |
+
+```bash
+xvfb-run -a tools/retroarch_smoke.sh              # 无头跑；有 X 就不用 xvfb-run
+tools/fuzz_pxt.sh -max_total_time=300             # 崩溃样本落 out/fuzz/crash-*
+tools/coverage.sh --corpus /path/to/carts         # 报告在 out/coverage/
+```
+
+它们不"记住结果"，只负责把问题翻出来：`retroarch_smoke.sh` 首次实跑就抓到"退出即 139"
+（pxt 的 static 析构 + dlclose，用 `DF_1_NODELETE` 解决），`fuzz_pxt.sh` 首轮抓到段表遍历
+的读越界（PATCH 12）。改核心后偶尔跑一轮，比在真机上撞见便宜得多。
 
 已验证：ping / jumpy / cube-land 三款游戏在**同一份预编译 core 二进制**上
 通过 VM 字节码运行并正确渲染（pxtapp C++ 树与游戏无关，
