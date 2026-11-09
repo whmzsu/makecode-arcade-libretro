@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""check_pxt_patches.py — 校验 runtime/pxtapp 里 9 个 pxt 上游补丁是否都在
+"""check_pxt_patches.py — 校验 runtime/pxtapp 里 11 个 pxt 上游补丁是否都在
 
 ## 为什么需要这个脚本
 
 runtime/pxtapp 是 vendored 的 pxt 运行时（MIT，来源见 runtime/VENDORING.md）。
-我们为了让它在 libretro 前端里活下来改了 9 处：换游戏、重置、卸载、重启后
+我们为了让它在 libretro 前端里活下来改了 11 处：换游戏、重置、卸载、重启后
 音频、以及"同一输入的两次运行必须逐帧一致"。
 
 这些改动**直接落在源码里**（没有独立 patch 文件，构建时也不再重放），所以
 只有一个隐形的约束在保护它们：没人会把整棵树换成上游版本。偏偏升级 pxt 时
-最自然的动作就是"重新生成 pxtapp"——那一刻 9 个补丁全部消失，而代码照样编
+最自然的动作就是"重新生成 pxtapp"——那一刻 11 个补丁全部消失，而代码照样编
 得过、`contract_test` 照样全绿，退化要到真机上换游戏才暴露（而且是崩溃，不是
 报错）。这个脚本把"补丁还在"变成一条可执行的断言。
 
@@ -160,6 +160,43 @@ PATCHES = [
             ("core---vm/platform.cpp", r"GetTickCount64\(\)\s*\^"),
         ],
     },
+    {
+        "no": 11,
+        "title": "ALLOC_ARRAY 宏缺括号 → iface 名字表越界写",
+        "impact": "loadIfaceNames 传 `len + 1` 时展开成 `sizeof(tp) * len + 1`，"
+                  "少分配 7 字节，末尾指针写入越界（ASAN 实测）；"
+                  "glibc 恰好靠对齐余量兜住，Android/musl 分配器可能踩坏堆",
+        "checks": [
+            ("core---vm/verify.cpp", r"MCA PATCH 11"),
+            ("core---vm/verify.cpp",
+             r"#define ALLOC_ARRAY\(tp, sz\) \(tp \*\)xmalloc\(\(sz\) == 0 \? 1 : sizeof\(tp\) \* \(sz\)\)"),
+        ],
+        "forbid": [
+            # 上游那份没加括号的宏
+            ("core---vm/verify.cpp",
+             r"#define ALLOC_ARRAY\(tp, sz\) \(tp \*\)xmalloc\(sz == 0 \? 1 : sizeof\(tp\) \* sz\)"),
+        ],
+    },
+    {
+        "no": 12,
+        "title": "段表遍历先判边界再读段头",
+        "impact": "FOR_SECTIONS 的逗号左边先算 vmNextSection(sect)，走到 dataEnd 时"
+                  "仍读一次 sect->size（越界 4 字节）；countSections 里剩余不足 8 字节"
+                  "也会读。宿主多 malloc 了 16 字节兜住，精确分配的 fuzz 立即报 "
+                  "heap-buffer-overflow（READ of size 4）",
+        "checks": [
+            ("core---vm/verify.cpp", r"MCA PATCH 12"),
+            ("core---vm/verify.cpp",
+             r"\(uint64_t \*\)sect < img->dataEnd && \(\(next = vmNextSection\(sect\)\), true\)"),
+            ("core---vm/verify.cpp",
+             r"while \(\(uint8_t \*\)p \+ sizeof\(VMImageSection\) <= \(uint8_t \*\)img->dataEnd\)"),
+        ],
+        "forbid": [
+            # 先算 next 再看边界的旧写法
+            ("core---vm/verify.cpp",
+             r"\(next = vmNextSection\(sect\), \(uint64_t \*\)sect < img->dataEnd\)"),
+        ],
+    },
 ]
 
 # 已退役：编号留着，防止旧文档/旧日志里的 PATCH 4 对不上号
@@ -254,7 +291,7 @@ def main():
     if missing:
         print(f"{missing} 处缺失。补丁内容见 docs/M3-VM-HOST.md"
               f"（PATCH 1~5 的重放脚本在 cartconv 仓库 vm-build/build_vmapp.sh，"
-              f"6~10 只有文档描述）。")
+              f"6~12 只有文档描述）。")
         return 1
     print(f"全部 {len(PATCHES)} 个补丁在位。")
     return 0

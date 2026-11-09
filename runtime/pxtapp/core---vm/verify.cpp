@@ -22,12 +22,21 @@ VMImage *setVMImgError(VMImage *img, int code, void *pos) {
     } while (0)
 #define ALIGNED(sz) (((sz)&7) == 0)
 
+// MCA PATCH 12：先判边界再读段头。上游的循环条件把 "算下一段地址" 放在前、
+// "当前段是否还在镜像内" 放在后（逗号表达式从左到右），走到 dataEnd 时仍会读
+// 一次 sect->size —— 越界 4 字节。
+// 生产路径上之所以没崩，是因为 vmStartFile 多 malloc 了 16 字节兜住；
+// fuzz 里精确分配就立刻报 heap-buffer-overflow（READ of size 4）。
 #define FOR_SECTIONS()                                                                             \
     VMImageSection *sect, *next;                                                                   \
     for (sect = (VMImageSection *)img->dataStart;                                                  \
-         (next = vmNextSection(sect), (uint64_t *)sect < img->dataEnd); sect = next)
+         (uint64_t *)sect < img->dataEnd && ((next = vmNextSection(sect)), true); sect = next)
 
-#define ALLOC_ARRAY(tp, sz) (tp *)xmalloc(sz == 0 ? 1 : sizeof(tp) * sz)
+// MCA PATCH 11：sz 必须加括号。上游写法是 `sizeof(tp) * sz`，而唯一传表达式
+// 的调用点（loadIfaceNames 的 `len + 1`）会展开成 `sizeof(tp) * len + 1`，
+// 少分配 sizeof(tp) - 1 字节，末尾两个指针的写入越界（ASAN: heap-buffer-overflow
+// @ verify.cpp:361，glibc 靠 16 字节对齐的余量兜住了，Android/musl 的分配器不一定）。
+#define ALLOC_ARRAY(tp, sz) (tp *)xmalloc((sz) == 0 ? 1 : sizeof(tp) * (sz))
 
 #define VM_MAX_PATCH 7
 
@@ -142,7 +151,10 @@ const char *vm_patch_image(VMPatchState *state, uint8_t *data, uint32_t len) {
 
 static VMImage *countSections(VMImage *img) {
     auto p = img->dataStart;
-    while (p < img->dataEnd) {
+    // MCA PATCH 12：段头必须完整落在镜像内才读得到 size。截断的镜像（半截下载、
+    // 拷贝中断）在这里原本会读越界，读到的垃圾还可能让 p 跳过 dataEnd——下面
+    // 的 CHECK_AT(p == dataEnd) 只能事后发现，读已经发生了。
+    while ((uint8_t *)p + sizeof(VMImageSection) <= (uint8_t *)img->dataEnd) {
         auto sect = (VMImageSection *)p;
         CHECK(ALIGNED(sect->size), 1002);
         CHECK(sect->size > 0, 1002);

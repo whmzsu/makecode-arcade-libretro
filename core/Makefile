@@ -49,9 +49,20 @@ PXTAPP_DIR := $(CORE_DIR)/../runtime/pxtapp
 
 # 可选 sanitizer（CI 的契约自检构型）：make platform=unix SANITIZE=undefined
 # 必须放在 BUILD_TAG 之前——打开后对象与产物落独立目录，不覆盖普通构建。
+# 目录名带上 sanitizer 名：address 与 undefined 的 .o **不通用**，共用一个
+# -san 目录会链到上一次构型的旧对象（症状是 `undefined symbol:
+# __ubsan_handle_*` 或者干脆没插桩，静默给出假的"干净"结果）。
 ifneq ($(SANITIZE),)
    SANFLAGS  := -fsanitize=$(SANITIZE) -fno-sanitize-recover=$(SANITIZE) -g
-   SAN_TAG   := -san
+   SAN_TAG   := -san-$(SANITIZE)
+endif
+
+# 覆盖率构型：make platform=unix COVERAGE=1 && ./tools/coverage.sh
+# -O0 是为了行/分支计数准（-O2 会把小函数内联掉，报告里那一行永远不出现）；
+# 产物落在对象目录里，不覆盖 core/ 根下的正式 .so。
+ifneq ($(COVERAGE),)
+   COVFLAGS := --coverage -O0 -g
+   COV_TAG  := -cov
 endif
 
 # 产物与对象：对象按平台分目录，避免多目标构建互相覆盖（build/ 已在 .gitignore）
@@ -59,7 +70,7 @@ endif
 # 统一压成 - 分隔的目录名
 empty      :=
 space      := $(empty) $(empty)
-BUILD_TAG  := $(subst $(space),-,$(strip $(platform)))$(SAN_TAG)
+BUILD_TAG  := $(subst $(space),-,$(strip $(platform)))$(SAN_TAG)$(COV_TAG)
 BUILD_DIR  := $(CORE_DIR)/build/make/$(BUILD_TAG)
 OBJ_DIR    := $(BUILD_DIR)/obj
 
@@ -78,6 +89,9 @@ CFLAGS    += $(COMMON_FLAGS) -std=c99
 CXXFLAGS  += $(SANFLAGS)
 CFLAGS    += $(SANFLAGS)
 LDFLAGS   += $(SANFLAGS)
+CXXFLAGS  += $(COVFLAGS)
+CFLAGS    += $(COVFLAGS)
+LDFLAGS   += $(COVFLAGS)
 
 INCFLAGS := -I$(CORE_DIR)/src -I$(PXTAPP_DIR)
 
@@ -151,10 +165,18 @@ else
    # 目标 glibc 没有的符号（如 ppc64le 的 __vsnprintfieee128），动态链接下无害。
    TARGET  := $(CORE_DIR)/$(TARGET_NAME).so
    LDFLAGS += -shared -Wl,-soname,$(TARGET_NAME).so
+   # DF_1_NODELETE：pxt 运行时带 static 析构。RetroArch 退出时先 dlclose 再走
+   # atexit 链，析构函数会跳进已解除映射的代码段 —— 用户侧表现就是"退出即 139"。
+   # 让 ld.so 保留映射即可；代价是换核心时不回收，单次会话可忽略。
+   LDFLAGS += -Wl,-z,nodelete
 endif
 
-# ---------------------------------------------------------------- 源文件
-# 清单只有一份：core/sources.mk。Android.mk 与 tools/build_*.sh 读的是同一个
+# 插桩产物别覆盖 core/ 根下那个"当前正式可用"的 .so：覆盖率构型改落对象目录
+ifneq ($(COVERAGE),)
+   TARGET := $(BUILD_DIR)/$(notdir $(TARGET))
+endif
+
+# ---------------------------------------------------------------- 源文件# 清单只有一份：core/sources.mk。Android.mk 与 tools/build_*.sh 读的是同一个
 # 文件（shell 侧用 tools/lib/sources.sh），加源文件只改那一个地方。
 include $(CORE_DIR)/sources.mk
 
@@ -228,7 +250,7 @@ contract-test: $(CONTRACT_BIN)
 $(CONTRACT_BIN): $(OBJECTS) $(CORE_DIR)/tests/contract_test.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) -std=c++14 $(INCFLAGS) -o $@ \
-	   $(CORE_DIR)/tests/contract_test.cpp $(OBJECTS) $(SANFLAGS) -lpthread
+	   $(CORE_DIR)/tests/contract_test.cpp $(OBJECTS) $(SANFLAGS) $(COVFLAGS) -lpthread
 endif
 endif
 

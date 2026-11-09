@@ -128,7 +128,7 @@ pointers.cpp、functions.json、pxtconfig.h）逐字节一致（仅我们的 3 �
    整个测试在 VM 起跑前跑完，画面全黑（0xff000000 = screen.cpp 的 no-display 分支）。
 3. VM 日志每条重复两遍（官方宿主同样现象，pxt_get_logs 行为，不影响功能）。
 
-### 对 pxt 上游的 9 个补丁（PATCH 1/2/3/5~10；PATCH 4 已被 10 取代）
+### 对 pxt 上游的 11 个补丁（PATCH 1/2/3/5~12；PATCH 4 已被 10 取代）
 
 > **校验**：`python tools/check_pxt_patches.py`（CI 的 `pxt-patches` job 每次 push 都跑）。
 > 补丁没有独立 patch 文件、构建时也不重放，全靠这棵树本身带着——脚本是唯一能
@@ -142,6 +142,19 @@ pointers.cpp、functions.json、pxtconfig.h）逐字节一致（仅我们的 3 �
 > （取帧等待超时 / shutdown）、`mixer---ext/sound.cpp`、`mixer---ext/melody.cpp`
 > （单例置 NULL）、`core---vm/{scheduler,vmload}.cpp`、`platform.h`。
 > **从上游重生成 pxtapp 后必须手工重放**，否则重置/卸载/音频会一起退化。
+
+> PATCH 12（2026-11-09，fuzz 发现）修段表遍历的读越界：`FOR_SECTIONS` 的逗号左边
+> 先算 `vmNextSection(sect)`，走到 `dataEnd` 时仍会读一次 `sect->size`；`countSections`
+> 在剩余不足 8 字节时也照读。宿主 `malloc(len + 16)` 的余量把它盖住了，`core/tests/fuzz_image.cpp`
+> 精确分配就立刻报 `heap-buffer-overflow (READ of size 4)`。改成先判边界再读段头，
+> 截断镜像（半截下载/拷贝中断）从此是干净拒绝而不是越界读。
+
+> PATCH 11（2026-11-09 发现）只改一行：`core---vm/verify.cpp` 的 `ALLOC_ARRAY`
+> 宏给 `sz` 补上括号。上游写法 `sizeof(tp) * sz` 遇到唯一传表达式的调用点
+> （`loadIfaceNames` 的 `len + 1`）会展开成 `sizeof(tp) * len + 1`，比需要少分配
+> 7 字节，末尾两个 `dst[i]` 写入越界。ASAN 实测 `heap-buffer-overflow @
+> verify.cpp:361`（glibc 靠 malloc 的 16 字节对齐余量兜住，所以桌面从未崩；
+> Android/musl 的分配器不保证）。**这是打包进每张卡带装载路径的 UB**，不是新功能。
 
 > PATCH 6（v0.2.5）只落在 `runtime/pxtapp`（仓库内 vendored 树，构建直接用这棵），
 > 涉及 `base/gc.cpp`（新增 `gcForgetAllBlocks`）、`core---vm/scheduler.cpp`
