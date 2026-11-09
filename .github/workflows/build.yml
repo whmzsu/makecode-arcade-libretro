@@ -38,6 +38,20 @@ on:
   push:
     branches: [main]
     tags: ['core-v*']
+    # 纯文档提交不必跑 18 个 job（md、docs/ 下的图与报告、LICENSE 都不进产物）。
+    # 只要改动里有一个非忽略文件，整条 workflow 照常跑。
+    #
+    # 注意：paths-ignore 对 tag push 同样生效（GitHub 按"tag 指向的 commit 改了
+    # 什么"来判），所以「只改 release-notes 想重发同一版」不会触发构建。那种
+    # 情况用 workflow_dispatch 手动跑（不受 paths 过滤），release job 会走
+    # `gh release upload --clobber` + `edit` 更新附件与正文。
+    #
+    # pull_request 故意不加：paths-ignore 跳过的 workflow 不产生 check，若分支
+    # 保护把 build 列为必需项，只改文档的 PR 会永远卡在 "Expected"。
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
   pull_request:
   workflow_dispatch:
 
