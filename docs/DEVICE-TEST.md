@@ -1561,3 +1561,53 @@ performance（测完已恢复 powersave）。cubeland 152.9 fps 与 11-05 记录
 - 其余 7 台开机后按同流程替换即可（备份移出核心目录），届时全场才重新一致。
 - Switch NX 是独立 `nx-v*` 发布线，本次未跟随，现有 NX 产物仍 0.3.3。
 - 若 muOS 前端仍显示旧版本号，重启一次 RetroArch 让它重建 `core_info.cache`。
+
+---
+
+## 2026-11-09 · v0.3.7 两台真机验收（退出 139 的真正根因）
+
+### 部署
+
+| 设备 | 核心路径 | `.info` 路径 | 备份 |
+|---|---|---|---|
+| cubexx (.149, muOS / RG CubeXX) | `/opt/muos/share/core/` | `/opt/muos/share/emulator/retroarch/info/` | `/root/mca-backups/core-0.3.5/` |
+| rgb30c (.101, Debian 13) | `~/.config/retroarch/cores/` | 同核心目录 | `~/mca-backups/core-0.3.5/` |
+
+两台都是 0.3.5 → 0.3.7，发行包 `makecode_arcade_linux-arm64.zip` 里的 `.so`（5007984 B，
+md5 `a3e8b64d…`）与 `.info`。备份留在**家目录**，核心目录只剩目标文件。cubexx 是
+BusyBox 环境：没有 `tar -z` / `stat` / `install`，用 `gzip -dc | tar x` + `cp` + `chmod`。
+
+### golden 三例：逐位一致
+
+| 用例 | cubexx | rgb30c | 桌面基线 |
+|---|---|---|---|
+| ping 300 帧 | `0556e78f…` | `0556e78f…` | `0556e78f…` |
+| probe 120 帧 | `e82844f7…` | `e82844f7…` | `e82844f7…` |
+| probe 120 帧按 A | `0eb7884c…` | `0eb7884c…` | `0eb7884c…` |
+
+真游戏卡带：cubexx `Blocky_Boss_Battle` 300 帧 `18a21077…`、rgb30c `Jumpy Platformer`
+300 帧 `e2d84eb5…`，均无 PANIC。
+
+### 真 RetroArch 退出：0.3.5 = 139 / 0.3.7 = 0
+
+`/tmp` 配置 + video/audio/input 全 null + 独立存档目录，`--max-frames=120`，
+同一张 `ping.pxt64`，只换核心：
+
+| 设备 | 0.3.5 退出码 | 0.3.7 退出码 |
+|---|---|---|
+| cubexx（muOS RA 1.22.2） | **139** | **0** |
+| rgb30c（Debian RA） | **139** | **0** |
+
+两台的 0.3.5 日志都停在 `[Core] Unloading core symbols...` 之后（即 `dlclose` 之后、
+`atexit` 链上），0.3.7 走完同样四行后干净退出。
+
+**更正本文件上面的旧结论。** 2026-11-05 那轮写的是「0.3.3 / 0.3.4 都是 139 → 与核心
+版本无关，是 muOS 定制 RA 的既有现象」。当时两台都返回 139，是因为**那个 bug 在核心侧
+一直存在**（pxt 运行时的 static 析构函数在 `dlclose` 后仍挂在 `atexit` 链上，进程退出
+时跳进已解除映射的代码段），换哪个版本都一样；而 Debian 那台当时判成「正常结束」
+是因为 `timeout 20` 的 RC=124 掩盖了真实退出码，没有像这次一样拿 0.3.5/0.3.7 做对照。
+
+修法在链接期：`-Wl,-z,nodelete`（`DF_1_NODELETE`，`readelf -d` 可见 `FLAGS_1: NOW
+NODELETE`），ld.so 不回收映射，析构函数跳进去仍在。代价是换核心时不释放内存，单次
+会话可忽略。**只在 ELF 上生效**：Windows 是 PE，没有对应标志，修复方式取决于前端是否
+`FreeLibrary`，未实测。
