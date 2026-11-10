@@ -29,7 +29,8 @@
 #     免费）上用第三方前端 miniretro 跑 900 帧冒烟 —— 行为层验证
 #   golden-hash：末帧 MD5 比对（2 卡带 3 用例）—— 像素层验证，唯一能抓住
 #     "契约全绿但画面画错了"的断言
-#   pxt-patches：vendored pxt 树里的 9 个必要补丁是否还在（不编译，几秒）
+#   pxt-patches：14 个必要补丁是否还在（不编译，几秒）
+#   crash-regression：3 张回归夹具盯 PATCH 13/14（两处整数除零）与 15（加载失败可见）
 #   package：把上面各 job 的产物打成发行包，再解包 dlopen 跑 60 帧
 
 name: build
@@ -38,7 +39,7 @@ on:
   push:
     branches: [main]
     tags: ['core-v*']
-    # 纯文档提交不必跑 18 个 job（md、docs/ 下的图与报告、LICENSE 都不进产物）。
+    # 纯文档提交不必跑 19 个 job（md、docs/ 下的图与报告、LICENSE 都不进产物）。
     # 只要改动里有一个非忽略文件，整条 workflow 照常跑。
     #
     # 注意：paths-ignore 对 tag push 同样生效（GitHub 按"tag 指向的 commit 改了
@@ -697,7 +698,7 @@ jobs:
           retention-days: 10
 
   # --------------------------------------- vendored pxt 树的补丁完整性
-  # runtime/pxtapp 是 vendored 的 pxt 运行时，9 个必要补丁直接落在源码里
+  # runtime/pxtapp 是 vendored 的 pxt 运行时，必要补丁直接落在源码里
   # （没有独立 patch 文件，构建时也不重放）。升级 pxt 时"重新生成这棵树"是
   # 最自然的动作，而补丁全消失后代码照样编得过、契约测试照样全绿——退化要
   # 到真机上换游戏才暴露，且是崩溃。这一步把隐形约束变成断言，5 秒成本。
@@ -706,7 +707,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
-      - name: 校验 11 个 pxt 上游补丁（--strict 还查未登记编号）
+      - name: 校验 14 个 pxt/宿主侧补丁（--strict 还查未登记编号）
         run: python3 tools/check_pxt_patches.py --strict
 
   # --------------------------------------------------- 末帧哈希（golden hash）
@@ -742,6 +743,55 @@ jobs:
           path: out/ci_bmp/*.bmp
           if-no-files-found: ignore
           retention-days: 14
+
+  # ----------------------------------------------- PATCH 13/14/15 回归夹具
+  # 三张卡带分别盯住 0.3.8 暴露的三条缺陷（社区卡带，由 cartconv 侧转来）：
+  #   crash-scale        sprite.scale -> 0 的 blit 除零（PATCH 13）
+  #   crash-idiv         raycasting 的 idiv(x, 0) 除零（PATCH 14）
+  #   oversize-section   单段 109952 B >= 32000，VM error 1014（PATCH 15）
+  # 前两张必须跑满 600 帧且宿主进程活着（0.3.8 会 SIGFPE 直接死）；第三张
+  # 必须让 load_game 返回 false，并在日志里给出 1014 与 32000。
+  crash-regression:
+    name: crash-regression
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 编译（gcc/unix）
+        env:
+          CC: gcc
+          CXX: g++
+        run: make -f core/Makefile platform=unix -j"$(nproc)"
+
+      - name: PATCH 13/14：两张除零卡带跑满 600 帧
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          SO=core/makecode_arcade_libretro.so
+          for c in crash-scale crash-idiv; do
+            echo "== $c =="
+            python3 tools/libretro_host.py "$SO" "tools/fixtures/$c.pxt64" 600 \
+              --turbo --press=A --press-at=60 --data-dir="out/regress_$c" \
+              | tee "out/$c.log"
+            grep -q "FINAL-FRAME-HASH" "out/$c.log"
+          done
+
+      - name: PATCH 15：超限镜像必须明确加载失败
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          set +e
+          python3 tools/libretro_host.py core/makecode_arcade_libretro.so \
+            tools/fixtures/oversize-section.pxt64 60 --turbo \
+            --data-dir=out/regress_oversize | tee out/oversize.log
+          rc=${PIPESTATUS[0]}
+          set -e
+          [ "$rc" -eq 3 ] || {
+            echo "::error::期望宿主退出码 3（load_game FAIL），实际 $rc"; exit 1;
+          }
+          grep -q "load_game -> FAIL" out/oversize.log
+          # 日志正文里的 error 1014 / 32000 由 contract_test 的 C 回调断言：
+          # Python ctypes 宿主拿不到 libretro 日志接口的变参，只显示 <...>。
 
   # ----------------------------------------------- RetroArch 真前端无头冒烟
   # golden hash 用的是自研 ctypes 宿主（tools/libretro_host.py），验的是"我们

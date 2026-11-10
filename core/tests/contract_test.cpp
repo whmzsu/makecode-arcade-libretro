@@ -90,11 +90,30 @@ static bool g_load_called = false;
 // 第一次 load_game 那一刻的状态快照：像素格式必须已经协商完
 static bool g_pf_at_first_load = false;
 
+// MCA PATCH 15：把核心日志收进缓冲区，用来断言「加载失败的原因看得见」。
+// 0.3.8 之前日志接口是静音的，正好掩盖了 VM 校验失败只 dmesg 的问题。
+static char g_log_buf[4096];
+static size_t g_log_len = 0;
+
+static void log_cb(enum retro_log_level, const char* fmt, ...) {
+    char line[1024];
+    va_list ap;
+    va_start(ap, fmt);
+    std::vsnprintf(line, sizeof(line), fmt, ap);
+    va_end(ap);
+    const size_t n = std::strlen(line);
+    if (g_log_len + n < sizeof(g_log_buf) - 1) {
+        std::memcpy(g_log_buf + g_log_len, line, n);
+        g_log_len += n;
+        g_log_buf[g_log_len] = 0;
+    }
+}
+
 static bool env_cb(unsigned cmd, void* data) {
     switch (cmd) {
     case RETRO_ENVIRONMENT_GET_LOG_INTERFACE: {
         auto* cb = static_cast<struct retro_log_callback*>(data);
-        cb->log = nullptr;  // 本测试不接日志（静音，输出只看断言）
+        cb->log = log_cb;  // PATCH 15：收集失败原因供断言
         return true;
     }
     case RETRO_ENVIRONMENT_SET_PIXEL_FORMAT: {
@@ -277,6 +296,23 @@ int main(int argc, char** argv) {
 
     loaded = retro_load_game(nullptr);
     CHECK(!loaded, "load_game(NULL) 返回 false");
+
+    // MCA PATCH 15：段链合法但单段 >= 32000 的镜像，必须在 load_game 阶段
+    // 被宿主同步拒绝，并把 1014 / 32000 打进前端日志（0.3.8 会返回 true
+    // 然后留一片黑屏，sm64thign 因此绕了三轮才定案）。
+    static uint8_t oversize[32000];
+    std::memset(oversize, 0, sizeof(oversize));
+    const uint32_t big_sect = 32000;
+    std::memcpy(oversize + 4, &big_sect, sizeof(big_sect));
+    gi.path = "contract_test_oversize.pxt64";
+    gi.data = oversize;
+    gi.size = sizeof(oversize);
+    fe::g_log_len = 0;
+    fe::g_log_buf[0] = 0;
+    loaded = retro_load_game(&gi);
+    CHECK(!loaded, "段尺寸超限镜像 load_game 返回 false（PATCH 15 不再谎报成功）");
+    CHECK(std::strstr(fe::g_log_buf, "1014") && std::strstr(fe::g_log_buf, "32000"),
+          "失败日志含 VM error 1014 与段上限 32000（前端/玩家可自查）");
 
     // ---- 4. 各项环境声明的时机与内容 -----------------------------------
     CHECK(fe::g_pixel_format_calls > 0, "SET_PIXEL_FORMAT 已发出（%d 次）",

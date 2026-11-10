@@ -28,8 +28,16 @@
     {"name": "Stack_the_Goats", "id": "86980-49044-76449-93183", "tier": "full", "expect": "ok", "why": "瓦片 + 精灵数据 + 粒子"},
     {"name": "Cave_Explorer", "id": "02651-16710-47798-38995", "tier": "full", "expect": "ok", "why": "多关卡洞穴，瓦片地图为主"},
     {"name": "Mouse_Adventure", "id": "21784-44427-92956-37509", "tier": "full", "expect": "ok", "why": "最大的镜像（382KB），瓦片 + 精灵数据 + 大量状态"},
-    {"name": "Strawberry_Slam", "id": "39705-92830-48491-01106", "tier": "known_bad", "expect": "panic:980", "why": "固定第 5133 tick 崩 PANIC_CAST_FROM_UNDEFINED（与按键无关），留作\"崩溃处理是否优雅\"的样本"}
+    {"name": "Strawberry_Slam", "id": "39705-92830-48491-01106", "tier": "known_bad", "expect": "panic:980", "why": "PANIC_CAST_FROM_UNDEFINED（coco cooldown / readDataSprite(\"hitbox\") 读未初始化值）；**输入序列相关**：A 口径与四方向口径触发，A@60+LEFT 口径 600 帧不触发，回归标注必须附固定按键脚本"}
   ],
+  "regression_fixtures": {
+    "about": "例外：下面 3 张 .pxt64 是 PATCH 13/14/15 的回归夹具，随仓库提交（.gitignore 只对 tools/fixtures/*.pxt64 放行）。来源是 cartconv 侧转来的社区卡带，没有 share id、无法由 games 清单重建，且是唯一能复现这三条缺陷的输入；不参与常规 sweep。CI 的 crash-regression job 单独跑它们。",
+    "carts": [
+      {"file": "crash-scale.pxt64", "patch": 13, "expect": "600 帧存活", "why": "sprite.scale 递减到 0 → blit 的 hDst==0 整数除零（0.3.8 进程直接死）"},
+      {"file": "crash-idiv.pxt64", "patch": 14, "expect": "600 帧存活", "why": "raycasting 的 _fov 无初值 → Math_::idiv 的 x/0（帧 0 必崩）"},
+      {"file": "oversize-section.pxt64", "patch": 15, "expect": "load_game 返回 false", "why": "单段 109952 B >= 32000，VM error 1014；0.3.8 谎报成功留黑屏"}
+    ]
+  },
   "excluded": [
     {"name": "Asphodel_follows_directions", "id": "07573-63879-62644-28924", "reason": "依赖 thermometer / lightsensor 硬件扩展，hw---vm 变体下 C++ 常量无法求值，编不出来——这类卡带在掌机上本来也跑不了（没有温度/光照传感器）"}
   ],

@@ -128,7 +128,7 @@ pointers.cpp、functions.json、pxtconfig.h）逐字节一致（仅我们的 3 �
    整个测试在 VM 起跑前跑完，画面全黑（0xff000000 = screen.cpp 的 no-display 分支）。
 3. VM 日志每条重复两遍（官方宿主同样现象，pxt_get_logs 行为，不影响功能）。
 
-### 对 pxt 上游的 11 个补丁（PATCH 1/2/3/5~12；PATCH 4 已被 10 取代）
+### 对 pxt 上游与宿主侧的 14 个补丁（PATCH 1/2/3/5~15；PATCH 4 已被 10 取代）
 
 > **校验**：`python tools/check_pxt_patches.py`（CI 的 `pxt-patches` job 每次 push 都跑）。
 > 补丁没有独立 patch 文件、构建时也不重放，全靠这棵树本身带着——脚本是唯一能
@@ -148,6 +148,22 @@ pointers.cpp、functions.json、pxtconfig.h）逐字节一致（仅我们的 3 �
 > 在剩余不足 8 字节时也照读。宿主 `malloc(len + 16)` 的余量把它盖住了，`core/tests/fuzz_image.cpp`
 > 精确分配就立刻报 `heap-buffer-overflow (READ of size 4)`。改成先判边界再读段头，
 > 截断镜像（半截下载/拷贝中断）从此是干净拒绝而不是越界读。
+
+> **PATCH 13/14（v0.3.9，62 张社区卡带批量冒烟发现）** 修两处整数除零，都是
+> `0xc0000094`/`SIGFPE` 级别——**整个宿主进程直接消失**，来不及画 panic 横幅：
+> `screen---ext/image.cpp` 的 `blit()` 在 `sprite.scale` 递减到 0 时拿 `hDst==0`
+> 做 `(hSrc << 16) / hDst`；`base/core.cpp` 的 `Math_::idiv()` 在 raycasting 的
+> `_fov` 无初值时做 `x/0`。前者零/负目标尺寸直接 `return false`（本来就没有
+> 像素可画），后者 `y==0` 返回 0。回归夹具在 `tools/fixtures/crash-*.pxt64`。
+
+> **PATCH 15（v0.3.9）** 是宿主侧改动，不在 vendored 树里：`core/src/vm_host.cpp`
+> 在 spawn VM 线程之前同步预检 section 链（段链/对齐、size ≥ 16、size < 32000），
+> 失败时 `retro_load_game()` 返回 false 并把 `VM error 1014` 与段尺寸打进前端日志。
+> 起因是 `vmload.cpp` 的校验在**线程内**，失败只 `dmesg` 后 return，主线程
+> `pxt_vm_start_buffer()` 却已成功返回——`sm64thign`（单段 109952 B）因此在
+> 0.3.8 上"加载成功 + 永久黑屏"，围绕渲染层查了三轮才定位。**没有放宽 32000**：
+> 那是上游给小栈 MCU 设的保守上限，真机栈大小与 16 位跳转上限都未审计。
+> 契约测试新增两条断言守这条线。
 
 > PATCH 11（2026-11-09 发现）只改一行：`core---vm/verify.cpp` 的 `ALLOC_ARRAY`
 > 宏给 `sz` 补上括号。上游写法 `sizeof(tp) * sz` 遇到唯一传表达式的调用点

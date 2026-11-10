@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""check_pxt_patches.py — 校验 runtime/pxtapp 里 11 个 pxt 上游补丁是否都在
+"""check_pxt_patches.py — 校验 14 个 pxt/宿主侧补丁是否都在
 
 ## 为什么需要这个脚本
 
 runtime/pxtapp 是 vendored 的 pxt 运行时（MIT，来源见 runtime/VENDORING.md）。
-我们为了让它在 libretro 前端里活下来改了 11 处：换游戏、重置、卸载、重启后
-音频、以及"同一输入的两次运行必须逐帧一致"。
+我们为了让它在 libretro 前端里活下来改了 14 处：换游戏、重置、卸载、重启后
+音频、"同一输入的两次运行必须逐帧一致"、两处整数除零防护，以及加载失败可见性。
 
 这些改动**直接落在源码里**（没有独立 patch 文件，构建时也不再重放），所以
 只有一个隐形的约束在保护它们：没人会把整棵树换成上游版本。偏偏升级 pxt 时
-最自然的动作就是"重新生成 pxtapp"——那一刻 11 个补丁全部消失，而代码照样编
+最自然的动作就是"重新生成 pxtapp"——那一刻补丁全部消失，而代码照样编
 得过、`contract_test` 照样全绿，退化要到真机上换游戏才暴露（而且是崩溃，不是
 报错）。这个脚本把"补丁还在"变成一条可执行的断言。
 
@@ -197,6 +197,42 @@ PATCHES = [
              r"\(next = vmNextSection\(sect\), \(uint64_t \*\)sect < img->dataEnd\)"),
         ],
     },
+    {
+        "no": 13,
+        "title": "blit() 目标尺寸为 0/负时整数除零",
+        "impact": "sprite.scale 递减到 0（CrateMaker / Crate_Dungeon 的爆炸特效）"
+                  "会让 (hSrc << 16) / hDst 触发 SIGFPE，宿主进程直接死",
+        "checks": [
+            ("screen---ext/image.cpp", r"MCA PATCH 13"),
+            ("screen---ext/image.cpp", r"if \(wDst <= 0 \|\| hDst <= 0\)\s*return false;"),
+        ],
+        "forbid": [],
+    },
+    {
+        "no": 14,
+        "title": "Math_::idiv() 除数为 0 时整数除零",
+        "impact": "工程自带 raycasting 的 _fov 无初值时 0/0、x/0 触发 SIGFPE"
+                  "（FPS_game_test_menu_test 帧 0 必崩）",
+        "checks": [
+            ("base/core.cpp", r"MCA PATCH 14"),
+            ("base/core.cpp", r"if \(y == 0\)\s*return 0;"),
+        ],
+        "forbid": [],
+    },
+    {
+        "no": 15,
+        "title": "镜像校验失败时 retro_load_game 不再谎报成功",
+        "impact": "VM 在线程内 loadVMImage() 校验失败只 dmesg 后 return，宿主拿不到"
+                  "结果、load_game 返回 true、前端只见黑屏（0.3.8 的 sm64thign "
+                  "1014 因此绕了三轮才定案）",
+        "checks": [
+            # 宿主侧改动不在 PXTAPP 树里，用相对路径回到仓库根
+            ("../../core/src/vm_host.cpp", r"MCA PATCH 15"),
+            ("../../core/src/vm_host.cpp", r"validate_pxt64_sections\(data, len\)"),
+            ("../../core/src/platform.h", r"const char\* vm_last_error\(\)"),
+        ],
+        "forbid": [],
+    },
 ]
 
 # 已退役：编号留着，防止旧文档/旧日志里的 PATCH 4 对不上号
@@ -218,7 +254,7 @@ def read(rel):
 def main():
     argv = sys.argv[1:]
     if "--list" in argv:
-        print(f"{len(PATCHES)} 个在册补丁（runtime/pxtapp，vendored pxt 运行时）：\n")
+        print(f"{len(PATCHES)} 个在册补丁（vendored pxt 运行时 + core/src 宿主侧）：\n")
         for p in PATCHES:
             print(f"  PATCH {p['no']:<2}  {p['title']}")
             print(f"            后果：{p['impact']}")
@@ -291,7 +327,7 @@ def main():
     if missing:
         print(f"{missing} 处缺失。补丁内容见 docs/M3-VM-HOST.md"
               f"（PATCH 1~5 的重放脚本在 cartconv 仓库 vm-build/build_vmapp.sh，"
-              f"6~12 只有文档描述）。")
+              f"6~15 只有文档描述）。")
         return 1
     print(f"全部 {len(PATCHES)} 个补丁在位。")
     return 0

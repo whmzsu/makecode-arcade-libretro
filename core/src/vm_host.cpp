@@ -84,15 +84,73 @@ bool start_vm_from_orig() {
     return true;
 }
 
+// MCA PATCH 15：宿主侧同步段级预检。
+// VM 的 loadVMImage() 在线程内校验失败时只 dmesg("validation error %d") 后
+// return，主线程拿不到结果，retro_load_game() 就误报成功、前端只看到黑屏
+// （0.3.8 上 sm64thign 的 1014 因此绕了三轮才定案）。pxt_vm_start_buffer()
+// 会立刻 spawn 线程并成功返回，没法在 load_game 里同步等结果，所以在宿主侧
+// 用同一条 section 链把段级校验复现一遍：覆盖 verify.cpp 的
+//   1002/1003（段链/对齐）、1048（size >= 16）、1014（size < 32000）。
+// 这里只做「拒绝明显跑不了的镜像」，不放宽任何限制、不改 VM 行为。
+char g_vm_last_error[256] = {0};
+
+bool validate_pxt64_sections(const uint8_t* data, size_t len) {
+    size_t off = 0;
+    while (off + 8 <= len) {
+        uint32_t sz = 0;
+        std::memcpy(&sz, data + off + 4, 4);
+        if (sz == 0 || (sz & 7) || off + sz > len) {
+            std::snprintf(g_vm_last_error, sizeof(g_vm_last_error),
+                          "pxt64 image rejected: broken section chain at 0x%llx "
+                          "(size=%u, image_end=0x%llx) [VM error 1002/1003]",
+                          (unsigned long long)off, sz, (unsigned long long)len);
+            return false;
+        }
+        if (sz < 16) {
+            std::snprintf(g_vm_last_error, sizeof(g_vm_last_error),
+                          "pxt64 image rejected: section at 0x%llx size=%u < 16 "
+                          "[VM error 1048]", (unsigned long long)off, sz);
+            return false;
+        }
+        if (sz >= 32000) {
+            std::snprintf(g_vm_last_error, sizeof(g_vm_last_error),
+                          "pxt64 image rejected: section at 0x%llx size=%u >= 32000 "
+                          "(VM error 1014); max VM section size is 32000, this cart "
+                          "cannot run on the pxt VM", (unsigned long long)off, sz);
+            return false;
+        }
+        off += sz;
+    }
+    if (off != len) {
+        std::snprintf(g_vm_last_error, sizeof(g_vm_last_error),
+                      "pxt64 image rejected: section chain ends at 0x%llx but "
+                      "image length is 0x%llx [VM error 1003]",
+                      (unsigned long long)off, (unsigned long long)len);
+        return false;
+    }
+    return true;
+}
+
 } // namespace
+
+const char* vm_last_error() { return g_vm_last_error; }
 
 bool vm_start_from_image(const uint8_t* data, size_t size, const char* save_dir) {
     // 换游戏：老 VM 必须先完全停掉，否则两套线程共用全局状态，且新镜像
     // 装载期间老线程还在跑（前端随后会 dlclose/重新装载核心）。
     if (g_vm_up) vm_stop();
+    g_vm_last_error[0] = 0;
 
     const size_t len = pxt64_image_length(data, size);
-    if (len < 64 || (len & 7)) return false;
+    if (len < 64 || (len & 7)) {
+        std::snprintf(g_vm_last_error, sizeof(g_vm_last_error),
+                      "pxt64 image rejected: invalid image length %llu bytes "
+                      "(need >= 64 and 8-byte aligned)", (unsigned long long)len);
+        return false;
+    }
+    // MCA PATCH 15：先同步预检，再 spawn VM 线程；失败时 load_game 能直接
+    // 返回 false 并把原因打给前端，不再留一片无法解释的黑屏。
+    if (!validate_pxt64_sections(data, len)) return false;
 
     g_vm_orig.assign(data, data + len);
     g_vm_len = len;

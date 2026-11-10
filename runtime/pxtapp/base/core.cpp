@@ -1449,6 +1449,12 @@ int imul(int x, int y) {
 
 //%
 int idiv(int x, int y) {
+    // MCA PATCH 14：工程自带的 raycasting 引擎里 `_fov` 无初值时会把 0 当
+    // 除数（FPS_game_test_menu_test 帧 0 就崩），x/0 与 0/0 在 C++ int 上
+    // 都是 SIGFPE。TS 层对除零期望 NaN/Infinity，VM 的整数除法没有浮点可退；
+    // 返回 0 是最保守的兜底：不崩宿主、游戏后续帧还能继续跑。
+    if (y == 0)
+        return 0;
     return x / y;
 }
 } // namespace Math_

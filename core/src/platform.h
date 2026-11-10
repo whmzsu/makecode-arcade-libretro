@@ -86,6 +86,12 @@ size_t pxt64_image_length(const uint8_t* data, size_t size);
 // vm_request_reset() + vm_poll_restart()（见下）。
 bool vm_start_from_image(const uint8_t* data, size_t size, const char* save_dir);
 
+// MCA PATCH 15：最近一次 vm_start_from_image() 失败的人类可读原因；成功时为
+// 空串。VM 的 loadVMImage() 在线程内校验失败时只 dmesg 后 return，宿主拿不到
+// 结果，retro_load_game 会误报成功、前端只看到黑屏。宿主侧同步预检失败时把
+// 原因写在这里，由 load_pxt64() 打给前端日志。
+const char* vm_last_error();
+
 // VM 是否已启动（由 vm_host.cpp 实现）
 bool runtime_available();
 

@@ -1088,6 +1088,13 @@ bool blit(Image_ dst, Image_ src, pxt::RefCollection *args) {
     bool transparent = pxt::toBoolQuick(args->getAt(8));
     bool check = pxt::toBoolQuick(args->getAt(9));
 
+    // MCA PATCH 13：sprite.scale 可以递减到 0 甚至负数（CrateMaker /
+    // Crate_Dungeon 的爆炸特效），wDst/hDst 为 0 时下面两个 16.16 定点除法
+    // 会直接触发 SIGFPE，把整个核心进程带死。零/负目标尺寸本来就没有像素
+    // 可画，提前返回 false（blit 的 false = 未绘制/未检出碰撞），语义等价。
+    if (wDst <= 0 || hDst <= 0)
+        return false;
+
     int xSrcStep = (wSrc << 16) / wDst;
     int ySrcStep = (hSrc << 16) / hDst;
 

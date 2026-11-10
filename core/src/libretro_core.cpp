@@ -63,7 +63,7 @@ static retro_log_printf_t g_log = nullptr;
 static bool g_pixel_format_ok = false;
 static enum retro_pixel_format g_pixel_format = RETRO_PIXEL_FORMAT_0RGB1555;
 // 版本号只在这里出现一次：.info 打包脚本和运行时横幅都读它
-static const char* const kCoreVersion = "0.3.8";
+static const char* const kCoreVersion = "0.3.9";
 
 static unsigned g_frame = 0;
 static bool g_game_loaded = false;
@@ -419,7 +419,15 @@ bool load_pxt64(const uint8_t* data, size_t size) {
         log_printf(RETRO_LOG_ERROR, "[MCA] not a valid .pxt64 image\n");
         return false;
     }
-    return vm_start_from_image(data, size, resolve_save_dir().c_str());
+    // MCA PATCH 15：把宿主预检给出的具体原因（段偏移/尺寸/VM error code）
+    // 打到前端日志，load_game 明确失败而不是留一片黑屏。
+    if (!vm_start_from_image(data, size, resolve_save_dir().c_str())) {
+        const char* why = vm_last_error();
+        log_printf(RETRO_LOG_ERROR, "[MCA] %s\n",
+                   (why && *why) ? why : "failed to start VM");
+        return false;
+    }
+    return true;
 }
 
 } // namespace
