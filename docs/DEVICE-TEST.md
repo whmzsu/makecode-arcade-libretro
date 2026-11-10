@@ -1611,3 +1611,59 @@ BusyBox 环境：没有 `tar -z` / `stat` / `install`，用 `gzip -dc | tar x` +
 NODELETE`），ld.so 不回收映射，析构函数跳进去仍在。代价是换核心时不释放内存，单次
 会话可忽略。**只在 ELF 上生效**：Windows 是 PE，没有对应标志，修复方式取决于前端是否
 `FreeLibrary`，未实测。
+
+## core 0.3.8 真机部署与实测（2026-11-10 08:25~08:40）
+
+发版 `core-v0.3.8`（tag run `42654310708` 全绿，6 主包 + 3 调试包体检全 PASS）。
+0.3.8 **零行为改动**，只改了出厂形态（strip / debuginfo / build-id）与两处漏配的
+`DF_1_NODELETE`（Android、Lakka）。因此真机这一轮的目标不是"找新 bug"，而是
+**确认等价 + 确认退出仍干净**。
+
+### 部署
+
+| 设备 | 核心路径 | `.info` | 备份 | md5 | 结果 |
+|---|---|---|---|---|---|
+| rgb30c (.101, Debian 13) | `~/.config/retroarch/cores/` | 同目录 | `~/mca-backups/core-0.3.7/` | `eb4eb217…` / 732 496 B | ✅ 已升 |
+| cubexx (.149, muOS) | `/opt/muos/share/core/` | `/opt/muos/share/emulator/retroarch/info/` | — | — | ⏸ **设备不在线**（无 ARP、22 端口不通），待开机补 |
+| Mi Max 2 (`b2aec2db`, Android 7.1.1) | shell 宿主直跑，不动 RA | — | — | `ed2a6a56…` / 455 136 B | ✅ 21 卡回归 |
+
+rgb30c 换完 `display_version = "0.3.8"`，核心目录只留目标文件（`.bak` 不留），
+0.3.7 的 5 007 984 B 原件与 `.info` 在 `~/mca-backups/core-0.3.7/`。
+
+### golden 三例（rgb30c）
+
+| 用例 | 实测 | 桌面基线 | |
+|---|---|---|---|
+| ping 300 帧 | `0556e78f7ce0e828f2dc922d210dc047` | 同 | ✅ |
+| probe 120 帧 | `e82844f7160449d1767aa69afe788800` | 同 | ✅ |
+| probe 120 帧按 A | `0eb7884cb40cef0cb549946af3a942ab` | 同 | ✅ |
+
+真游戏 `arcade-jumpy-platformer` 300 帧 → `e2d84eb5325d9436a69fc5acee35358b`
+（与 0.3.7 实测值一致），无 PANIC。
+
+### 真 RetroArch 退出：0.3.8 仍是 0
+
+`/tmp` 配置 + video/audio/input 全 null + 独立存档目录，`ping.pxt64` 120 帧：
+
+| 设备 | 0.3.5 | 0.3.7 | 0.3.8 |
+|---|---|---|---|
+| rgb30c（Debian RA 1.22.2） | 139 | 0 | **0** |
+
+日志里 `[Core] Unloading core symbols...` 之后干净退出，`SET_PIXEL_FORMAT: RGB565`、
+`Geometry: 160x120` 均正常。strip 掉 `.debug_info` 没有影响任何行为。
+
+### Android（Mi Max 2）21 卡 ×600 帧
+
+新核心 md5 `ed2a6a56…`（同 455 136 B，但补了 `DF_1_NODELETE`，故与 0.3.7 不同）：
+
+```
+ADB=.../adb.exe bash tools/android_test/run_shellhost.sh \
+  --serial b2aec2db --core out/rel038-android/makecode_arcade_libretro.so \
+  --carts out/android_test/carts21 --baseline tools/fixtures/android21-baseline.txt
+→ 21/21 与桌面 x86_64 基线逐位一致，结论「全部一致」
+```
+
+### 未完成
+
+- **cubexx 没升**：08:24 起 `.149` 无 ARP、22 端口超时（同网段扫描只看到 .1/.69/.84/.101/.196），
+  判定设备关机或掉网。开机后按上表路径补一次（BusyBox 环境：`gzip -dc | tar x` + `cp` + `chmod`）。
