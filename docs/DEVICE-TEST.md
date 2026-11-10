@@ -1624,22 +1624,25 @@ NODELETE`），ld.so 不回收映射，析构函数跳进去仍在。代价是�
 | 设备 | 核心路径 | `.info` | 备份 | md5 | 结果 |
 |---|---|---|---|---|---|
 | rgb30c (.101, Debian 13) | `~/.config/retroarch/cores/` | 同目录 | `~/mca-backups/core-0.3.7/` | `eb4eb217…` / 732 496 B | ✅ 已升 |
-| cubexx (.149, muOS) | `/opt/muos/share/core/` | `/opt/muos/share/emulator/retroarch/info/` | — | — | ⏸ **设备不在线**（无 ARP、22 端口不通），待开机补 |
+| cubexx (.149, muOS) | `/opt/muos/share/core/` | `/opt/muos/share/emulator/retroarch/info/` | `/root/mca-backups/core-0.3.7/` | `eb4eb217…` / 732 496 B | ✅ 已升（19:24 补） |
 | Mi Max 2 (`b2aec2db`, Android 7.1.1) | shell 宿主直跑，不动 RA | — | — | `ed2a6a56…` / 455 136 B | ✅ 21 卡回归 |
 
-rgb30c 换完 `display_version = "0.3.8"`，核心目录只留目标文件（`.bak` 不留），
-0.3.7 的 5 007 984 B 原件与 `.info` 在 `~/mca-backups/core-0.3.7/`。
+两台换完 `display_version = "0.3.8"`，核心目录只留目标文件（`.bak` 不留）。
+0.3.7 的 5 007 984 B 原件与 `.info`：rgb30c 在 `~/mca-backups/core-0.3.7/`，
+cubexx 在 `/root/mca-backups/core-0.3.7/`。cubexx 的 `.info` 与核心**分属两个目录**
+（`/opt/muos/share/emulator/retroarch/info/`），最容易漏改。
 
-### golden 三例（rgb30c）
+### golden 三例（两台完全一致）
 
-| 用例 | 实测 | 桌面基线 | |
+| 用例 | rgb30c | cubexx | 桌面基线 |
 |---|---|---|---|
-| ping 300 帧 | `0556e78f7ce0e828f2dc922d210dc047` | 同 | ✅ |
-| probe 120 帧 | `e82844f7160449d1767aa69afe788800` | 同 | ✅ |
-| probe 120 帧按 A | `0eb7884cb40cef0cb549946af3a942ab` | 同 | ✅ |
+| ping 300 帧 | `0556e78f7ce0e828f2dc922d210dc047` | 同 | 同 |
+| probe 120 帧 | `e82844f7160449d1767aa69afe788800` | 同 | 同 |
+| probe 120 帧按 A | `0eb7884cb40cef0cb549946af3a942ab` | 同 | 同 |
 
-真游戏 `arcade-jumpy-platformer` 300 帧 → `e2d84eb5325d9436a69fc5acee35358b`
-（与 0.3.7 实测值一致），无 PANIC。
+真游戏：rgb30c `arcade-jumpy-platformer` 300 帧 → `e2d84eb5325d9436a69fc5acee35358b`；
+cubexx `Blocky_Boss_Battle` 300 帧 → `18a2107772b41851f8043aa4972fbcce`。两值都与
+各自 0.3.5/0.3.7 记录一致，无 PANIC。
 
 ### 真 RetroArch 退出：0.3.8 仍是 0
 
@@ -1648,9 +1651,11 @@ rgb30c 换完 `display_version = "0.3.8"`，核心目录只留目标文件（`.b
 | 设备 | 0.3.5 | 0.3.7 | 0.3.8 |
 |---|---|---|---|
 | rgb30c（Debian RA 1.22.2） | 139 | 0 | **0** |
+| cubexx（muOS RA 1.22.2） | 139 | 0 | **0** |
 
-日志里 `[Core] Unloading core symbols...` 之后干净退出，`SET_PIXEL_FORMAT: RGB565`、
-`Geometry: 160x120` 均正常。strip 掉 `.debug_info` 没有影响任何行为。
+两台日志里 `[Core] Unloading core symbols...` 之后都干净退出，`SET_PIXEL_FORMAT: RGB565`、
+`Geometry: 160x120` 均正常。strip 掉 `.debug_info` 没有影响任何行为。cubexx 用的是
+设备上既有的 `/tmp/ra_mca.cfg`（video/audio/input 全 null），日志留在 `/tmp/ra-0.3.8.log`。
 
 ### Android（Mi Max 2）21 卡 ×600 帧
 
@@ -1663,7 +1668,12 @@ ADB=.../adb.exe bash tools/android_test/run_shellhost.sh \
 → 21/21 与桌面 x86_64 基线逐位一致，结论「全部一致」
 ```
 
-### 未完成
+### 补记：cubexx 19:23 开机后补升
 
-- **cubexx 没升**：08:24 起 `.149` 无 ARP、22 端口超时（同网段扫描只看到 .1/.69/.84/.101/.196），
-  判定设备关机或掉网。开机后按上表路径补一次（BusyBox 环境：`gzip -dc | tar x` + `cp` + `chmod`）。
+08:24 那轮 `.149` 无 ARP、22 端口超时（同网段扫描只看到 .1/.69/.84/.101/.196），判定
+关机或掉网；19:23 用户开机后立即补做，上面的表格与测试结果已按最终状态更新。
+**BusyBox 坑**：`tar` 不支持 `-z`，本机传文件改用 `scp` 直传（比 `gzip -dc | tar x` 更省事），
+再 `cp` + `chmod 755`。设备上已有的 `/root/mca/tools/libretro_host.py`、
+`/root/mca/tools/fixtures/{ping,probe}.pxt64`、`/tmp/ra_mca.cfg` 都可直接复用。
+
+3 台设备（rgb30c / cubexx / Mi Max 2）至此全部完成 0.3.8 验证，**无待办**。
