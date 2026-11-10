@@ -10,8 +10,8 @@
 
 | 别名 | IP | 型号 | SoC / 内存 | 系统 / 内核 | RA | 核心 | 状态 |
 |---|---|---|---|---|---|---|---|
-| `cubexx` | 192.168.1.149 | Anbernic RG CubeXX（H700，标识 `rgcubexx-h`） | 4×A55 1.80G / 973MB | muOS 2606.0 (ANDROMEDA) / 4.9.170 | 1.22.2 | **0.3.8** | 在线（19:23 开机后补升） |
-| `rgb30c` | 192.168.1.101 | Powkiddy RGB30 | RK3566 1.99G / 967MB | Debian 13 (trixie) / 5.10.226 | 1.22.2 | **0.3.8** | 在线 |
+| `cubexx` | 192.168.1.149 | Anbernic RG CubeXX（H700，标识 `rgcubexx-h`） | 4×A55 1.80G / 973MB | muOS 2606.0 (ANDROMEDA) / 4.9.170 | 1.22.2 | **0.3.9** | 在线 |
+| `rgb30c` | 192.168.1.101 | Powkiddy RGB30 | RK3566 1.99G / 967MB | Debian 13 (trixie) / 5.10.226 | 1.22.2 | **0.3.9** | 在线 |
 | `rg353m` | 192.168.1.130 | Anbernic RG353M | RK3566 1.99G / **1971MB** | Debian 13 / 5.10.226 | 1.22.2 | 0.3.3 | 关机 |
 | `rg353v` | 192.168.1.77 | Anbernic RG353V/VS | RK3566 1.99G / 967MB | Debian 13 / 5.10.226 | 1.22.2 | 0.3.3 | 关机 |
 | `rk2023` | 192.168.1.17 | Powkiddy RK2023 | RK3566 1.99G / 964MB | **Ubuntu 19.10** / 4.19.172（glibc 2.30） | **1.19.1** | 0.3.3 | 关机 |
@@ -39,7 +39,7 @@
 |---|---|---|---|---|---|---|
 | G Cloud | `2429TNR40628` | 罗技 G Cloud `GR0006` | Android 11 / SDK 30 | 1080×1920 @320 | 0.3.5 | 无 root，RA 里能跑；shell 宿主必 906 |
 | `rtwo` | `ZY22GCKKB4` | Motorola XT2301-5（骁龙 8 Gen 2） | **Android 16 / SDK 36** | — | 0.3.5 | RA 1.21.0 是 `targetSdk=28` 才跑得起来 |
-| `oxygen` | `b2aec2db` | Xiaomi Mi Max 2（骁龙 625） | **Android 7.1.1 / SDK 25** | — | **0.3.8** | **常规长测机**：3.7GB / data 43GB |
+| `oxygen` | `b2aec2db` | Xiaomi Mi Max 2（骁龙 625） | **Android 7.1.1 / SDK 25** | — | **0.3.9** | **常规长测机**：3.7GB / data 43GB |
 
 合计 **14 台**：9 台 Linux 掌机 + 1 台 Switch(Lakka) + 1 台送修 + 3 台 Android。
 
@@ -50,11 +50,17 @@
 > 0.3.8 的 `android-arm64`（md5 `ed2a6a56f0e1a1ef410541892ba7dca7`，455 136 B）：体积与
 > 0.3.7 相同，但补上了 `DF_1_NODELETE`（0.3.7 的 Android 包一直缺这个标志），md5 因此不同。
 > 2026-11-10 用它在 Mi Max 2 上跑 21 卡 ×600 帧：**21/21 与桌面基线逐位一致**。
+>
+> 0.3.9 的 `android-arm64`（md5 `9ad8e8d763d3c003b3a3a7fb127b7e5b`，456 136 B）：
+> PATCH 13/14/15 后体积 +1 000 B。2026-11-10 晚在 Mi Max 2 上跑 21 卡 ×600 帧：
+> **21/21 与桌面 x86_64 基线逐位一致**（`run_shellhost.sh` 结论「全部一致」、exit=0）。
+> 注意 Android 上跑的是 shell 宿主、不动 RA 里的核心，所以这里验的是发行包里的 `.so`。
 
 ## 4. 版本登记（linux-arm64 核心）
 
 | 版本 | 核心 MD5 | 大小 | 备注 |
 |---|---|---|---|
+| 0.3.9 | `2cb2236308791b49eb96b08202502d33` | 733 432 B | **PATCH 13/14/15**：两处整数除零不再带崩宿主；镜像段校验失败 `load_game` 返回 false 并打 `VM error 1014`。两台 Linux 掌机 golden 三例与 0.3.8 逐位一致 + 3 张回归夹具全过，真 RA 退出码 0 |
 | 0.3.8 | `eb4eb21716d77ecaabd77357b5ce1ea7` | 732 496 B | **首个 strip 版本**（原 5.0 MB）+ 独立 `-debuginfo.zip`；补 Android/musl 的 `DF_1_NODELETE`。qemu 跑 golden 三例与 0.3.7 逐位一致 |
 | 0.3.7 | `a3e8b64dc602fc98de331a7a1c1dc003` | 5 007 984 B | 修 PATCH 11/12 + 退出 139（`DF_1_NODELETE`）；两机实测退出码 0 |
 | 0.3.6 | — | — | 零行为变化（工程债），未在真机铺开 |

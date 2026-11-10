@@ -1677,3 +1677,102 @@ ADB=.../adb.exe bash tools/android_test/run_shellhost.sh \
 `/root/mca/tools/fixtures/{ping,probe}.pxt64`、`/tmp/ra_mca.cfg` 都可直接复用。
 
 3 台设备（rgb30c / cubexx / Mi Max 2）至此全部完成 0.3.8 验证，**无待办**。
+
+---
+
+## core 0.3.9 真机部署与实测（2026-11-10 晚）
+
+发版 `core-v0.3.9`（commit `109f0ee`；main run `42829643036` 最终 success，
+tag run `42831088561` 全绿；6 主包 + 3 调试包，`verify_release.py` 作为 release job
+硬门槛 PASS）。与 0.3.8 的「零行为改动」不同，**0.3.9 有三处真实行为变更**，
+所以真机这轮有两个目标：确认正常卡带逐位等价，以及确认三个修复在 ARM / Android 上生效。
+
+### 修了什么（PATCH 13/14/15）
+
+| 补丁 | 位置 | 作用 |
+|---|---|---|
+| 13 | `runtime/pxtapp/screen---ext/image.cpp` `blit()` | 两条 16.16 定点除法前加早退：目标宽或高不大于 0 直接 `return false`，挡住 `sprite.scale -> 0` 的整数除零 |
+| 14 | `runtime/pxtapp/base/core.cpp` `Math_::idiv()` | `y == 0` 返回 0，挡住 `_fov` 无初值的 `0/0`、`x/0` |
+| 15 | `core/src/vm_host.cpp` + `libretro_core.cpp` | 宿主侧同步预检段表（段链/对齐、`size >= 16`、`size < 32000`），失败时 `retro_load_game()` 返回 **false**、把 `VM error 1014` 打进前端日志；0.3.8 是「返回 true + 黑屏」 |
+
+PATCH 13/14 的触发源是兄弟项目新转卡带：`CrateMaker` / `Crate_Dungeon`（按 A 后
+`sprite.scale` 递减到 0）与 `FPS_game_test_menu_test`（帧 0 就 `x/0`），0.3.8 上
+都是 `SIGFPE` 把宿主进程直接打死。PATCH 15 的触发源是 `sm64thign`（单个 Function
+段 109 952 B ≥ 32000），VM 校验阶段就拒绝、游戏代码一行没执行。
+
+**刻意不放宽 `32000`**：上游给小栈 MCU 设的保守上限，9 台掌机 / Android / Lakka musl 的
+栈大小与函数内 16 位跳转上限未逐一审计，收益只有 1 张卡带；转换侧已用
+「预检 + known_bad + 用户改源码」闭环（`split.pxt64` 实测 122 独立画面 / 94% 非黑）。
+临时二进制诊断副本把上限改到 262144 能让原版出画，但**不进发布物**。
+
+### 部署
+
+| 设备 | 核心路径 | `.info` 路径 | 备份 | md5 / 大小 |
+|---|---|---|---|---|
+| rgb30c (.101, Debian 13) | `~/.config/retroarch/cores/` | 同核心目录 | `~/mca-backups/core-0.3.8/` | `2cb22363…` / 733 432 B |
+| cubexx (.149, muOS) | `/opt/muos/share/core/` | `/opt/muos/share/emulator/retroarch/info/` | `/root/mca-backups/core-0.3.8/` | 同上 |
+| Mi Max 2 (`b2aec2db`, Android 7.1.1) | shell 宿主直跑，不动 RA | — | — | `9ad8e8d7…` / 456 136 B |
+
+两台 Linux 掌机的 `.so` 与 `.info` 已复核：`display_version = "0.3.9"`、`.info` md5
+`9dd3c2d1…`；核心目录只留目标文件，备份移出（避免被前端 glob 成重复条目）。
+cubexx 的 `.info` 与核心**分属两个目录**，仍是最容易漏改的一处；BusyBox 无 `tar -z`，
+沿用 `scp` 直传 + `cp` + `chmod 755`。
+
+### 无头冒烟：golden 三例 + 三张回归夹具
+
+新写 `out/rel039/device_test.sh`，六个用例：
+
+```sh
+run ping      ping.pxt64               300
+run probe     probe.pxt64              120
+run probeA    probe.pxt64              120 --press=A --release=100000
+run scale     crash-scale.pxt64        600 --press=A --press-at=60
+run idiv      crash-idiv.pxt64         600 --press=A --press-at=60
+run oversize  oversize-section.pxt64    60
+```
+
+**rgb30c 与 cubexx 六项结果完全一致**：
+
+| 用例 | rc | 末帧哈希 | load_fail | 说明 |
+|---|---|---|---|---|
+| ping 300 | 0 | `0556e78f7ce0e828f2dc922d210dc047` | 0 | 与 0.3.8 / 0.3.7 桌面基线逐位一致 |
+| probe 120 | 0 | `e82844f7160449d1767aa69afe788800` | 0 | 同上 |
+| probe 120 按 A | 0 | `0eb7884cb40cef0cb549946af3a942ab` | 0 | 同上 |
+| scale 600 | 0 | `3b49f0ed6eca3fb939a705e9e33ed530` | 0 | **PATCH 13**：0.3.8 上按 A 必 SIGFPE |
+| idiv 600 | 0 | `032c69da01ab186c77fc96cae52c86ed` | 0 | **PATCH 14**：0.3.8 上帧 0 就 SIGFPE；现为 VM `PANIC 980` 自动重启、宿主存活、600 帧跑满 |
+| oversize 60 | **3** | none | **1** | **PATCH 15**：`load_game -> FAIL`，不再谎报成功 |
+
+前三项证明三个补丁**没有改变合规卡带的像素输出**；后三项证明修复在 ARM 真机上生效。
+`idiv` 用例的 `PANIC 980` 是 PATCH 14 兜住除零后暴露的游戏自身逻辑问题，不再是
+进程级崩溃，符合 0.3.2 起「panic 不带崩前端」的保证。
+
+### 真 RetroArch 退出：仍是 0
+
+`/tmp/ra_mca.cfg` + video/audio/input 全 null + 独立存档目录，`ping.pxt64` 120 帧，
+两台都：
+
+```
+exit=0
+[INFO] [Environ] SET_PIXEL_FORMAT: RGB565.
+[INFO] [Core] Geometry: 160x120, Aspect: 1.333, FPS: 60.00, Sample rate: 44100.00 Hz.
+[INFO] [Core] Unloading core symbols...
+```
+
+`DF_1_NODELETE` 与 strip 的出厂形态未因本次改动回退（0.3.5 为 139、0.3.7 起为 0）。
+
+### Android（Mi Max 2）21 卡 ×600 帧
+
+```
+ADB=.../adb.exe bash tools/android_test/run_shellhost.sh \
+  --serial b2aec2db --core out/rel039/android/makecode_arcade_libretro.so \
+  --carts ... --baseline ...
+→ 结论「全部一致」，exit=0
+```
+
+21/21 与桌面 x86_64 基线逐位一致，PATCH 13/14/15 在 Android arm64 上同样没有行为回归。
+
+### 结论
+
+3 台在线设备（rgb30c / cubexx / Mi Max 2）全部完成 0.3.9 验证：合规卡带逐位等价、
+三处修复在真机生效、真 RA 退出干净、Android 长测链路一致。其余 7 台 Linux 掌机仍
+关机、停在 0.3.3，开机后按同流程替换即可。**本轮无待办。**
