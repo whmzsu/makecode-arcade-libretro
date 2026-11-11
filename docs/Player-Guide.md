@@ -27,8 +27,10 @@ Find the newest release (currently **core-v0.3.9**). Below it is a row of archiv
 
 | Your device | Download this |
 |---|---|
-| Windows PC (64-bit) | `makecode_arcade_windows-x64.zip` |
+| Windows PC (64-bit x86) | `makecode_arcade_windows-x64.zip` |
+| Windows handheld / PC (ARM, e.g. Surface, Windows on ARM) | `makecode_arcade_windows-arm64.zip` |
 | Linux PC / handheld (x64) | `makecode_arcade_linux-x64.zip` |
+| Linux handheld (ARM, e.g. RK3566 devices like RGB30 / RG CubeXX, Amlogic) | `makecode_arcade_linux-arm64.zip` |
 | Android phone / handheld (64-bit) | `makecode_arcade_android-arm64.zip` |
 | Lakka / LibreELEC systems (musl) | `makecode_arcade_lakka-arm64.zip` |
 
