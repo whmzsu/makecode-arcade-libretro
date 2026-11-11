@@ -359,7 +359,7 @@ def parse_args(argv):
     pos = []
     cfg = {"bmp": None, "press": None, "press_at": 4, "release": None, "dry": False,
            "seq": None, "switch": None, "dlclose": False, "data_dir": None,
-           "turbo": False,
+           "turbo": False, "hold_from": None,
            "random_input": None, "random_interval": 18,
            "hash_every": 0}       # >0：每 N 帧输出一次画面哈希
     for a in argv:
@@ -398,6 +398,9 @@ def parse_args(argv):
             cfg["dlclose"] = True                  # 模拟前端关闭内容后卸载核心库
         elif a == "--dry":
             cfg["dry"] = True
+        elif a.startswith("--hold="):
+            # --hold=N：从 N 帧起把 --press 的键一直按住（测持续移动/相机锁定用）
+            cfg["hold_from"] = int(a.split("=", 1)[1])
         else:
             pos.append(a)
     return pos, cfg
@@ -608,6 +611,8 @@ def main():
             if press_id is not None and cfg["release"] and i == cfg["release"]:
                 HELD.discard(press_id)
                 say(f"   [host] frame {i}: 松开 {cfg['press']}")
+            if press_id is not None and cfg.get("hold_from") is not None and i >= cfg["hold_from"]:
+                HELD.add(press_id)
             lib.retro_run()
             if (i + 1) % 30 == 0:
                 say(f"   [{tag}] frame {i + 1}: video={stats['video_frames']} "

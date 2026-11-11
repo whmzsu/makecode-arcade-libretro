@@ -52,6 +52,46 @@ static core_t g_core;
 static char g_data_dir[512] = ".";
 static int g_quiet = 0;
 
+// ---- 可选输入注入（默认全关，行为等同无参回归宿主）----
+enum { MAX_INJ = 64 };
+static int g_btn_seq_id[MAX_INJ];     // 按键
+static int g_btn_seq_from[MAX_INJ];   // 按下帧
+static int g_btn_seq_to[MAX_INJ];     // 松开帧（from + 时长）
+static int g_seq_n = 0;
+static int g_seq_dur = 20;            // 每次 seq 按压时长（帧），仿 libretro_host.py
+static int g_btn_hold_id[MAX_INJ];    // 从某帧起常按的按键
+static int g_btn_hold_from[MAX_INJ];
+static int g_hold_n = 0;
+// 短按脉冲：在 from 帧按下、from+tap_dur 帧松开（只产生一次上升沿，
+// 对应 pxt-arcade 标题屏/对话框的 Pressed 事件——"按几次 A 进入操控"）
+static int g_btn_tap_id[MAX_INJ];
+static int g_btn_tap_at[MAX_INJ];
+static int g_tap_n = 0;
+static int g_tap_dur = 2;             // 单次短按时长（帧）
+static unsigned g_cur_frame = 0;
+static uint32_t g_input_mask = 0;
+static int g_perframe = 0;            // 每帧打印 FRAME-HASH
+static int g_crop_x = 0, g_crop_y = 0, g_crop_w = 0, g_crop_h = 0;  // 哈希裁切
+
+// 标准 libretro RetroPad 按键 id（与 tools/libretro_host.py 的 JOYPAD 表一致）。
+// 注意：A=8 而不是 0——核心读 A 时查的是 id=8，早期版本错写成 0 导致 A 永远进不了核心。
+static int button_id(const char* name) {
+    if (!name) return -1;
+    if (!strcmp(name, "B")) return 0;
+    if (!strcmp(name, "Y")) return 1;
+    if (!strcmp(name, "SELECT")) return 2;
+    if (!strcmp(name, "START")) return 3;
+    if (!strcmp(name, "UP")) return 4;
+    if (!strcmp(name, "DOWN")) return 5;
+    if (!strcmp(name, "LEFT")) return 6;
+    if (!strcmp(name, "RIGHT")) return 7;
+    if (!strcmp(name, "A")) return 8;
+    if (!strcmp(name, "X")) return 9;
+    if (!strcmp(name, "L")) return 10;
+    if (!strcmp(name, "R")) return 11;
+    return -1;
+}
+
 static void* g_frame;         // 上一帧副本（RGB565）
 static size_t g_frame_cap;
 static unsigned g_frame_w, g_frame_h;
@@ -201,14 +241,28 @@ static void audio_cb(int16_t left, int16_t right) {
     (void)right;
 }
 
-static void input_poll_cb(void) {}
+static void input_poll_cb(void) {
+    g_input_mask = 0;
+    for (int i = 0; i < g_seq_n; ++i)
+        if ((int)g_cur_frame >= g_btn_seq_from[i] && (int)g_cur_frame < g_btn_seq_to[i])
+            g_input_mask |= (1u << g_btn_seq_id[i]);
+    for (int i = 0; i < g_hold_n; ++i)
+        if ((int)g_cur_frame >= g_btn_hold_from[i])
+            g_input_mask |= (1u << g_btn_hold_id[i]);
+    for (int i = 0; i < g_tap_n; ++i)
+        if ((int)g_cur_frame >= g_btn_tap_at[i] && (int)g_cur_frame < g_btn_tap_at[i] + g_tap_dur)
+            g_input_mask |= (1u << g_btn_tap_id[i]);
+}
 
 static int16_t input_state_cb(unsigned port, unsigned device, unsigned index, unsigned id) {
-    (void)port;
-    (void)device;
-    (void)index;
-    (void)id;
-    return 0;   // 回归不对按键做断言，全 0 即可复现基线
+    // 与 libretro_host.py 对齐：不卡 port/device/index，任何查询都返回当前按键位。
+    // id == RETRO_DEVICE_ID_JOYPAD_MASK(256) 时返回 16 位整掩码——pxt-arcade 运行时
+    // 用它做"任意键"检测（标题屏 dismiss / pauseUntilAnyButtonIsPressed 就走这条路）。
+    if (id == 256)
+        return (int16_t)(g_input_mask & 0xFFFFu);
+    if (id < 16)
+        return (g_input_mask >> id) & 1u ? 1 : 0;
+    return 0;
 }
 
 // ---------------------------------------------------------------- 工具
@@ -295,6 +349,36 @@ static int load_core(const char* path, void** handle_out) {
     return 1;
 }
 
+// 计算整帧（或裁切区域）的 MD5，写入 hex[33]。w_out/h_out 返回实际哈希宽高。
+static void frame_hash_hex(char hex[33], int* w_out, int* h_out) {
+    unsigned w = g_frame_w, h = g_frame_h;
+    unsigned x0 = 0, y0 = 0, cw = w, ch = h;
+    if (g_crop_w > 0 && g_crop_h > 0) {
+        x0 = (unsigned)g_crop_x;
+        y0 = (unsigned)g_crop_y;
+        cw = (unsigned)g_crop_w;
+        ch = (unsigned)g_crop_h;
+        if (x0 + cw > w) cw = w - x0;
+        if (y0 + ch > h) ch = h - y0;
+    }
+    size_t n = (size_t)cw * ch * 2;
+    unsigned char* buf = (unsigned char*)malloc(n ? n : 1);
+    if (!buf) {
+        hex[0] = 0;
+        return;
+    }
+    unsigned char* p = buf;
+    for (unsigned y = 0; y < ch; ++y) {
+        const unsigned char* src = (const unsigned char*)g_frame + ((y0 + y) * w + x0) * 2;
+        memcpy(p, src, cw * 2);
+        p += cw * 2;
+    }
+    mca_md5_hex(buf, n, hex);
+    free(buf);
+    if (w_out) *w_out = (int)cw;
+    if (h_out) *h_out = (int)ch;
+}
+
 // ---------------------------------------------------------------- main
 
 int main(int argc, char** argv) {
@@ -312,10 +396,69 @@ int main(int argc, char** argv) {
             snprintf(g_data_dir, sizeof(g_data_dir), "%s", argv[i] + 11);
         else if (strcmp(argv[i], "--quiet") == 0)
             g_quiet = 1;
+        else if (strncmp(argv[i], "--seq=", 6) == 0) {
+            char* s = argv[i] + 6;
+            for (char* tok = strtok(s, ","); tok && g_seq_n < MAX_INJ; tok = strtok(NULL, ",")) {
+                char* at = strchr(tok, '@');
+                if (!at) continue;
+                *at = 0;
+                int id = button_id(tok);
+                int fr = atoi(at + 1);
+                if (id >= 0 && fr >= 0) {
+                    g_btn_seq_id[g_seq_n] = id;
+                    g_btn_seq_from[g_seq_n] = fr;
+                    g_btn_seq_to[g_seq_n] = fr + g_seq_dur;
+                    ++g_seq_n;
+                }
+            }
+        } else if (strncmp(argv[i], "--seq-dur=", 10) == 0) {
+            g_seq_dur = atoi(argv[i] + 10);
+            if (g_seq_dur < 1) g_seq_dur = 1;
+        } else if (strncmp(argv[i], "--hold=", 7) == 0) {
+            char* s = argv[i] + 7;
+            char* at = strchr(s, '@');
+            int from = 0;
+            if (at) {
+                *at = 0;
+                from = atoi(at + 1);
+            }
+            int id = button_id(s);
+            if (id >= 0 && g_hold_n < MAX_INJ) {
+                g_btn_hold_id[g_hold_n] = id;
+                g_btn_hold_from[g_hold_n] = from;
+                ++g_hold_n;
+            }
+        } else if (strcmp(argv[i], "--perframe") == 0) {
+            g_perframe = 1;
+        } else if (strncmp(argv[i], "--tap=", 6) == 0) {
+            char* s = argv[i] + 6;
+            for (char* tok = strtok(s, ","); tok && g_tap_n < MAX_INJ; tok = strtok(NULL, ",")) {
+                char* at = strchr(tok, '@');
+                if (!at) continue;
+                *at = 0;
+                int id = button_id(tok);
+                int fr = atoi(at + 1);
+                if (id >= 0 && fr >= 0 && g_tap_n < MAX_INJ) {
+                    g_btn_tap_id[g_tap_n] = id;
+                    g_btn_tap_at[g_tap_n] = fr;
+                    ++g_tap_n;
+                }
+            }
+        } else if (strncmp(argv[i], "--tap-dur=", 10) == 0) {
+            g_tap_dur = atoi(argv[i] + 10);
+            if (g_tap_dur < 1) g_tap_dur = 1;
+        } else if (strncmp(argv[i], "--crop=", 7) == 0) {
+            sscanf(argv[i] + 7, "%d,%d,%d,%d", &g_crop_x, &g_crop_y, &g_crop_w, &g_crop_h);
+        }
     }
     if (frames <= 0) {
         fprintf(stderr, "[host] frames must be > 0\n");
         return 2;
+    }
+
+    if (g_seq_n || g_hold_n || g_tap_n) {
+        say("[host] input injected: seq=%d(dur=%d) hold=%d tap=%d(dur=%d)",
+            g_seq_n, g_seq_dur, g_hold_n, g_tap_n, g_tap_dur);
     }
 
     void* handle = NULL;
@@ -368,15 +511,24 @@ int main(int argc, char** argv) {
         av.timing.fps, av.timing.sample_rate);
 
     for (int i = 0; i < frames; ++i) {
+        g_cur_frame = (unsigned)i;
         g_core.run();
         note_distinct();
+        if (g_perframe) {
+            char hex[33];
+            frame_hash_hex(hex, NULL, NULL);
+            printf("FRAME-HASH %d %s\n", i, hex);
+            fflush(stdout);
+        }
     }
 
     if (g_frame && g_frame_w && g_frame_h) {
         char hex[33];
-        mca_md5_hex(g_frame, (size_t)g_frame_w * g_frame_h * 2, hex);
+        int cw = 0, ch = 0;
+        frame_hash_hex(hex, &cw, &ch);
+        const char* tag = (g_crop_w > 0 && g_crop_h > 0) ? " [crop]" : "";
         // 这两个字段是脚本 parse 的锚点，格式别改
-        printf("FINAL-FRAME-HASH %s  (%ux%u, 独立帧 %lu)\n", hex, g_frame_w, g_frame_h, g_distinct);
+        printf("FINAL-FRAME-HASH %s  (%ux%u, 独立帧 %lu)%s\n", hex, cw, ch, g_distinct, tag);
     } else {
         printf("FINAL-FRAME-HASH NONE  (核心没有出帧)\n");
     }
