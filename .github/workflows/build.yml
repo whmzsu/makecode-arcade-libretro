@@ -1064,12 +1064,20 @@ jobs:
           tag="${GITHUB_REF#refs/tags/}"
           title="core ${tag#core-} - libretro core (6 platforms, 64-bit)"
           notes=".github/release-notes/${tag}.md"
+          footer=".github/release-notes/PLAYER-GUIDE-FOOTER.md"
+          combined=/tmp/mca-release-notes.md
           if [ -f "$notes" ]; then
-            body=(--notes-file "$notes")
+            cp "$notes" "$combined"
           else
             # 没写专属说明就退回自动生成（commit 列表），至少不是空正文
-            body=(--generate-notes)
+            gh release generate-notes "$tag" > "$combined"
           fi
+          # 每个正式发布都带上玩家指南链接（避免漏写；已含则跳过，重跑不重复）
+          if [ -f "$footer" ] && ! grep -q "docs/Player-Guide.md" "$combined"; then
+            printf '\n' >> "$combined"
+            cat "$footer" >> "$combined"
+          fi
+          body=(--notes-file "$combined")
           if gh release view "$tag" >/dev/null 2>&1; then
             # 重跑（重推 tag / 手动 rerun）时更新而不是报错
             gh release upload "$tag" core/dist/release/*.zip --clobber
