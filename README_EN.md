@@ -482,6 +482,10 @@ is game-agnostic; functions.json is byte-identical).
 
 ## Using with RetroArch
 
+> **Just want to play, no technical details?** See the player guide:
+> - 中文（小白版）：[`docs/玩家指南.md`](docs/玩家指南.md)
+> - English (beginner edition): [`docs/Player-Guide.md`](docs/Player-Guide.md)
+
 > **The core only runs `.pxt64` bytecode, and the file browser only lists
 > `.pxt64`.** A `.png` cartridge contains only **source code** (meta +
 > source), not a runnable game — get a `.pxt64` either by exporting it from the
