@@ -28,10 +28,11 @@
 | 别名 | IP | 设备 | 规格 | 系统 | 核心 | 状态 |
 |---|---|---|---|---|---|---|
 | （Lakka） | 192.168.1.61 | Nintendo Switch OLED（Mariko） | 6 核 2.295G / 3.9GB | Lakka / L4T 4.9.140 | 0.3.3 `lakka-arm64` | 关机 |
-| `r36s`（原） | 192.168.1.81 | 初代 R36S | RK3326 1.30G | Debian | 0.3.3 | **送修** |
+| `r36s`（原） | 192.168.1.81 | 初代 R36S | RK3326 1.30G | Debian | 0.3.9 | 在线 |
 
 - Switch 另有独立的 `nx-v*` 线（Horizon 静态库 + NRO），挂起等上游，产物同为 0.3.3。
 - Lakka 的核心在 `/storage/cores/`，卡带在 `/flash/roms/pxt64_collections/`（20 张）。
+- R36S（原）2026-11-12 维修回归：实机 `strings` 显示此前为 **0.3.2**（台账误记 0.3.3），已升 **0.3.9**；golden 三例末帧哈希与 x86_64 基线逐位一致（0556e78f / e82844f7 / 0eb7884c），3 张 PATCH 夹具（crash-scale / crash-idiv / oversize-section）全过，其中 oversize-section 为预期 `load_game -> FAIL`（VM error 1014）。
 
 ## 3. Android 掌机（3 台）
 
