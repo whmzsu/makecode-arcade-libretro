@@ -234,3 +234,23 @@ malloc 分配的（`vm_host.cpp` 的 `start_vm_from_orig()`），每次重启 ma
    `cleanup done` ⟹ 清理途中 panic 递归；停在 `[host] join old vm thread` 没有
    `join done` ⟹ 旧线程没退出；停在 `[vm] start: unload image` ⟹ 新一局启动失败。
 5. **没有核心选项**：v0.2.4 起全部输入设置走前端 Controls 页（见二.3）。
+
+## 六、超出范围（当前不做）
+
+输入端只对齐官方硬件的单人能力。以下两项经评估**超出当前项目范围，暂不实现**：
+
+1. **联机（RetroArch Netplay）不做**。RetroArch 的联机依赖确定性存档
+   `retro_serialize` / `retro_serialize_size`，本项目两者为 stub
+   （`size=0`，前端据此禁用 Netplay/rewind/runahead，见
+   `core/src/libretro_core.cpp:389`）。官方 MakeCode 真机的"联机"实为
+   **link cable 连接两台物理机**各自跑一份游戏，并非网络对战；在本 core 语境下
+   等价于"两台独立 core 进程 + 串口桥接"，超出 libretro 模型，且其 link 协议后端
+   （`runtime/pxtapp/game/multiplayer.cpp`）目前为空壳实现。
+2. **单机多人（同设备多手柄 / 2-4 人）暂不做**。核心输入 `read_joypad_mask()`
+   硬编码只读 `port=0`（见二.4 位掩码路径，`g_input_state(0, …)`），
+   `multiplayer` 扩展的 C++ 后端也是空实现（`postImage`/`setOrigin` 全空）。
+   要做需核心侧循环多端口 + 补运行时 player 输入分发，属**架构级改造**；且官方真机
+   本身**不支持同机多手柄**（靠两台机 link），这是 sim/PC 专属玩法，与"对齐真机"
+   路线 B 有张力。
+
+> 若未来有需求，两项应作为独立 P3 评估，不混进"对齐官方硬件"的主线。
