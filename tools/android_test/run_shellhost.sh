@@ -5,6 +5,9 @@
 #   ./run_shellhost.sh --rounds 20 --frames 600          # 连续 20 轮，用来做长测
 #   ./run_shellhost.sh --only ping.pxt64 --frames 3000   # 单张卡带跑 50 秒游戏时间
 #
+# 不带 --core 时，自动使用 out/android-manual-test/ 下唯一的 .so（发版只需替换该目录里的文件）。
+# 若目录下有多个 .so，脚本会拒绝并提示用 --core 显式指定，避免静默测到旧版本。
+#
 # 适用条件：设备的 `targetSdkVersion` 小于 30（Android 9 及以前，bionic 不做堆指针打标），
 # 或前端把堆开在低地址。SDK >= 30 的设备上 bionic 会给 malloc 打 top-byte tag，
 # pxt 的 NaN-boxing 必然 PANIC 906 —— 那种设备请用 run_on_device.sh 走 APK 路线。
@@ -20,7 +23,7 @@ PROJ="$(cd "$HERE/../.." && pwd)"
 
 REMOTE=/data/local/tmp/mca
 CARTS=""
-CORE="$PROJ/out/android-manual-test/mca035b_libretro.so"
+CORE=""   # 留空 = 自动探测 out/android-manual-test/ 下唯一的 .so（版本号不写死）
 HOSTBIN="$PROJ/out/android/mca_host"
 FRAMES=600
 ROUNDS=1
@@ -45,6 +48,23 @@ while [ $# -gt 0 ]; do
     *) echo "未知参数: $1" >&2; exit 2 ;;
   esac
 done
+
+# ---- 默认核心：自动探测 out/android-manual-test/ 下唯一的 .so ----
+# 版本号不写死在脚本里：发版只需把新 core 丢进该目录、删掉旧的，脚本自动跟上。
+# 多于一个会明确拒绝（防止静默测到旧版）。
+if [ -z "$CORE" ]; then
+  shopt -s nullglob
+  cores=("$PROJ"/out/android-manual-test/*.so)
+  shopt -u nullglob
+  if [ ${#cores[@]} -eq 0 ]; then
+    echo "out/android-manual-test/ 下没有 .so 核心，请用 --core 指定" >&2; exit 2
+  elif [ ${#cores[@]} -gt 1 ]; then
+    echo "out/android-manual-test/ 下有多个 .so，请删除旧的或显式 --core 指定：" >&2
+    printf '  %s\n' "${cores[@]}" >&2; exit 2
+  fi
+  CORE="${cores[0]}"
+  echo "自动选定核心: $CORE"
+fi
 
 export MSYS_NO_PATHCONV=1
 ADB="${ADB:-$LOCALAPPDATA/Android/Sdk/platform-tools/adb.exe}"
