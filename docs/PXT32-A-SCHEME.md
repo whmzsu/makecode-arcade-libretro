@@ -355,3 +355,41 @@ cpp 实编验证到结构层，真正的 SDK 头/链接需在有工具链的机�
 **剩余**（清单第 3、4 项）：pthread 栈适配（3DS 栈紧，devkitARM/newlib 语义实测）、
 前端实测（静态 core 链进 RetroArch 3DS/Vita 版跑 golden + 8 键）。这两项都
 强依赖真工具链/真机，本环境无法推进。
+
+### 9.5 追加：真工具链实编打通（GitHub Actions 容器，2026-11-16 深夜）
+
+9.4 末尾记录的"真 SDK 实编"阻塞已解除——绕法是 **GitHub Actions 官方容器**：
+本机与 tool69 都访问不了 apt.devkitpro.org（Cloudflare 403），但 GitHub 的
+runner 没这个限制。新增 `.github/workflows/3ds-vita.yml`（仅 workflow_dispatch，
+不进常规 CI、不进发版矩阵）：
+
+- `libretro_ctr.a`：容器 `devkitpro/devkitarm:latest`，**138 925 B，全绿**
+- `libretro_vita.a`：容器 `vitasdk/vitasdk:latest`（注意 vitaSDK 不归
+  devkitPro 发布，`devkitpro/vitasdk` 镜像不存在），**134 840 B，全绿**
+- 校验（沿用 nx.yml 模式 + 平台 hook 断言）：ELF32/ARM、39 对象 = 39 归档成员
+  （防同名覆盖）、25 个 retro_* 全局符号、4 个关键 retro 符号、
+  `mcaCtrInitGcHeap` / `mcaVitaInitGcHeap` / `mca_vm_set_gc_heap` 必须在库内。
+
+注意 workflow 文件必须存在于默认分支才能被 `gh workflow run` 发现——已在
+main 单独 cherry-pick 该 yml（`0b1ed6b`，仅一个 dispatch-only CI 文件，
+构建矩阵未动）；分支本体 `probe/pxt32-3ds-vita` 依旧不合 main。
+
+**首轮实编抓到 5 个只有真工具链才能暴露的问题**（全部已修，逐条零回归）：
+1. `core.cpp` `getConfig`：`vmImg->configData` 是 `int32_t*`，devkitARM 的
+   newlib 里 `int32_t = long int`，隐式转 `int*` 报错 → 显式转换（32 位下
+   int/long 同宽，ABI 无差）。
+2. `scheduler.cpp`：`sys/mman.h` 与 mmap 调用只排除了 PXT64 → 加排除
+   `_PXT_CTR`/`_PXT_VITA`；裸机 gcAllocBlock 的 mmap else 分支改为明确
+   panic（预置堆是唯一入口，预置缺失失败可见）。
+3. `scheduler.cpp` `afterProgramPage`：定义用 `uint32_t` 与 pxtbase.h 的
+   `unsigned` 声明冲突（同 1 的 long int 问题）→ 定义改回 unsigned。
+4. newlib 默认特性可见性不声明 `strdup`（vmcache.cpp）与 `usleep`
+   （vmload.cpp）→ 裸机平台补 extern "C" 声明（实现由 newlib/libctru
+   提供，静态库阶段无需链接）。
+5. `platform_gc_heap.h` hook 声明没包 extern "C" → 符号是 C++ 修饰名，
+   nm 断言查不到 → 补 extern "C"。
+
+64 位宿主 golden（ping 300 帧 `0556e78f…`）在改动后逐位一致——以上修复
+对既有平台零行为变化。原 9.4 清单第 3、4 项中，pthread 的**编译期**风险
+已随实编通过解除（头文件、类型都在），**链接/运行期**栈语义与前端实测
+仍需真机（3DS 栈紧、Vita memblock 接入），是本分支剩余的全部工作。
