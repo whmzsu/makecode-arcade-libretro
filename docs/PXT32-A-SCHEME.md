@@ -313,3 +313,45 @@ GC 堆基址解耦成立：A 方案不再依赖固定地址，注入任意合法
 4. 前端实测：静态 core 链进 RetroArch 3DS/Vita 版，跑 golden + 8 键。
 
 分支不合并 main、不进 CI/发版矩阵；范围决策仍是"不做 32 位发版"。
+
+### 9.4 追加：静态库构建目标 + 平台接入（同日晚）
+
+上面清单的第 1、2 项已实现（代码层面；真工具链实编受环境阻塞，见下）：
+
+**Makefile 目标**（`core/Makefile`，复用 libnx 的 `STATIC_LINKING` 归档规则）：
+- `platform=ctr` → `libretro_ctr.a`，devkitARM `arm-none-eabi-*`，
+  `-march=armv6k -mtune=mpcore -mfloat-abi=hard -mfpu=vfp -DARM11 -D_3DS -D_PXT_CTR`
+- `platform=vita` → `libretro_vita.a`，vitaSDK `arm-vita-eabi-*`，
+  `-march=armv7-a -mtune=cortex-a9 -mfloat-abi=hard -mfpu=neon -DVITA -D_PXT_VITA`
+- 两者都要求环境（`DEVKITPRO` / `VITASDK`），缺则明确报错；产物是静态库，
+  39 个对象扁平化归档（防 base/control.cpp 与 core---vm/control.cpp 重名覆盖），
+  带成员数自检——与 libnx 完全同构。
+
+**平台接入**（不污染公共代码，仿 nx_diag 模式）：
+- 新增 `core/src/platform_gc_heap.h`：非目标平台把
+  `MCA_PLATFORM_GC_HEAP_INIT()` 展开成 `(void)0`（零符号）；3DS/Vita 分别调
+  `mcaCtrInitGcHeap()` / `mcaVitaInitGcHeap()`。
+- `core/src/platform_gc_heap_{ctr,vita}.cpp`：各自 `malloc(64MB)` 连续堆后调
+  `mca_vm_set_gc_heap()` 注入。用 newlib malloc 而非 libctru/vitaSDK 专有 API，
+  减少 SDK 耦合（分配失败只报日志、不 panic，让后续路径可见失败）。
+- `core/src/libretro_core.cpp` 的 `retro_init` 开头调一次
+  `MCA_PLATFORM_GC_HEAP_INIT()`；两个 cpp 加入 `sources.mk`（空 TU，5 入口共用）。
+
+**验证**：
+- 64 位 core 全量重建 + golden 三例逐位一致；两个新 cpp 在非目标平台编成空 TU，
+  产物里查不到平台 hook 符号（零回归）。
+- tool69 用 stub 工具链（软链系统 gcc）跑 `make -n`：ctr/vita 两条路径的编译器
+  路径、ABI flag、39 对象归档命令、产物名、环境守卫全部正确；实编两个 hook cpp
+  确认 `T mcaCtrInitGcHeap()` / `T mcaVitaInitGcHeap()` 定义符号在、
+  未定义引用 `mca_vm_set_gc_heap` 由 scheduler.cpp 提供、无宏时为空 TU。
+
+**真工具链阻塞（environment，非代码）**：tool69 无 devkitPro/vitaSDK；
+`apt.devkitpro.org` 整域被 Cloudflare 403（连 Release 都拿不到）；GitHub release
+大文件下载仅 ~65KB/s（65MB 安装包要 17 分钟，且那个 .pkg 是 macOS 格式用不上）；
+Docker Hub 拉取超时；ghcr.io 可达但没有 devkitpro 官方镜像。故**没法在本环境用真
+devkitARM/vitaSDK 实编**——静态库目标的正确性靠 stub 工具链的 make -n + hook
+cpp 实编验证到结构层，真正的 SDK 头/链接需在有工具链的机器补做。
+
+**剩余**（清单第 3、4 项）：pthread 栈适配（3DS 栈紧，devkitARM/newlib 语义实测）、
+前端实测（静态 core 链进 RetroArch 3DS/Vita 版跑 golden + 8 键）。这两项都
+强依赖真工具链/真机，本环境无法推进。

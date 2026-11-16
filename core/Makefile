@@ -96,7 +96,44 @@ LDFLAGS   += $(COVFLAGS)
 INCFLAGS := -I$(CORE_DIR)/src -I$(PXTAPP_DIR)
 
 # ---------------------------------------------------------------- 目标形态
-ifneq (,$(findstring libnx,$(platform)))
+ifneq (,$(findstring ctr,$(platform)))
+   # Nintendo 3DS (probe/pxt32-3ds-vita)：ARM11 / ARMv6k，devkitARM(newlib)，
+   # 没有 dlopen —— 产物是静态库 libretro_ctr.a，由 RetroArch 的 Makefile.ctr
+   # 连同前端一起链进 .3dsx/.cia（官方约定 core 静态库名 libretro_ctr.a）。
+   # PXT32 的 GC 堆靠 scheduler.cpp 的 mca_vm_set_gc_heap 注入（无 MAP_FIXED mmap），
+   # 平台接入在 platform_gc_heap_ctr.cpp（仅本平台编入）。
+   STATIC_LINKING := 1
+   TARGET  := $(CORE_DIR)/$(TARGET_NAME)_ctr.a
+   ifeq ($(DEVKITPRO),)
+      $(error platform=ctr 需要 DEVKITPRO：devkitPro 装好后 source /etc/profile.d/devkit-env.sh（含 devkitARM + libctru）)
+   endif
+   CC  := $(DEVKITPRO)/devkitARM/bin/arm-none-eabi-gcc
+   CXX := $(DEVKITPRO)/devkitARM/bin/arm-none-eabi-g++
+   AR  := $(DEVKITPRO)/devkitARM/bin/arm-none-eabi-ar
+   CTR_ARCH := -march=armv6k -mtune=mpcore -mfloat-abi=hard -mfpu=vfp
+   # 裸机静态库没有 -fPIC 概念；PIE 不适用于 3DS 的静态链接模型
+   CXXFLAGS := $(filter-out -fPIC,$(CXXFLAGS)) $(CTR_ARCH) -fdata-sections
+   CFLAGS   := $(filter-out -fPIC,$(CFLAGS)) $(CTR_ARCH) -fdata-sections
+   CXXFLAGS += -DARM11 -D_3DS -D__CTR__ -D_PXT_CTR
+   CFLAGS   += -DARM11 -D_3DS -D__CTR__ -D_PXT_CTR
+else ifneq (,$(findstring vita,$(platform)))
+   # PlayStation Vita (probe/pxt32-3ds-vita)：Cortex-A9 / ARMv7-A，vitaSDK(newlib)，
+   # 同样是静态库 libretro_vita.a，链进 RetroArch 的 .vpk。
+   # 工具链前缀 arm-vita-eabi-，由 VITASDK 环境变量定位（vitaSDK 惯例）。
+   STATIC_LINKING := 1
+   TARGET  := $(CORE_DIR)/$(TARGET_NAME)_vita.a
+   ifeq ($(VITASDK),)
+      $(error platform=vita 需要 VITASDK：vitaSDK 装好后 export VITASDK=/path/to/vitasdk)
+   endif
+   CC  := $(VITASDK)/bin/arm-vita-eabi-gcc
+   CXX := $(VITASDK)/bin/arm-vita-eabi-g++
+   AR  := $(VITASDK)/bin/arm-vita-eabi-ar
+   VITA_ARCH := -march=armv7-a -mtune=cortex-a9 -mfloat-abi=hard -mfpu=neon
+   CXXFLAGS := $(filter-out -fPIC,$(CXXFLAGS)) $(VITA_ARCH) -fdata-sections
+   CFLAGS   := $(filter-out -fPIC,$(CFLAGS)) $(VITA_ARCH) -fdata-sections
+   CXXFLAGS += -DVITA -D__VITA__ -D_PXT_VITA
+   CFLAGS   += -DVITA -D__VITA__ -D_PXT_VITA
+else ifneq (,$(findstring libnx,$(platform)))
    # Nintendo Switch：裸机 aarch64（newlib + libnx），没有动态链接。
    # 产物是静态库，由 RetroArch 的 Makefile.libnx 连同自身一起链进
    # retroarch_switch.nro（官方把 core 改名 libretro_libnx.a 放源码根目录）。
