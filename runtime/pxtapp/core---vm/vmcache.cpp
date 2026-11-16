@@ -6,6 +6,11 @@
 #include <sys/stat.h>
 #include <time.h>
 
+#if defined(_PXT_CTR) || defined(_PXT_VITA)
+// newlib 默认特性可见性下不声明 strdup（POSIX 2008），裸机平台显式补声明
+extern "C" char *strdup(const char *);
+#endif
+
 static char *settings_path;
 
 namespace vmcache {

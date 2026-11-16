@@ -845,7 +845,9 @@ void registerWithDal(int id, int event, Action a, int flags) {
     setBinding(id, event, a);
 }
 
-uint32_t afterProgramPage() {
+// pxtbase.h 声明为 unsigned：devkitARM 的 newlib 里 uint32_t 是 long int，
+// 用 uint32_t 定义会与声明冲突（glibc 下两者同为 int，无此问题）
+unsigned afterProgramPage() {
     return 0;
 }
 
