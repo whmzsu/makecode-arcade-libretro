@@ -107,7 +107,9 @@ jobs:
     name: libretro_vita.a (vitaSDK / ARMv7-A + NEON)
     runs-on: ubuntu-24.04
     container:
-      image: devkitpro/vitasdk:latest
+      # 注意：vitaSDK 不归 devkitPro 发布，官方镜像是 vitasdk/vitasdk
+      #（Docker Hub），镜像内已预置 VITASDK 与 PATH
+      image: vitasdk/vitasdk:latest
     steps:
       - uses: actions/checkout@v4
 
