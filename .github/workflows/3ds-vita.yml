@@ -1,0 +1,178 @@
+# 3DS / Vita 静态库实编（probe/pxt32-3ds-vita 分支探索线）
+#
+# 与 NX 同理：3DS/Vita 没有 dlopen，core 只能编成静态库
+#（libretro_ctr.a / libretro_vita.a），由 RetroArch 的 Makefile.ctr /
+# Makefile.vita 连同前端一起链进 .3dsx/.cia / .vpk。
+#
+# 为什么放 CI 而不是本地 tool69：apt.devkitpro.org 在本机/工具机网络均被
+# Cloudflare 403（2026-11-16 实测，换 UA 无效），devkitPro 工具链装不上；
+# GitHub 的 runner 访问该源无限制，官方容器（devkitpro/devkitarm、
+# devkitpro/vitasdk）里工具链是预置的。静态库正确性（SDK 头、ABI、
+# pthread 头、platform hook 编入）只有真工具链能验证。
+#
+# 只做手动触发（workflow_dispatch）：本分支不进常规 CI，按需实编。
+# 与 nx.yml 一致的两级构建里，这里只做第一级（静态库）；
+# 第二级（链进 RetroArch 前端出 .3dsx/.vpk）等静态库稳定后再加。
+name: 3DS/Vita static core
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: 3dsvita-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ------------------------------------------------------------ 3DS
+  core-ctr:
+    name: libretro_ctr.a (devkitARM / ARMv6k)
+    runs-on: ubuntu-24.04
+    container:
+      image: devkitpro/devkitarm:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 编译静态库
+        run: |
+          set -u
+          # 容器里 DEVKITPRO 由 /etc/profile.d/devkit-env.sh 设置，非登录
+          # shell（Actions 的 bash -e）拿不到，显式补上
+          export DEVKITPRO="${DEVKITPRO:-/opt/devkitpro}"
+          export PATH="$DEVKITPRO/devkitARM/bin:$DEVKITPRO/tools/bin:$PATH"
+          echo "DEVKITPRO=$DEVKITPRO"
+          arm-none-eabi-gcc --version | head -1
+          log=/tmp/ctr-build.log
+          if ! make -C core platform=ctr -j"$(nproc)" > "$log" 2>&1; then
+            echo "::error::make 返回非零"
+            grep -nE 'error:|Error [0-9]|undefined reference|cannot find|No such file|No rule' "$log" \
+              | head -20 | cut -c1-300 | sed 's/^/::error::  /'
+            echo "::error::日志尾部（已滤掉编译命令行）："
+            awk 'length($0) < 300' "$log" | tail -20 | cut -c1-300 | sed 's/^/::error::  /'
+            exit 1
+          fi
+          tail -3 "$log"
+          ls -l core/makecode_arcade_libretro_ctr.a
+
+      - name: 校验 .a（架构 + retro_* 符号 + 平台 hook 编入）
+        run: |
+          set +e
+          out=$(mktemp)
+          (
+            set -u
+            export DEVKITPRO="${DEVKITPRO:-/opt/devkitpro}"
+            export PATH="$DEVKITPRO/devkitARM/bin:$DEVKITPRO/tools/bin:$PATH"
+            fail() { echo "FAIL: $*"; exit 1; }
+            a=core/makecode_arcade_libretro_ctr.a
+            [ -f "$a" ] || fail "没生成 $a"
+            obj=$(arm-none-eabi-ar t "$a" | head -1)
+            [ -n "$obj" ] || fail "ar t 读不出成员"
+            arm-none-eabi-ar p "$a" "$obj" > /tmp/probe.o || fail "ar p 提取失败"
+            arm-none-eabi-readelf -h /tmp/probe.o | grep -E 'Class:|Machine:' || fail "readelf 失败"
+            arm-none-eabi-readelf -h /tmp/probe.o | grep -q 'ARM' || fail "不是 ARM 对象"
+            # 对象数 vs 成员数：防止同名对象被 ar 覆盖（会静默丢符号）
+            nobj=$(find core/build/make/ctr/obj -name '*.o' | wc -l | tr -d ' ')
+            narm=$(arm-none-eabi-ar t "$a" | wc -l | tr -d ' ')
+            echo "对象 $nobj 个 / 归档成员 $narm 个"
+            [ "$nobj" -eq "$narm" ] || fail "归档成员数($narm)与对象数($nobj)不一致：有同名成员被覆盖"
+            n=$(arm-none-eabi-nm --defined-only -g "$a" | grep -cE ' T retro_')
+            echo "导出的 retro_* 全局符号: $n 个"
+            [ "$n" -ge 20 ] || fail "retro_* 符号不足（$n）"
+            for s in retro_init retro_run retro_load_game retro_set_environment; do
+              arm-none-eabi-nm --defined-only -g "$a" | grep -qE " T $s\$" || fail "缺 $s"
+            done
+            # 平台接入必须真编进去：hook 定义 + GC 堆注入函数（由 scheduler.cpp 提供）
+            arm-none-eabi-nm --defined-only "$a" | grep -qE ' T mcaCtrInitGcHeap' \
+              || fail "mcaCtrInitGcHeap 没编进去（platform_gc_heap_ctr.cpp 未生效）"
+            arm-none-eabi-nm --defined-only "$a" | grep -qE ' T mca_vm_set_gc_heap' \
+              || fail "mca_vm_set_gc_heap 没编进去（scheduler.cpp PXT32 分支未生效）"
+            echo "平台 hook 校验通过"
+          ) > "$out" 2>&1
+          rc=$?
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::校验失败（rc=$rc）"
+            tail -30 "$out" | cut -c1-300 | sed 's/^/::error::  /'
+            exit 1
+          fi
+          tail -10 "$out"
+
+      - name: 上传 .a
+        uses: actions/upload-artifact@v4
+        with:
+          name: ctr-core-static
+          path: core/makecode_arcade_libretro_ctr.a
+          if-no-files-found: error
+
+  # ------------------------------------------------------------ Vita
+  core-vita:
+    name: libretro_vita.a (vitaSDK / ARMv7-A + NEON)
+    runs-on: ubuntu-24.04
+    container:
+      image: devkitpro/vitasdk:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 编译静态库
+        run: |
+          set -u
+          export VITASDK="${VITASDK:-/opt/vitasdk}"
+          export PATH="$VITASDK/bin:$PATH"
+          echo "VITASDK=$VITASDK"
+          arm-vita-eabi-gcc --version | head -1
+          log=/tmp/vita-build.log
+          if ! make -C core platform=vita -j"$(nproc)" > "$log" 2>&1; then
+            echo "::error::make 返回非零"
+            grep -nE 'error:|Error [0-9]|undefined reference|cannot find|No such file|No rule' "$log" \
+              | head -20 | cut -c1-300 | sed 's/^/::error::  /'
+            echo "::error::日志尾部（已滤掉编译命令行）："
+            awk 'length($0) < 300' "$log" | tail -20 | cut -c1-300 | sed 's/^/::error::  /'
+            exit 1
+          fi
+          tail -3 "$log"
+          ls -l core/makecode_arcade_libretro_vita.a
+
+      - name: 校验 .a（架构 + retro_* 符号 + 平台 hook 编入）
+        run: |
+          set +e
+          out=$(mktemp)
+          (
+            set -u
+            export VITASDK="${VITASDK:-/opt/vitasdk}"
+            export PATH="$VITASDK/bin:$PATH"
+            fail() { echo "FAIL: $*"; exit 1; }
+            a=core/makecode_arcade_libretro_vita.a
+            [ -f "$a" ] || fail "没生成 $a"
+            obj=$(arm-vita-eabi-ar t "$a" | head -1)
+            [ -n "$obj" ] || fail "ar t 读不出成员"
+            arm-vita-eabi-ar p "$a" "$obj" > /tmp/probe.o || fail "ar p 提取失败"
+            arm-vita-eabi-readelf -h /tmp/probe.o | grep -E 'Class:|Machine:' || fail "readelf 失败"
+            arm-vita-eabi-readelf -h /tmp/probe.o | grep -q 'ARM' || fail "不是 ARM 对象"
+            nobj=$(find core/build/make/vita/obj -name '*.o' | wc -l | tr -d ' ')
+            narm=$(arm-vita-eabi-ar t "$a" | wc -l | tr -d ' ')
+            echo "对象 $nobj 个 / 归档成员 $narm 个"
+            [ "$nobj" -eq "$narm" ] || fail "归档成员数($narm)与对象数($nobj)不一致：有同名成员被覆盖"
+            n=$(arm-vita-eabi-nm --defined-only -g "$a" | grep -cE ' T retro_')
+            echo "导出的 retro_* 全局符号: $n 个"
+            [ "$n" -ge 20 ] || fail "retro_* 符号不足（$n）"
+            for s in retro_init retro_run retro_load_game retro_set_environment; do
+              arm-vita-eabi-nm --defined-only "$a" | grep -qE " T $s\$" || fail "缺 $s"
+            done
+            arm-vita-eabi-nm --defined-only "$a" | grep -qE ' T mcaVitaInitGcHeap' \
+              || fail "mcaVitaInitGcHeap 没编进去（platform_gc_heap_vita.cpp 未生效）"
+            arm-vita-eabi-nm --defined-only "$a" | grep -qE ' T mca_vm_set_gc_heap' \
+              || fail "mca_vm_set_gc_heap 没编进去（scheduler.cpp PXT32 分支未生效）"
+            echo "平台 hook 校验通过"
+          ) > "$out" 2>&1
+          rc=$?
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::校验失败（rc=$rc）"
+            tail -30 "$out" | cut -c1-300 | sed 's/^/::error::  /'
+            exit 1
+          fi
+          tail -10 "$out"
+
+      - name: 上传 .a
+        uses: actions/upload-artifact@v4
+        with:
+          name: vita-core-static
+          path: core/makecode_arcade_libretro_vita.a
+          if-no-files-found: error
