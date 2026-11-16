@@ -6,6 +6,14 @@
 #include <unistd.h>
 #endif
 
+#if !defined(_WIN32) && (defined(_PXT_CTR) || defined(_PXT_VITA))
+// newlib 默认特性可见性下不声明 usleep（废弃 POSIX），裸机平台补声明；
+// 实现由 newlib/libctru(libc) 提供，静态库阶段无需链接。
+// 参数用 unsigned 而非 useconds_t：后者同样受特性可见性守卫，未必可见；
+// 32 位平台上 useconds_t 就是 unsigned int，两者 ABI 一致。
+extern "C" int usleep(unsigned);
+#endif
+
 // MCA PATCH 3：VM 线程栈大小（见 spinThread 里的说明）
 #ifndef MCA_VM_STACK_SIZE
 #define MCA_VM_STACK_SIZE (8 * 1024 * 1024)
