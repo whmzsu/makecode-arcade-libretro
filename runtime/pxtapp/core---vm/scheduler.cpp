@@ -16,10 +16,11 @@
 // __MINGW32__ is defined on both mingw32 and mingw64
 #ifdef __MINGW32__
 #include <windows.h>
-#elif !defined(PXT64)
+#elif !defined(PXT64) && !defined(_PXT_CTR) && !defined(_PXT_VITA)
 // 只有 32 位目标才用 mmap 分配 GC 堆（见 gcAllocBlock）；64 位走 malloc，
 // 而裸机工具链（devkitA64/newlib，Switch）没有 sys/mman.h——无条件包含会
-// 让整个文件编不过。
+// 让整个文件编不可。3DS/Vita 静态平台同样没有 mmap，GC 堆走
+// mca_vm_set_gc_heap() 预置注入（见 platform_gc_heap_{ctr,vita}.cpp）。
 #include <sys/mman.h>
 #endif
 #endif
@@ -922,12 +923,21 @@ void *gcAllocBlock(size_t sz) {
         }
         r = currPtr;
     } else {
+#if defined(_PXT_CTR) || defined(_PXT_VITA)
+        // 3DS/Vita 裸机平台没有 mmap：mca_vm_set_gc_heap() 是唯一入口，
+        // 平台接入（platform_gc_heap_{ctr,vita}.cpp）保证 retro_init 时
+        // 预置堆。走到这里说明预置没发生，panic 给出明确信号而不是
+        // 把未初始化的 gcAllocPtr 当堆用。
+        DMESG("gc heap not preset: mca_vm_set_gc_heap() must run before VM start");
+        target_panic(PANIC_INTERNAL_ERROR);
+#else
         r = mmap(currPtr, sz, PROT_READ | PROT_WRITE,
                  MAP_PRIVATE | MAP_ANON | MAP_FIXED, -1, 0);
         if (r == MAP_FAILED) {
             DMESG("mmap %p failed; err=%d", currPtr, errno);
             target_panic(PANIC_INTERNAL_ERROR);
         }
+#endif
     }
 #endif
     currPtr = (uint8_t *)r + sz;
