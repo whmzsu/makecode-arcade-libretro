@@ -51,6 +51,7 @@ typedef struct {
 static core_t g_core;
 static char g_data_dir[512] = ".";
 static int g_quiet = 0;
+static int g_reject_rgb565 = 0;   // --reject-rgb565：模拟只接受 0RGB1555 的前端
 
 // ---- 可选输入注入（默认全关，行为等同无参回归宿主）----
 enum { MAX_INJ = 64 };
@@ -129,7 +130,16 @@ static bool env_cb(unsigned cmd, void* data) {
     switch (cmd) {
         case RETRO_ENVIRONMENT_SET_PIXEL_FORMAT: {
             const enum retro_pixel_format* fmt = (const enum retro_pixel_format*)data;
-            // 只认 RGB565：与 py 宿主一致，核心本来就优先这个
+            // 默认只认 RGB565（与 py 宿主一致）；--reject-rgb565 时反过来只认
+            // 0RGB1555，用来验证核心在前端拒绝 565 后真能降级输出 16bpp。
+            if (g_reject_rgb565) {
+                if (*fmt == RETRO_PIXEL_FORMAT_0RGB1555) {
+                    say("[host] SET_PIXEL_FORMAT = 0RGB1555 (565 rejected)");
+                    return true;
+                }
+                say("[host] SET_PIXEL_FORMAT = %d（拒绝，只用 0RGB1555）", (int)*fmt);
+                return false;
+            }
             if (*fmt == RETRO_PIXEL_FORMAT_RGB565) {
                 say("[host] SET_PIXEL_FORMAT = RGB565");
                 return true;
@@ -396,6 +406,8 @@ int main(int argc, char** argv) {
             snprintf(g_data_dir, sizeof(g_data_dir), "%s", argv[i] + 11);
         else if (strcmp(argv[i], "--quiet") == 0)
             g_quiet = 1;
+        else if (strcmp(argv[i], "--reject-rgb565") == 0)
+            g_reject_rgb565 = 1;
         else if (strncmp(argv[i], "--seq=", 6) == 0) {
             char* s = argv[i] + 6;
             for (char* tok = strtok(s, ","); tok && g_seq_n < MAX_INJ; tok = strtok(NULL, ",")) {

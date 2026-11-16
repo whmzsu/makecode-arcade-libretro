@@ -72,6 +72,190 @@ probe + SELECT 主动 Reset：32 位 2 次 RESET、零 PANIC、末帧 `e82844f7.
   张真实卡带的末帧与 64 位逐位一致；顺带修掉 P1 的重启地址漂移。
 - **代价仍是长期 fork**：`gc.cpp` 的标记读写被重写成旁路表，上游 runtime 每次
   更新都要重新 rebase 这套改动；32 位 number boxing（`NumberBoxes` 段）语义与
-  64 位本就不同，不能指望所有卡带逐位一致；ARM/Android 各 ABI 未逐一验证。
+  64 位本就不同，不能指望所有卡带逐位一致；Linux x86/armhf、ARM Android、
+  Win32 32 位已实测（见第 5–7 节），其余 ABI 仍未逐一验证。
 - **范围决策不变**：15 台设备全 64 位、收益近零，不恢复 32 位发版。本分支作为
   "能不能自己做"的证据保留，不合并 main。
+
+## 5. 追加：Android ARM32 真机验证（2026-11-16）
+
+用 NDK r27c 的 `--target=armv7a-linux-androideabi21` 重编 A 方案 core 与
+`tools/mca_host_android.c` 的 32 位无头宿主，产物均经 `llvm-readelf` 确认是
+`ELF32 / ARM`：
+
+- core：`core/dist/armv7a-linux-androideabi21/makecode_arcade_libretro.so`
+  711536 B，md5 `065bb41e1d6d487ec166c291816c1eb8`
+- host：`out/android/mca_host32` 20044 B，md5 `25e24a3699217a397c6e3f0dfe792d26`
+
+两台在线设备都运行 `armeabi-v7a` 核心（系统主 ABI 仍是 `arm64-v8a`）：
+
+| 设备 | serial | SDK / Android | 结果 |
+|---|---|---|---|
+| MI MAX 2 | `b2aec2db` | 25 / 7.1.1 | 21/21 + golden 三例全部一致，`rc=0` |
+| MI MAX（hydrogen） | `13c2be8e` | 24 / 7.0 | 21/21 + golden 三例全部一致，`rc=0` |
+
+- **21 卡 × 600 帧**：两台都与 `tools/fixtures/android21-baseline.txt` 逐位一致，
+  `rc=0`；结果分别存于 `out/android_test/android32-b2aec2db.txt` /
+  `android32-13c2be8e.txt`。
+- **golden 三例**：`0556e78f…`（ping 300）、`e82844f7…`（probe 120）、
+  `0eb7884c…`（probe 120 + A 从第 4 帧按住）三台口径全部一致；第三例要用
+  `--tap=A@4 --tap-dur=100000` 对齐 Python 宿主的 `--press=A --release=100000`
+  默认第 4 帧按下。
+- **重启路径**：probe 注入 `SELECT@60` 跑 240 帧，两台均 `rc=0`、无 `PANIC`；
+  未观察到核心 `TARGET RESET` 日志，因此这里只作为“无崩溃”的补充观察，
+  不替代 x86 上已完成的主动 Reset 逐位验证。
+- 32 位下卡带 buffer 落在普通高地址（实测 `0xeb24cd00`）也能跑通，印证 A 方案
+  不再依赖 vtable/指针低 28 位假设。该 host 只是测试工具，不在发版路径。
+
+结论：A 方案的 32 位支持在 **ARM32 Android + 真实 bionic** 上同样成立；但范围
+决策仍不变，分支不合并、不进 CI/发版矩阵。
+
+## 6. 追加：Win32 实测（2026-11-16）
+
+本机只有 64 位 Python，无法用 `tools/libretro_host.py` 加载 32 位 DLL；因此新增
+`tools/win32_shim/`（`dlfcn.h` / `dlfcn_shim.c` / `sys/mman.h`），用
+`LoadLibraryA` / `GetProcAddress` 顶替 `dlopen` / `dlsym`，直接把现有的
+`tools/mca_host_android.c` 编成 32 位 PE 宿主。该兼容层只用于测试，不在发版路径。
+
+- core：`core/dist/x86-windows-gnu/makecode_arcade_libretro.dll`
+  PE32 / I386，733696 B，md5 `e2a2c58a5972a890e76f897aff00454a`
+- host：`out/mca_host32.exe` PE32 / I386，284160 B，md5
+  `23c10e50f8d9a7f98e2a950fb8560502`
+
+结果：
+
+- **golden 三例全部逐位一致**：`0556e78f…` / `e82844f7…` / `0eb7884c…`
+  （第三例仍用 `--tap=A@4 --tap-dur=100000` 对齐 Python 宿主口径）。
+- **21 卡 × 600 帧**全部与 `tools/fixtures/android21-baseline.txt` 逐位一致，
+  `rc=0`；结果在 `out/win32_test/carts21.txt`，golden 在
+  `out/win32_test/golden.txt`。
+- 实测日志：镜像在 `0x00e5xxxx`、`number_vt=0x63667f98`、`GC block @ 0x050e1020`，
+  高地址指针不再被误判，说明 A 方案在 Win32 同样摆脱了 vtable 低 28 位假设。
+- 观察项：`platform.h` 对 `__MINGW32__` 走 PXT64 式 `GC_BASE 0x2000000000`，
+  在 32 位 `uintptr_t` 下截成 0；旁路表从 0 开始索引，按当前堆地址会增长到
+  `2^25` 字节量级。功能正确，但有额外内存开销，若未来真要做 Win32 发版，
+  这里值得单独优化。
+
+Win32 32 位 core 至此已能跑通标准回归；范围决策仍不变，不合并、不进 CI/发版矩阵。
+
+## 7. 追加：32 位矩阵补测（2026-11-16 晚）
+
+按“先 Linux armhf，再 Win32/Android 全量与长稳，再 RESET/PANIC 夹具”的顺序补测。
+
+### 7.1 Linux ARM32（armhf）
+
+Zig `arm-linux-gnueabihf.2.17` 全量重编：
+
+- core：`core/dist/arm-linux-gnueabihf.2.17/makecode_arcade_libretro.so`
+  4372432 B，md5 `cf048347248982521180746bd896eee0`
+- host：`out/mca_host_armhf` 1134644 B，md5 `2bddfe5b2a38501d904e39d9a073b7b5`
+- tool69 上用 `qemu-arm-static -L /opt/armhf-sysroot` 运行；sysroot 从 Debian
+  bookworm armhf 的 libc6/libgcc-s1/libstdc++6 解包，不进仓库。
+
+结果：
+
+- golden 三例与 21 卡 × 600 帧全部逐位一致、rc=0
+  （`out/armhf_test/carts21.txt`）。
+- 全量 64 用例（63 卡 + ping）对比 64 位基线：61 一致；
+  `sm64thign` 两边都是 `FAIL`（已知坏卡）；
+  `Horizontally_Spinning_Rat` 是既有墙钟节拍抖动卡；
+  `unique_cube` 在 qemu-armhf 下三次三个不同 hash，而 x86 32/64 各三次稳定
+  `8c40c32e…`。这更像 qemu/极慢卡的计时口径问题，未归因到 GC 旁路表，记为观察项。
+
+### 7.2 Win32 / Android 全量与长稳
+
+- Win32：全量 64 用例中 63 个逐位一致，`sm64thign` 两边 FAIL
+  （`out/win32_test/carts63.txt`）。
+- Android 两台：各 62 个逐位一致；`sm64thign` 两边 FAIL；
+  `Horizontally_Spinning_Rat` 又一次出现墙钟节拍抖动
+  （`out/android_test/android32-*-63.txt`）。`unique_cube` 在两台 Android 上都一致。
+- 长稳：四个环境（armhf qemu、Win32、Mi Max 2、hydrogen）跑
+  `arcade-jumpy-platformer` 18000 帧，末帧均为 `1c0f2dd46f99e3754ecdd0cb966ee3f6`；
+  `Space_Destroyer` 6000 帧 ×2，末帧均为 `a0a25e59d3cbaeef8dad890e2d95d13a`。
+
+### 7.3 PATCH 夹具与 RESET/PANIC
+
+64 位基线（`out/armhf_test/fixture-baseline64.txt`）：
+
+```text
+crash-scale.pxt64       9ebf768b67950bb5673487d0d43e5bb8 rc=0
+crash-idiv.pxt64        032c69da01ab186c77fc96cae52c86ed rc=0
+oversize-section.pxt64  FAIL rc=5
+reset-stress            e82844f7160449d1767aa69afe788800 rc=0
+```
+
+- armhf qemu、Win32、两台 Android：三条 PATCH 夹具全部与基线一致；
+  `oversize-section.pxt64` 按预期 `load_game -> FAIL`，不能当测试失败。
+- 单次 SELECT Reset 在所有 32 位环境均无 PANIC。
+- 21 次连续 SELECT 的 hash 跨宿主不稳定：armhf/部分宿主是 `e82844f7…`，
+  Win32 与 Mi Max 2 出现 `02b0fb5e…`；Win64 自己也随 tap 数量出现同样两种值。
+  这是测试宿主的 RESET 节拍口径问题，不是 32 位专属崩溃；只记为观察项，
+  不据此宣称“高频 RESET 逐位稳定”。
+
+### 7.4 32 位 Android RetroArch
+
+两台设备都列出 `armeabi-v7a,armeabi`，libretro buildbot 也提供
+`RetroArch_ra32.apk`（本次下载 md5 `70fab3634f0249914523e29b31e5ff7e`），
+所以硬件/ROM 层面可以用 32 位 RetroArch。当前两机只装了
+`com.retroarch.aarch64`。本次尝试 `adb install` 与 `pm install` 都被 MIUI 的
+`INSTALL_FAILED_USER_RESTRICTED` 拦截，需要在设备上开启“允许通过 USB 安装”
+并确认弹窗后才能实测前端加载；这一步保持未完成时，不声称 RA 前端已验证。
+
+### 7.5 仍未覆盖
+
+32 位 RetroArch 前端加载、CI/发版矩阵，仍未做或不在这条探针分支范围内。
+
+## 8. 追加：8 键映射 / 坏镜像 / 像素降级 / 路径边界（2026-11-16 晚）
+
+### 8.1 标准 8 键逐键映射
+
+宿主：`--tap=<KEY>@4 --tap-dur=100000`，probe 卡带 120 帧，颜色即映射结果。
+x86-32、armhf qemu、Win32 三个 32 位环境全部与 64 位基线逐位一致
+（`out/input32/`）：
+
+| 键 | 末帧 hash | 键 | 末帧 hash |
+|---|---|---|---|
+| A | `0eb7884c…` | RIGHT | `5ea71e47…` |
+| B | `aab0c6e8…` | START | `3658205f…` |
+| UP | `4b7aded7…` | SELECT | `e82844f7…` |
+| DOWN | `e37d92b3…` | LEFT | `6208cdcc…` |
+
+SELECT 在 probe 上触发 Reset，所以末帧等同无输入——这是预期，不按失败处理。
+
+### 8.2 坏镜像边界
+
+构造 9 个坏镜像（`out/badimg/`）：空文件、16 字节、512 字节垃圾、PNG 改名、
+首段 size 非 8 对齐、首段 size 超大、probe 截断一半、截掉尾部 8 字节、尾部多 1 字节。
+x86-32、armhf qemu、Win32 三个 32 位环境与 64 位基线行为一致
+（`out/input32/badimg-*.txt`）：
+
+- 空文件：宿主读不到内容，`rc=4`；其余结构坏镜像：`load_game -> FAIL, rc=5`。
+- 截断到 section 边界（`truncated` / `trunc-tail` / `unaligned`）核心按 section 链
+  吃掉有效部分正常出帧，hash 与 64 位一致——核心本来就是“按链截断”语义，
+  不把这三条判成失败。
+- 全程无段错误、无越界，坏镜像不会让 32 位 core 崩。
+
+### 8.3 RGB565 → 0RGB1555 降级
+
+给 C 宿主补了 `--reject-rgb565`（`tools/mca_host_android.c`，仅测试宿主），
+模拟前端拒绝 RGB565。核心打 `frontend rejected RGB565; output 0RGB1555` 后
+正常出帧。四环境 golden 三例逐位一致（`out/pixfmt/reject565-*.txt`）：
+
+```text
+ping 300      aec6c1c80bc75cdcab7a26b527b88136
+probe 120     af451361f744bd6e9763e921352d8fee
+probe A@4     181cc2bb2313931d367e3bf0553246b7
+```
+
+### 8.4 路径 / 权限边界
+
+正常目录、多级不存在目录、路径带空格、中文路径（Win32 与 Linux 都测）：
+四个 32 位环境末帧都是 `e82844f7…`，无异常。
+把 data-dir 指向一个普通文件时，核心进入 VM 后 `FAILURE: can't write file`：
+x86-32 Linux / armhf `rc=134`（abort），Win32 `rc=127`。这是核心写存档失败的
+既有行为，32 位与 64 位同口径（Win64 同样 abort），不算 A 方案回归。
+
+### 8.5 覆盖范围更新
+
+至此原先列出的 P0/P1 功能项已全部跑完，只剩前端级 32 位 RetroArch
+（需设备侧确认 USB 安装）和 CI / 发版矩阵（属于范围决策，不在探针分支做）。
