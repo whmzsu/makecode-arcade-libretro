@@ -880,7 +880,16 @@ void *gcAllocBlock(size_t sz) {
     if ((uint8_t *)currPtr - gcBase > (1 << PXT_VM_HEAP_ALLOC_BITS) - (int)sz)
         soft_panic(20);
 #else
-    void *r = mmap(currPtr, sz, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+    // MCA A-scheme (probe/pxt32-gc-a)：必须 MAP_FIXED。重启后 gcAllocPtr 回绕到
+    // GC_BASE，而上一局的 mmap 页还占着这段地址；不带 MAP_FIXED 时内核会另找
+    // 高地址返回（实测第二局块漂到 0xf7f2xxxx），导致两处连锁故障：
+    //   ① GC 旁路表按 (addr-GC_BASE)>>2 索引，高地址算出近 1G 的巨大 idx；
+    //   ② PXT_IS_READONLY 用 mca_gc_top 判区间，漂移块全被当成"只读" → GC
+    //      不扫描 → 重启后游戏状态错乱（PANIC 842/841 循环）。
+    // GC_BASE=0x20000000 是 VM 堆专用空洞（首局能映射即证明空闲），MAP_FIXED
+    // 会先丢弃本堆上一局的旧映射再重映射，地址严格稳定。首局落在空洞同样正常。
+    void *r = mmap(currPtr, sz, PROT_READ | PROT_WRITE,
+                   MAP_PRIVATE | MAP_ANON | MAP_FIXED, -1, 0);
     if (r == MAP_FAILED) {
         DMESG("mmap %p failed; err=%d", currPtr, errno);
         target_panic(PANIC_INTERNAL_ERROR);
