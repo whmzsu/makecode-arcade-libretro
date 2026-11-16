@@ -64,6 +64,9 @@ void operator delete[](void *p) THROW {
 }
 
 uint8_t *gcBase;
+// MCA P1 (probe/pxt32): PXT32 GC 堆的实际堆顶（按需 mmap，无固定上限）。
+// PXT_IS_READONLY() 用它把「堆内可写」与「DSO/镜像只读」精确分开。
+uint8_t *mca_gc_top = (uint8_t *)GC_BASE;
 
 namespace pxt {
 
@@ -884,6 +887,8 @@ void *gcAllocBlock(size_t sz) {
     }
 #endif
     currPtr = (uint8_t *)r + sz;
+    // MCA P1: 堆顶随分配前进，必须在本函数末尾的 isReadOnly(r) 检查之前更新。
+    mca_gc_top = currPtr;
 #endif
 
     if (isReadOnly((TValue)r)) {
@@ -1004,6 +1009,7 @@ static void resetRuntimeState() {
         gcAllocPtr = gcBase;
 #else
     gcAllocPtr = (uint8_t *)GC_BASE;
+    mca_gc_top = gcAllocPtr; // MCA P1: 重启后堆区间回绕到堆首
 #endif
     // 清空 reset 回调槽：registerResetFunction() 在槽满时会 target_panic，
     // 而 systemReset 只调回调不清表，重启时重复注册就会 panic

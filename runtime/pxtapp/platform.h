@@ -100,6 +100,16 @@ extern uint8_t *gcBase;
 #define GC_BASE 0x20000000
 #define GC_PAGE_SIZE 4096
 
+// MCA P1 (probe/pxt32): 32 位通用宿主（Linux/Android）的核心是 ET_DYN DSO，
+// vtable 与 VM 镜像都落在高地址。旧的 ARM 假设「高 4 位非零 = 可写 RAM」
+// 会把它们误判成堆内对象，GC 扫描时改写 vtable 标记位、堆结构随即损坏
+// （实测 sweep() 里 free block 的 sz 变成 1.3 亿）。PXT64 早已改用基于
+// gcBase 的精确堆区间，这里补上等价的动态堆顶 mca_gc_top。
+extern uint8_t *mca_gc_top;
+#define PXT_IS_READONLY(v)                                                                         \
+    (!isPointer(v) || (uintptr_t)v < (uintptr_t)GC_BASE ||                                       \
+     (uintptr_t)v >= (uintptr_t)mca_gc_top)
+
 #endif // PXT32 vs 64
 
 #endif
