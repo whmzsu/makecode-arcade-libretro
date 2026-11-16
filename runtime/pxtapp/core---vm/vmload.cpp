@@ -68,9 +68,29 @@ static void vmStartCore(uint8_t *data, unsigned len) {
 
     gcPreStartup();
 
+#ifdef PXT32
+    // P0 探针（probe/pxt32）：pxtbase.h:525 的 RefObject 构造在
+    // PXT32 && PXT_VM && !PXT_ESP32 下要求 vtable 地址 < 0x10000000
+    // （Cortex-M 的 flash/RAM 布局假设）。32 位 Linux/Android 的 .so 是
+    // ET_DYN，由动态链接器加载到高地址 —— 这条日志用来一次性判定该假设
+    // 是否成立，决定本分支是否值得继续投入 P1。只在 PXT32 构建里编译。
+    dmesg("PXT32: number_vt=0x%x lowaddr=%s", (unsigned)(uintptr_t)&number_vt,
+          ((uint32_t)(uintptr_t)&number_vt & 0xf0000000) ? "VIOLATED" : "ok");
+#endif
+
     auto state = vm_alloc_patch_state();
-    vm_patch_image(state, data, len);
+    const char *patchErr = vm_patch_image(state, data, len);
     vm_finish_patch(state);
+    if (patchErr) {
+        // 上游的 PXT32 分支至今留着 "TODO: NumberBoxes"（非 VM 目标由
+        // embedVTs() 直接填 vtable，VM 目标留 0xffffffff 占位等宿主 patch）。
+        // 原实现丢弃返回值继续 loadVMImage()，最终只报 1064，看不出真正的
+        // 失败点。P0 探针只把补丁错误打出来，**不改变后续装载路径**：
+        // 镜像未打补丁，loadVMImage 仍会报 1064，两条日志一起给出完整链路。
+        // 不在这里提前 return/free，是为了不引入镜像所有权与野指针问题
+        // （该问题连同「load_game 谎报成功」一起留给 P1 处理）。
+        dmesg("image patch failed: %s", patchErr);
+    }
 
     auto img = loadVMImage(data, len);
     if (img->errorCode) {
