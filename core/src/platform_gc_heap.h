@@ -13,10 +13,12 @@
 #pragma once
 
 #if defined(_PXT_CTR)
-void mcaCtrInitGcHeap();
+// extern "C"：符号进静态库后要用 nm 直接可查（校验断言依赖），也与
+// 项目的导出符号风格一致
+extern "C" void mcaCtrInitGcHeap();
 #define MCA_PLATFORM_GC_HEAP_INIT() mcaCtrInitGcHeap()
 #elif defined(_PXT_VITA)
-void mcaVitaInitGcHeap();
+extern "C" void mcaVitaInitGcHeap();
 #define MCA_PLATFORM_GC_HEAP_INIT() mcaVitaInitGcHeap()
 #else
 #define MCA_PLATFORM_GC_HEAP_INIT() ((void)0)
