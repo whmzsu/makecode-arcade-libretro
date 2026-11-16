@@ -99,8 +99,8 @@ static uintptr_t mcaGcTagsWords;
 
 // 返回 p 对应 GC word 的 tag 字节槽，按需扩容（按 2 的幂）。
 static inline uint8_t *mcaGctSlot(void *p) {
-    uintptr_t idx = ((uintptr_t)p - (uintptr_t)GC_BASE) >> 2;
-    GC_CHECK((uintptr_t)p >= (uintptr_t)GC_BASE && idx < (1U << 30), 42);
+    uintptr_t idx = ((uintptr_t)p - (uintptr_t)mca_gc_base) >> 2;
+    GC_CHECK((uintptr_t)p >= (uintptr_t)mca_gc_base && idx < (1U << 30), 42);
     if (idx >= mcaGcTagsWords) {
         uintptr_t ncap = mcaGcTagsWords ? mcaGcTagsWords : (1U << 16);
         while (ncap <= idx)
@@ -118,8 +118,8 @@ static inline uint8_t *mcaGctSlot(void *p) {
 
 // 读 tag 不扩容：不在表内的地址（尚未分配的对象）tag 视为 0。
 static inline uint8_t mcaGct(void *p) {
-    uintptr_t idx = ((uintptr_t)p - (uintptr_t)GC_BASE) >> 2;
-    return (mcaGcTags && (uintptr_t)p >= (uintptr_t)GC_BASE && idx < mcaGcTagsWords)
+    uintptr_t idx = ((uintptr_t)p - (uintptr_t)mca_gc_base) >> 2;
+    return (mcaGcTags && (uintptr_t)p >= (uintptr_t)mca_gc_base && idx < mcaGcTagsWords)
                ? mcaGcTags[idx]
                : 0;
 }

@@ -259,3 +259,57 @@ x86-32 Linux / armhf `rc=134`（abort），Win32 `rc=127`。这是核心写存�
 
 至此原先列出的 P0/P1 功能项已全部跑完，只剩前端级 32 位 RetroArch
 （需设备侧确认 USB 安装）和 CI / 发版矩阵（属于范围决策，不在探针分支做）。
+
+---
+
+## 9. 追加：3DS/Vita 移植起步 —— GC 堆基址解耦（分支 `probe/pxt32-3ds-vita`）
+
+> 2026-11-16 晚。承接前面的性能评估（两台掌机算力都够，门槛在移植形态）：
+> 从 `probe/pxt32-gc-a` 派生本分支，第一步解耦 A 方案的命门——**GC 堆被
+> `mmap(MAP_FIXED)` 钉死在编译期常量 `GC_BASE=0x20000000`**。3DS/Vita 是静态
+> 链接（`libretro_ctr.a` / `libretro_vita.a`），没有这套 mmap，地址也可能被占。
+
+### 9.1 改动：基址从编译期常量改成运行时变量
+
+- `platform.h`：新增 `extern uint8_t *mca_gc_base;`（放分支外，Win32 走 PXT32
+  旁路表的 gc.cpp 也可见）；PXT32 的 `PXT_IS_READONLY` 下界从 `GC_BASE` 改成
+  `mca_gc_base`。PXT64 / `__MINGW32__` 分支一律不碰。
+- `scheduler.cpp`：定义 `mca_gc_base = (uint8_t *)GC_BASE`（**默认值不变**，
+  故既有平台零回归）；`gcAllocPtr` 前移到文件顶部，重启回绕改用 `mca_gc_base`。
+- `gc.cpp`：旁路表索引与下界检查 `(addr - GC_BASE)` → `(addr - mca_gc_base)`。
+- 新增导出函数 `mca_vm_set_gc_heap(void *base, unsigned size)`：静态链接平台在
+  `pxt_vm_start*` 之前调用，指定 VM 堆区间；之后 `gcAllocBlock` 在该区间内
+  bump 分配，**完全不调用 mmap**。未调用时 `mca_gc_heap_limit=0`，原 MAP_FIXED
+  路径一字不变。Win32 PE 下额外加 `__declspec(dllexport)` 才能进导出表。
+
+### 9.2 验证：注入任意堆地址，末帧逐位一致
+
+给测试宿主加 `--gc-heap=SIZE`（`tools/mca_host_android.c`，仅测试、不在发版路径）：
+在 `retro_init` 前 dlsym `mca_vm_set_gc_heap`，注入一块普通 `calloc` 堆（地址随
+ASLR 变化，刻意避开 `0x20000000`）。用 32 位 Linux（纯 PXT32 分支，与 3DS/Vita
+同构，工具机 tool69）验证：
+
+- golden 三例：注入 64MB 堆后 `0556e78f…` / `e82844f7…` / `0eb7884c…`
+  （含 A@4 按键），与基线逐位一致。
+- probe 注入 3 次 + 换 128MB 堆：`e82844f7…` 全一致、稳定。
+- 21 卡 × 600 帧注入堆对比 `android21-baseline.txt`：**21/21 逐位一致**，
+  `bad=0`。
+- 64 位 Windows core 全量重建后 golden 三例仍逐位一致（PXT64 零回归）。
+- 32 位 Win32 core 全量重建 golden 三例一致；但**不要用它验证注入堆**：
+  `__MINGW32__` 下 `gcAllocBlock` 走 xmalloc 分支、不读注入堆，改基址只会让
+  旁路表与堆错位（实测 hash 不稳）。注入路径必须用纯 PXT32 平台验证。
+
+### 9.3 结论与后续
+
+GC 堆基址解耦成立：A 方案不再依赖固定地址，注入任意合法堆后末帧不变——
+3DS/Vita 绕开 mmap 的核心机制已具备。距离可运行还差（按优先级）：
+1. 静态链接形态：`libretro_ctr.a` / `libretro_vita.a` 两个 Makefile 目标 +
+   devkitARM/vitaSDK 工具链（tool69 需装 devkitPro）。
+2. 平台接入：在各自 `retro_init` 前后调 `mca_vm_set_gc_heap` 指向平台合法堆
+   （3DS 线性内存 / Vita `sceKernelAllocMemBlock`），并确认堆容量够 21 卡最大
+   （Mouse_Adventure 382KB，64MB 堆绰绰有余）。
+3. pthread 栈：core 用 `pthread_create` 起 VM/worker 线程，3DS 栈尤其紧，
+   devkitARM/newlib 语义要实测。
+4. 前端实测：静态 core 链进 RetroArch 3DS/Vita 版，跑 golden + 8 键。
+
+分支不合并 main、不进 CI/发版矩阵；范围决策仍是"不做 32 位发版"。

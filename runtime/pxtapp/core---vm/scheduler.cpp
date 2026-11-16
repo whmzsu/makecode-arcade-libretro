@@ -64,9 +64,34 @@ void operator delete[](void *p) THROW {
 }
 
 uint8_t *gcBase;
+// MCA 3DS/Vita (probe/pxt32-3ds-vita)：GC 堆基址从编译期常量改成运行时变量。
+// 默认值仍是 GC_BASE，因此 Linux/Android/Win32 的既有行为逐位不变；静态链接
+// 平台可在 VM 启动前用 mca_vm_set_gc_heap() 把基址设到本平台合法堆地址，
+// 绕开对 MAP_FIXED mmap 的依赖（见 gcAllocBlock）。
+uint8_t *mca_gc_base = (uint8_t *)GC_BASE;
 // MCA P1 (probe/pxt32): PXT32 GC 堆的实际堆顶（按需 mmap，无固定上限）。
 // PXT_IS_READONLY() 用它把「堆内可写」与「DSO/镜像只读」精确分开。
 uint8_t *mca_gc_top = (uint8_t *)GC_BASE;
+// GC 分配游标（原定义在 gcAllocBlock 之前，因 mca_vm_set_gc_heap 需重置而前移）。
+static uint8_t *gcAllocPtr = (uint8_t *)GC_BASE;
+
+// 静态链接平台（3DS/Vita）在 pxt_vm_start* 之前调用，指定 VM 堆的起始地址
+// 与容量；之后 gcAllocBlock 在该区间内 bump 分配，不再调用 mmap。
+// 仅在 PXT32 有定义（64 位平台沿用 malloc/gcBase，不需要也不该调）。
+#ifdef PXT32
+static uintptr_t mca_gc_heap_limit = 0;
+// Windows PE 下 DLLEXPORT(=extern "C") 不足以进导出表，需显式 dllexport，
+// 否则测试宿主 dlsym 不到（Buildbot 64 位不编这个函数，无影响）。
+#ifdef __MINGW32__
+__declspec(dllexport)
+#endif
+DLLEXPORT void mca_vm_set_gc_heap(void *base, unsigned size) {
+    mca_gc_base = (uint8_t *)base;
+    mca_gc_top = (uint8_t *)base;
+    gcAllocPtr = (uint8_t *)base;
+    mca_gc_heap_limit = (uintptr_t)base + size;
+}
+#endif
 
 namespace pxt {
 
@@ -858,9 +883,7 @@ void initRuntime() {
 
 // MCA PATCH 5：GC 分配游标从函数内 static 提到文件级，好让 systemReset()
 // 在重启时把它绕回堆首。64 位下 VM 堆固定 1MB（PXT_VM_HEAP_ALLOC_BITS=20），
-// 不回绕的话重开几次游戏就 soft_panic(20)。
-static uint8_t *gcAllocPtr = (uint8_t *)GC_BASE;
-
+// 不回绕的话重开几次游戏就 soft_panic(20)。游标定义已前移到文件顶部。
 void *gcAllocBlock(size_t sz) {
 #ifdef PXT_ESP32
     void *r = xmalloc(sz);
@@ -888,11 +911,23 @@ void *gcAllocBlock(size_t sz) {
     //      不扫描 → 重启后游戏状态错乱（PANIC 842/841 循环）。
     // GC_BASE=0x20000000 是 VM 堆专用空洞（首局能映射即证明空闲），MAP_FIXED
     // 会先丢弃本堆上一局的旧映射再重映射，地址严格稳定。首局落在空洞同样正常。
-    void *r = mmap(currPtr, sz, PROT_READ | PROT_WRITE,
-                   MAP_PRIVATE | MAP_ANON | MAP_FIXED, -1, 0);
-    if (r == MAP_FAILED) {
-        DMESG("mmap %p failed; err=%d", currPtr, errno);
-        target_panic(PANIC_INTERNAL_ERROR);
+    void *r;
+    if (mca_gc_heap_limit) {
+        // MCA 3DS/Vita：平台已用 mca_vm_set_gc_heap() 预置堆区间，在本区间内
+        // bump 分配，完全不碰 mmap。越界直接 panic，避免静默写出堆外。
+        if ((uintptr_t)currPtr + sz > mca_gc_heap_limit) {
+            DMESG("gc heap exhausted: %p + %u > %p", currPtr, (unsigned)sz,
+                  (void *)mca_gc_heap_limit);
+            target_panic(PANIC_INTERNAL_ERROR);
+        }
+        r = currPtr;
+    } else {
+        r = mmap(currPtr, sz, PROT_READ | PROT_WRITE,
+                 MAP_PRIVATE | MAP_ANON | MAP_FIXED, -1, 0);
+        if (r == MAP_FAILED) {
+            DMESG("mmap %p failed; err=%d", currPtr, errno);
+            target_panic(PANIC_INTERNAL_ERROR);
+        }
     }
 #endif
     currPtr = (uint8_t *)r + sz;
@@ -1017,8 +1052,8 @@ static void resetRuntimeState() {
     if (gcBase)
         gcAllocPtr = gcBase;
 #else
-    gcAllocPtr = (uint8_t *)GC_BASE;
-    mca_gc_top = gcAllocPtr; // MCA P1: 重启后堆区间回绕到堆首
+    gcAllocPtr = mca_gc_base; // 重启回绕到运行时基址（未注入时 = GC_BASE，零回归）
+    mca_gc_top = gcAllocPtr;  // MCA P1: 重启后堆区间回绕到堆首
 #endif
     // 清空 reset 回调槽：registerResetFunction() 在槽满时会 target_panic，
     // 而 systemReset 只调回调不清表，重启时重复注册就会 panic

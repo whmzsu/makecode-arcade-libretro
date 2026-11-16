@@ -86,6 +86,11 @@ void pxt_vm_request_reset(void); // 置重启标志，VM 线程在主循环顶�
 #endif
 #endif
 
+// MCA 3DS/Vita (probe/pxt32-3ds-vita)：GC 堆基址运行时变量，定义于 scheduler.cpp。
+// 所有平台都有此符号（PXT64 下不使用），故声明放在分支外，保证 Win32 下走
+// PXT32 旁路表的 gc.cpp 也能看到。
+extern uint8_t *mca_gc_base;
+
 #if defined(PXT64) || defined(__MINGW32__)
 #define GC_BASE 0x2000000000
 #define GC_PAGE_SIZE (64 * 1024)
@@ -106,8 +111,12 @@ extern uint8_t *gcBase;
 // （实测 sweep() 里 free block 的 sz 变成 1.3 亿）。PXT64 早已改用基于
 // gcBase 的精确堆区间，这里补上等价的动态堆顶 mca_gc_top。
 extern uint8_t *mca_gc_top;
+// MCA 3DS/Vita (probe/pxt32-3ds-vita)：GC 堆基址从编译期常量改为运行时变量。
+// 默认值仍是 GC_BASE（见 scheduler.cpp 定义），故 Linux/Android/Win32 的既有
+// 行为逐位不变。静态链接平台（无 MAP_FIXED mmap，0x20000000 可能被占）可在
+// VM 启动前用 mca_vm_set_gc_heap() 把基址改到本平台合法堆地址。
 #define PXT_IS_READONLY(v)                                                                         \
-    (!isPointer(v) || (uintptr_t)v < (uintptr_t)GC_BASE ||                                       \
+    (!isPointer(v) || (uintptr_t)v < (uintptr_t)mca_gc_base ||                                    \
      (uintptr_t)v >= (uintptr_t)mca_gc_top)
 
 #endif // PXT32 vs 64
