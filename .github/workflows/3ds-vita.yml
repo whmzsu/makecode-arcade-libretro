@@ -100,9 +100,19 @@ jobs:
           set -u
           export DEVKITPRO="${DEVKITPRO:-/opt/devkitpro}"
           export PATH="$DEVKITPRO/devkitARM/bin:$DEVKITPRO/tools/bin:$PATH"
-          # makerom/bannertool 在 3ds-cia-tools 包，devkitarm 容器默认不带
-          dkp-pacman -Sy --noconfirm 3ds-cia-tools
+          # makerom/bannertool 不在 devkitPro pacman 源（dkp-pacman 报
+          # target not found，2026-11-17 实测），按社区惯例从 GitHub release 取
+          mkdir -p /tmp/ciatools && cd /tmp/ciatools
+          curl -fsSL -o makerom.zip \
+            https://github.com/3DSGuy/Project_CTR/releases/download/makerom-v0.18.4/makerom-v0.18.4-ubuntu_x86_64.zip
+          unzip -o makerom.zip -d makerom
+          install -m 755 makerom/makerom "$DEVKITPRO/tools/bin/makerom"
+          curl -fsSL -o bannertool.zip \
+            https://github.com/Steveice10/bannertool/releases/download/1.2.0/bannertool.zip
+          unzip -o bannertool.zip -d bannertool
+          install -m 755 bannertool/linux-x86_64/bannertool "$DEVKITPRO/tools/bin/bannertool"
           makerom -h 2>&1 | head -2 || true
+          cd "$GITHUB_WORKSPACE"
           log=/tmp/ctr-fe.log
           if ! make -C frontends/ctr all cia > "$log" 2>&1; then
             echo "::error::前端构建失败"
