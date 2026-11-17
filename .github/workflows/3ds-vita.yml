@@ -275,20 +275,6 @@ jobs:
           fi
           ls -l core/makecode_arcade_libretro_ctr.a
 
-      - name: 装 makerom/bannertool（CIA 打包，取法同 core-ctr job）
-        run: |
-          set -u
-          export DEVKITPRO="${DEVKITPRO:-/opt/devkitpro}"
-          mkdir -p /tmp/ciatools && cd /tmp/ciatools
-          curl -fsSL -o makerom.zip \
-            https://github.com/3DSGuy/Project_CTR/releases/download/makerom-v0.18.4/makerom-v0.18.4-ubuntu_x86_64.zip
-          unzip -o makerom.zip -d makerom
-          install -m 755 makerom/makerom "$DEVKITPRO/tools/bin/makerom"
-          curl -fsSL -o bannertool.zip \
-            https://github.com/diasurgical/bannertool/releases/download/1.2.0/bannertool.zip
-          unzip -o bannertool.zip -d bannertool
-          install -m 755 bannertool/linux-x86_64/bannertool "$DEVKITPRO/tools/bin/bannertool"
-
       - name: 拉 RetroArch（pin ${{ github.event.inputs.retroarch_ref || 'v1.22.2' }}）
         env:
           REF: ${{ github.event.inputs.retroarch_ref || 'v1.22.2' }}
@@ -301,6 +287,15 @@ jobs:
             https://github.com/libretro/RetroArch.git /tmp/ra
           git -C /tmp/ra log --oneline -1
 
+      - name: 装 picasso（shader 编译器，v1.22.2 无 prebuilt fallback）
+        run: |
+          set -u
+          # v1.22.2 的 Makefile.ctr 无条件编 ctr_sprite.o（需要 picasso+bin2s），
+          # devkitarm 容器没有 picasso → Error 127（首跑实测）；
+          # tip 上才有"缺 picasso 用 prebuilt .S"的回退，picasso 仍装上更稳
+          dkp-pacman -Syy --noconfirm 3ds-picasso 2>&1 | tail -3
+          "${DEVKITPRO:-/opt/devkitpro}/tools/bin/picasso" --help 2>&1 | head -1 || true
+
       - name: 链 RA 3DS 完整前端（.3dsx + .cia）
         run: |
           set -u
@@ -309,6 +304,7 @@ jobs:
           # "recipe commences before first target" 的迷惑错误，tool69 实测）
           export DEVKITARM="$DEVKITPRO/devkitARM"
           export PATH="$DEVKITARM/bin:$DEVKITPRO/tools/bin:$PATH"
+          # CIA 打包用 RA 仓库自带的 pkg/ctr/tools/makerom-linux/bannertool-linux
           cp core/makecode_arcade_libretro_ctr.a /tmp/ra/libretro_ctr.a
           log=/tmp/ra-ctr.log
           if ! make -f /tmp/ra/Makefile.ctr -C /tmp/ra -j"$(nproc)" > "$log" 2>&1; then

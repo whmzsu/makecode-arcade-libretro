@@ -74,7 +74,8 @@ make -C vitaGL install
 
 # ---- 验收 ----
 echo "== 验收"
-for f in libvitaGL.a libvitashark.a libmath_neon.a libSceShaccCgExt.a libtaihen_stub.a; do
+# 注意 math-neon 装出来的名字是 libmathneon.a（无下划线，2026-11-17 CI 实测）
+for f in libvitaGL.a libvitashark.a libmathneon.a libSceShaccCgExt.a libtaihen_stub.a; do
   ls -l "$PREFIX/lib/$f" || exit 1
 done
 echo "vitaGL 依赖链安装完成"
