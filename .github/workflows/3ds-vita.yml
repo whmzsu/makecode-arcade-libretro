@@ -243,6 +243,24 @@ jobs:
           tail -5 "$log"
           ls -l frontends/vita/mca_vita.vpk
 
+      - name: 校验测试包 vpk（eboot fSELF / icon0 / TITLE_ID）
+        run: |
+          set -euo pipefail
+          vpk=frontends/vita/mca_vita.vpk
+          fail() { echo "::error::$1"; exit 1; }
+          unzip -l "$vpk" | grep -q 'sce_sys/param.sfo' || fail "vpk 缺 param.sfo"
+          unzip -l "$vpk" | grep -q 'sce_sys/icon0.png'  || fail "vpk 缺 icon0"
+          # eboot 必须是 fSELF（SCE\x00 头）。血泪：-b 直接塞 .velf（\x7FELF）
+          # 的包 VitaShell 装不上。
+          unzip -p "$vpk" eboot.bin > /tmp/eboot.bin
+          printf 'SCE\x00' > /tmp/sce-magic
+          head -c 4 /tmp/eboot.bin > /tmp/eboot-head
+          cmp -s /tmp/sce-magic /tmp/eboot-head \
+            || { od -An -tx1 -N8 /tmp/eboot.bin; fail "eboot.bin 头不是 fSELF（SCE\\x00）"; }
+          echo "eboot.bin: $(stat -c %s /tmp/eboot.bin) B, fSELF 头正确"
+          unzip -p "$vpk" sce_sys/param.sfo | grep -aq MCAV00001 \
+            || fail "param.sfo TITLE_ID 不是 MCAV00001"
+
       - name: 上传 .a
         uses: actions/upload-artifact@v4
         with:

@@ -6,7 +6,7 @@ endif
 PREFIX := $(VITASDK)/bin/arm-vita-eabi-
 
 TARGET     := mca_vita
-TITLE_ID   := MCA00001
+TITLE_ID   := MCAV00001   # Vita TITLE_ID 是 9 位（4 字母前缀 + 5 位数字），8 位会装不上
 APP_VER    := 00.10
 TITLE      := MCA Core Test
 CORE_A     := ../../core/makecode_arcade_libretro_vita.a
@@ -27,8 +27,15 @@ all: $(TARGET).vpk
 $(TARGET).velf: $(TARGET).elf
 	$(VITASDK)/bin/vita-elf-create $< $@
 
-$(TARGET).vpk: $(TARGET).velf param.sfo
-	$(VITASDK)/bin/vita-pack-vpk -s param.sfo -b $(TARGET).velf $@
+# eboot 必须是 fSELF（SCE\0 头），裸 .velf/\x7FELF 直塞 vpk 会安装失败。
+# -s = safe self（无特权 API 标志，普通 homebrew 标准用法）
+$(TARGET).self: $(TARGET).velf
+	$(VITASDK)/bin/vita-make-fself -s $< $@
+
+# -a 语义是 --add src=dst（把前端目录的 icon0.png 放进包内 sce_sys/）
+$(TARGET).vpk: $(TARGET).self param.sfo
+	$(VITASDK)/bin/vita-pack-vpk -s param.sfo -b $(TARGET).self \
+		-a icon0.png=sce_sys/icon0.png $@
 
 param.sfo:
 	$(VITASDK)/bin/vita-mksfoex -s TITLE_ID=$(TITLE_ID) -s APP_VER=$(APP_VER) "$(TITLE)" $@
@@ -40,6 +47,6 @@ $(TARGET).elf: $(OBJS) $(CORE_A)
 	$(PREFIX)gcc $(CFLAGS) -c $< -o $@
 
 clean:
-	rm -f $(OBJS) $(TARGET).elf $(TARGET).velf param.sfo $(TARGET).vpk
+	rm -f $(OBJS) $(TARGET).elf $(TARGET).velf $(TARGET).self param.sfo $(TARGET).vpk
 
 .PHONY: all clean
