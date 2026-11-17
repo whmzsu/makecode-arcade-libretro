@@ -502,3 +502,20 @@ Found；②`EnableL2Memory` 键 makerom 不认；③还缺 `Priority` 与
 `SystemCallAccess`。最终按 PKSM assets/app.rsf 结构重写：全用户态 SVC 表 +
 本前端所需服务（fs:USER/gsp::Gpu/gsp::Lcd/hid:USER/dsp::DSP/APT:U/cfg:u）
 + 对应 Dependency 模块。bannertool makesmdh 参数按语言命名（-es/-el/-ep）。
+
+### 11.2 暂停态卡带列表菜单（2026-11-17 补）
+
+两个前端加同一套交互：**START+SELECT 同按进出**（两键同 held 且至少一键
+新按下才算，避免先后按误触发）。菜单态**不跑 `retro_run`**，VM 状态原地
+保留，退出即续玩；列表按文件名字典序，当前卡带标 `*`，光标 `>`，22 行
+滚动窗口。装载复用 `load_cart()`（换卡带先 `retro_unload_game`）。
+
+- 3DS：底屏 console 渲染（`consoleClear` + printf）。
+- Vita：内嵌 `frontends/vita/font8x8.h`（dhepper/font8x8，Public Domain，
+  仅 ASCII 可打印区 96 字形 × 8 字节）直绘 `g_fb`，深底 + 光标高亮条，
+  退出菜单 `blit_frame()` 恢复游戏画面。
+
+CI：vita job 补前端构建（`make -C frontends/vita` 默认目标即 vpk）+
+`vita-testpack` artifact。commit `31c0fab`（run `43998990453` 全绿）。
+包更新：3dsx 330 788 B（`995e00bc…`）、cia 347 072 B（`ee94c4f3…`）、
+vpk 236 332 B（`bc89373b…`）。
