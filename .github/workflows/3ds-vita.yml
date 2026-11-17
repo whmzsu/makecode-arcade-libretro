@@ -95,11 +95,37 @@ jobs:
           fi
           tail -10 "$out"
 
+      - name: 编译前端（最小 libretro 前端，.3dsx + .cia）
+        run: |
+          set -u
+          export DEVKITPRO="${DEVKITPRO:-/opt/devkitpro}"
+          export PATH="$DEVKITPRO/devkitARM/bin:$DEVKITPRO/tools/bin:$PATH"
+          # makerom/bannertool 在 3ds-cia-tools 包，devkitarm 容器默认不带
+          dkp-pacman -Sy --noconfirm 3ds-cia-tools
+          makerom -h 2>&1 | head -2 || true
+          log=/tmp/ctr-fe.log
+          if ! make -C frontends/ctr all cia > "$log" 2>&1; then
+            echo "::error::前端构建失败"
+            tail -30 "$log" | cut -c1-300 | sed 's/^/::error::  /'
+            exit 1
+          fi
+          tail -5 "$log"
+          ls -l frontends/ctr/mca_ctr.3dsx frontends/ctr/mca_ctr.cia
+
       - name: 上传 .a
         uses: actions/upload-artifact@v4
         with:
           name: ctr-core-static
           path: core/makecode_arcade_libretro_ctr.a
+          if-no-files-found: error
+
+      - name: 上传 3DS 测试包（3dsx + cia）
+        uses: actions/upload-artifact@v4
+        with:
+          name: ctr-testpack
+          path: |
+            frontends/ctr/mca_ctr.3dsx
+            frontends/ctr/mca_ctr.cia
           if-no-files-found: error
 
   # ------------------------------------------------------------ Vita

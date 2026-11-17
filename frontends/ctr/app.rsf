@@ -1,0 +1,13 @@
+# makerom rsf 模板：MCA 最小前端（3DS homebrew CIA）
+BasicInfo:
+  Title        : "MCA Core Test"
+  ProductCode  : "CTR-P-MCA1"
+  Logo         : "None"
+
+TitleInfo:
+  UniqueId     : '0xF1CA0'
+  Category     : 'Application'
+
+SystemControlInfo:
+  SaveDataSize : 0KB
+  RemasterVersion : 10

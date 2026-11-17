@@ -19,7 +19,25 @@ LIBS      := $(CTR_LIB) -lsysbase -lctru -lm
 
 OBJS      := main.o
 
+# CIA 打包（需要 tools/bin 里有 makerom/bannertool：dkp-pacman -S 3ds-cia-tools；
+# devkitarm 容器默认不带，CI 的 ctr job 会先装）
+APP_TITLE := MCA Core Test
+
 all: $(TARGET).3dsx
+cia: $(TARGET).cia
+
+$(TARGET).cia: $(TARGET).elf $(TARGET).smdh $(TARGET).bnr app.rsf
+	$(TOOLBIN)/makerom -f cia -o $@ -elf $(TARGET).elf \
+	  -icon $(TARGET).smdh -banner $(TARGET).bnr \
+	  -rsf app.rsf -DAPP_TITLE="$(APP_TITLE)"
+
+$(TARGET).smdh: icon48.png
+	$(TOOLBIN)/bannertool makesmdh -s "$(APP_TITLE)" \
+	  -l "MCA libretro core 最小前端（PXT32 静态库）" \
+	  -st "mca-arcade" -i $< -o $@
+
+$(TARGET).bnr: banner256.png
+	$(TOOLBIN)/bannertool makebanner -i $< -o $@
 
 $(TARGET).3dsx: $(TARGET).elf
 	$(TOOLBIN)/3dsxtool $< $@
@@ -31,6 +49,7 @@ $(TARGET).elf: $(OBJS) $(CORE_A)
 	$(PREFIX)gcc $(CFLAGS) -c $< -o $@
 
 clean:
-	rm -f $(OBJS) $(TARGET).elf $(TARGET).3dsx
+	rm -f $(OBJS) $(TARGET).elf $(TARGET).3dsx \
+	      $(TARGET).smdh $(TARGET).bnr $(TARGET).cia
 
-.PHONY: all clean
+.PHONY: all cia clean
