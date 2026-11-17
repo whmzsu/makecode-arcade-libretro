@@ -523,7 +523,11 @@ class RefObject {
 
     RefObject(const VTable *vt) {
 #if defined(PXT32) && defined(PXT_VM) && !defined(PXT_ESP32)
-        if ((uint32_t)vt & 0xf0000000)
+        // MCA P1 (probe/pxt32): 原断言要求 vtable < 0x10000000，那是
+        // Cortex-M 的 flash/RAM 布局假设。32 位 Linux/Android 的核心是
+        // ET_DYN DSO，vtable 落在高地址必然违规；但 TValue 只用低 2 位做
+        // tag、getVTable() 只 mask bit0，高位没有编码语义。放宽为非空检查。
+        if (!vt)
             target_panic(PANIC_INVALID_VTABLE);
 #endif
         vtable = vt;

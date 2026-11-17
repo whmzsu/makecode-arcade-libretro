@@ -28,20 +28,22 @@
 | 别名 | IP | 设备 | 规格 | 系统 | 核心 | 状态 |
 |---|---|---|---|---|---|---|
 | （Lakka） | 192.168.1.61 | Nintendo Switch OLED（Mariko） | 6 核 2.295G / 3.9GB | Lakka / L4T 4.9.140 | 0.3.3 `lakka-arm64` | 关机 |
-| `r36s`（原） | 192.168.1.81 | 初代 R36S | RK3326 1.30G | Debian | 0.3.3 | **送修** |
+| `r36s`（原） | 192.168.1.81 | 初代 R36S | RK3326 1.30G | Debian | 0.3.9 | 在线 |
 
 - Switch 另有独立的 `nx-v*` 线（Horizon 静态库 + NRO），挂起等上游，产物同为 0.3.3。
 - Lakka 的核心在 `/storage/cores/`，卡带在 `/flash/roms/pxt64_collections/`（20 张）。
+- R36S（原）2026-11-12 维修回归：实机 `strings` 显示此前为 **0.3.2**（台账误记 0.3.3），已升 **0.3.9**；golden 三例末帧哈希与 x86_64 基线逐位一致（0556e78f / e82844f7 / 0eb7884c），3 张 PATCH 夹具（crash-scale / crash-idiv / oversize-section）全过，其中 oversize-section 为预期 `load_game -> FAIL`（VM error 1014）。
 
-## 3. Android 掌机（3 台）
+## 3. Android 掌机（4 台）
 
 | 别名 | adb id | 设备 | 系统 | 屏幕 | 核心 | 用途 |
 |---|---|---|---|---|---|---|
 | G Cloud | `2429TNR40628` | 罗技 G Cloud `GR0006` | Android 11 / SDK 30 | 1080×1920 @320 | 0.3.5 | 无 root，RA 里能跑；shell 宿主必 906 |
 | `rtwo` | `ZY22GCKKB4` | Motorola XT2301-5（骁龙 8 Gen 2） | **Android 16 / SDK 36** | — | 0.3.5 | RA 1.21.0 是 `targetSdk=28` 才跑得起来 |
 | `oxygen` | `b2aec2db` | Xiaomi Mi Max 2（骁龙 625） | **Android 7.1.1 / SDK 25** | — | **0.3.9** | **常规长测机**：3.7GB / data 43GB |
+| `hydrogen` | `13c2be8e` | Xiaomi Mi Max（一代，骁龙 650） | **Android 7.0 / SDK 24** | — | **0.3.9** | shell 宿主 21/21 一致（SDK<30 无 TBI） |
 
-合计 **14 台**：9 台 Linux 掌机 + 1 台 Switch(Lakka) + 1 台送修 + 3 台 Android。
+合计 **15 台**：9 台 Linux 掌机 + 1 台 Switch(Lakka) + 1 台送修 + 4 台 Android。
 
 2026-11-09 用 0.3.7 的 `android-arm64` 核心（md5 `8e3e37c383cd290a72cf34f901aa5935`，
 455 136 B）在 Mi Max 2 上跑 21 张卡带 ×600 帧：**21/21 与桌面 x86_64 基线逐位一致**，
@@ -55,6 +57,10 @@
 > PATCH 13/14/15 后体积 +1 000 B。2026-11-10 晚在 Mi Max 2 上跑 21 卡 ×600 帧：
 > **21/21 与桌面 x86_64 基线逐位一致**（`run_shellhost.sh` 结论「全部一致」、exit=0）。
 > 注意 Android 上跑的是 shell 宿主、不动 RA 里的核心，所以这里验的是发行包里的 `.so`。
+>
+> 2026-11-14 在小米 Mi Max 一代（SDK 24，`hydrogen`/`13c2be8e`，shell 域）上同一套 21 卡 ×600 帧：
+> **21/21 与桌面 x86_64 基线逐位一致**（`run_shellhost.sh` 结论「全部一致」、exit=0）。
+> 证明 0.3.9 在更老的 SDK 24 上也等价，TBI/906 未触发（SDK<30 预期内），可作第二台 Android 回归机。
 
 ## 4. 版本登记（linux-arm64 核心）
 

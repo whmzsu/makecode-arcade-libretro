@@ -1771,6 +1771,38 @@ ADB=.../adb.exe bash tools/android_test/run_shellhost.sh \
 
 21/21 与桌面 x86_64 基线逐位一致，PATCH 13/14/15 在 Android arm64 上同样没有行为回归。
 
+### R36S（维修回归）0.3.9 验收（2026-11-12）
+
+设备：初代 R36S（RK3326，全系列下限机型），`192.168.1.81`，ssh 别名 `r36s`。
+此前台账误记 0.3.3，实机 `strings` 显示维修前实为 **0.3.2**；维修回来后直接对齐到 0.3.9
+（其余在线机已在 0.3.9）。
+
+#### 部署
+- 备份旧核心：`makecode_arcade_libretro.so.bak032`
+- 推送：`out/rel039/arm64/makecode_arcade_libretro.so`（733432 B，strip 版，md5 `2cb22363`）
+- 安装路径：`/home/ark/.config/retroarch/cores/`，`strings` 确认 `0.3.9`
+
+#### golden 三例（与 x86_64 基线逐位一致）
+| 用例 | 帧数 | 末帧哈希 | 结果 |
+|---|---|---|---|
+| ping | 300 | `0556e78f7ce0e828f2dc922d210dc047` | 一致 |
+| probe | 120 | `e82844f7160449d1767aa69afe788800` | 一致 |
+| probe +A | 120 | `0eb7884cb40cef0cb549946af3a942ab` | 一致 |
+
+#### 3 张 PATCH 夹具（0.3.9 修复生效）
+| 夹具 | 0.3.9 预期 | R36S 实测 | 结果 |
+|---|---|---|---|
+| crash-scale（PATCH 13 缩放 SIGFPE） | 正常跑完 | load_game OK / 120 帧 / `9ebf768b` / rc=0 | ✅ |
+| crash-idiv（PATCH 14 除零） | 正常跑完 | 120 帧 / `032c69da` / rc=0（VM 层 PANIC 980 被 catch，非进程崩） | ✅ |
+| oversize-section（PATCH 15 段表超限） | `load_game -> FAIL` | `load_game -> FAIL`，无末帧，rc=0 | ✅ 预期失败 |
+
+（oversize-section 为"期望失败"用例：0.3.9 让段表超限时 `retro_load_game()` 返回 false
+并报 VM error 1014，不再"黑屏但报成功"；R36S 实测正是预期拒绝。）
+
+#### 结论
+R36S 维修回归完成，已对齐 0.3.9：golden 三例在 aarch64 真机逐位等价、三处修复生效，
+作为下限机型补齐了 0.3.9 真机验收的最后一环。
+
 ### 结论
 
 3 台在线设备（rgb30c / cubexx / Mi Max 2）全部完成 0.3.9 验证：合规卡带逐位等价、

@@ -1540,7 +1540,9 @@ int getConfig(int key, int defl) {
 #ifdef PXT_VM
     if (!vmImg)
         return defl;
-    int *cfgData = vmImg->configData;
+    // devkitARM 的 newlib 里 int32_t 是 long int，与 int* 不兼容；显式转换
+    // （32 位平台 int/long 同宽，ABI 无差）
+    int *cfgData = (int *)vmImg->configData;
 #else
     int *cfgData = NULL;
     if (bytecode) {

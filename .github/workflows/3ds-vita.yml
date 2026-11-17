@@ -95,6 +95,35 @@ jobs:
           fi
           tail -10 "$out"
 
+      - name: 编译前端（最小 libretro 前端，.3dsx + .cia）
+        run: |
+          set -u
+          export DEVKITPRO="${DEVKITPRO:-/opt/devkitpro}"
+          export PATH="$DEVKITPRO/devkitARM/bin:$DEVKITPRO/tools/bin:$PATH"
+          # makerom/bannertool 不在 devkitPro pacman 源（dkp-pacman 报
+          # target not found，2026-11-17 实测），按社区惯例从 GitHub release 取
+          mkdir -p /tmp/ciatools && cd /tmp/ciatools
+          curl -fsSL -o makerom.zip \
+            https://github.com/3DSGuy/Project_CTR/releases/download/makerom-v0.18.4/makerom-v0.18.4-ubuntu_x86_64.zip
+          unzip -o makerom.zip -d makerom
+          install -m 755 makerom/makerom "$DEVKITPRO/tools/bin/makerom"
+          # bannertool 原仓库 Steveice10/bannertool 已 404（2026-11-17 实测），
+          # diasurgical fork 保留同名 release 资产（zip 内 linux-x86_64/bannertool）
+          curl -fsSL -o bannertool.zip \
+            https://github.com/diasurgical/bannertool/releases/download/1.2.0/bannertool.zip
+          unzip -o bannertool.zip -d bannertool
+          install -m 755 bannertool/linux-x86_64/bannertool "$DEVKITPRO/tools/bin/bannertool"
+          makerom -h 2>&1 | head -2 || true
+          cd "$GITHUB_WORKSPACE"
+          log=/tmp/ctr-fe.log
+          if ! make -C frontends/ctr all cia > "$log" 2>&1; then
+            echo "::error::前端构建失败"
+            tail -30 "$log" | cut -c1-300 | sed 's/^/::error::  /'
+            exit 1
+          fi
+          tail -5 "$log"
+          ls -l frontends/ctr/mca_ctr.3dsx frontends/ctr/mca_ctr.cia
+
       - name: 上传 .a
         uses: actions/upload-artifact@v4
         with:
@@ -102,12 +131,23 @@ jobs:
           path: core/makecode_arcade_libretro_ctr.a
           if-no-files-found: error
 
+      - name: 上传 3DS 测试包（3dsx + cia）
+        uses: actions/upload-artifact@v4
+        with:
+          name: ctr-testpack
+          path: |
+            frontends/ctr/mca_ctr.3dsx
+            frontends/ctr/mca_ctr.cia
+          if-no-files-found: error
+
   # ------------------------------------------------------------ Vita
   core-vita:
     name: libretro_vita.a (vitaSDK / ARMv7-A + NEON)
     runs-on: ubuntu-24.04
     container:
-      image: devkitpro/vitasdk:latest
+      # 注意：vitaSDK 不归 devkitPro 发布，官方镜像是 vitasdk/vitasdk
+      #（Docker Hub），镜像内已预置 VITASDK 与 PATH
+      image: vitasdk/vitasdk:latest
     steps:
       - uses: actions/checkout@v4
 
@@ -170,9 +210,33 @@ jobs:
           fi
           tail -10 "$out"
 
+      - name: 编译前端（最小 libretro 前端，.vpk）
+        run: |
+          set -u
+          export VITASDK="${VITASDK:-/opt/vitasdk}"
+          export PATH="$VITASDK/bin:$PATH"
+          log=/tmp/vita-fe.log
+          if ! make -C frontends/vita > "$log" 2>&1; then
+            echo "::error::前端构建失败"
+            grep -nE 'error:|undefined reference|cannot find|No such file|No rule' "$log" \
+              | head -20 | cut -c1-300 | sed 's/^/::error::  /'
+            echo "::error::日志尾部："
+            awk 'length($0) < 300' "$log" | tail -20 | cut -c1-300 | sed 's/^/::error::  /'
+            exit 1
+          fi
+          tail -5 "$log"
+          ls -l frontends/vita/mca_vita.vpk
+
       - name: 上传 .a
         uses: actions/upload-artifact@v4
         with:
           name: vita-core-static
           path: core/makecode_arcade_libretro_vita.a
+          if-no-files-found: error
+
+      - name: 上传 Vita 测试包（vpk）
+        uses: actions/upload-artifact@v4
+        with:
+          name: vita-testpack
+          path: frontends/vita/mca_vita.vpk
           if-no-files-found: error

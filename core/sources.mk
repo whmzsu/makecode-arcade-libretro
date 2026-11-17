@@ -27,4 +27,6 @@ MCA_VM_FILES := pointers.cpp
 # 相对 core/ 的宿主源文件。v0.3.5 起 PNG 解码链路（cart/decompress/miniz/lzma）
 # 整体移除，只认 .pxt64 镜像，所以只剩这三个。
 # nx_diag.cpp 在非 Switch 平台编成空 TU（零符号），摆在清单里不必加平台条件。
-MCA_CORE_FILES := src/libretro_core.cpp src/vm_host.cpp src/nx_diag.cpp
+# platform_gc_heap_ctr.cpp / _vita.cpp 同理：只有对应平台的宏打开时才有符号，
+# 其它平台编成空 TU，故可无条件列入（5 个构建入口共用本清单）。
+MCA_CORE_FILES := src/libretro_core.cpp src/vm_host.cpp src/nx_diag.cpp src/platform_gc_heap_ctr.cpp src/platform_gc_heap_vita.cpp

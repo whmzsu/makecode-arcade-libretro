@@ -49,8 +49,14 @@ typedef struct {
 // ---------------------------------------------------------------- 全局状态
 
 static core_t g_core;
+// MCA 3DS/Vita (probe/pxt32-3ds-vita)：可选注入 GC 堆，验证静态链接平台
+// 绕开 mmap 的路径。非 libretro 标准符号，dlsym 失败即不支持（非 3DS/Vita core）。
+typedef void (*set_gc_heap_fn)(void *, unsigned);
+static set_gc_heap_fn g_set_gc_heap = NULL;
+static unsigned g_gc_heap_size = 0;  // --gc-heap=SIZE：注入一块 malloc 堆给核心
 static char g_data_dir[512] = ".";
 static int g_quiet = 0;
+static int g_reject_rgb565 = 0;   // --reject-rgb565：模拟只接受 0RGB1555 的前端
 
 // ---- 可选输入注入（默认全关，行为等同无参回归宿主）----
 enum { MAX_INJ = 64 };
@@ -129,7 +135,16 @@ static bool env_cb(unsigned cmd, void* data) {
     switch (cmd) {
         case RETRO_ENVIRONMENT_SET_PIXEL_FORMAT: {
             const enum retro_pixel_format* fmt = (const enum retro_pixel_format*)data;
-            // 只认 RGB565：与 py 宿主一致，核心本来就优先这个
+            // 默认只认 RGB565（与 py 宿主一致）；--reject-rgb565 时反过来只认
+            // 0RGB1555，用来验证核心在前端拒绝 565 后真能降级输出 16bpp。
+            if (g_reject_rgb565) {
+                if (*fmt == RETRO_PIXEL_FORMAT_0RGB1555) {
+                    say("[host] SET_PIXEL_FORMAT = 0RGB1555 (565 rejected)");
+                    return true;
+                }
+                say("[host] SET_PIXEL_FORMAT = %d（拒绝，只用 0RGB1555）", (int)*fmt);
+                return false;
+            }
             if (*fmt == RETRO_PIXEL_FORMAT_RGB565) {
                 say("[host] SET_PIXEL_FORMAT = RGB565");
                 return true;
@@ -345,6 +360,8 @@ static int load_core(const char* path, void** handle_out) {
     BIND(unload_game, "retro_unload_game");
     BIND(run, "retro_run");
 #undef BIND
+    // 可选符号：只有带 3DS/Vita 解耦补丁的核心才有；缺失不是错误。
+    *(void **)(&g_set_gc_heap) = dlsym(h, "mca_vm_set_gc_heap");
     *handle_out = h;
     return 1;
 }
@@ -384,7 +401,7 @@ static void frame_hash_hex(char hex[33], int* w_out, int* h_out) {
 int main(int argc, char** argv) {
     setvbuf(stdout, NULL, _IOLBF, 0);   // 行缓冲：崩溃时别把结果留在缓冲区里
     if (argc < 4) {
-        fprintf(stderr, "usage: %s <core.so> <cart.pxt64> <frames> [--data-dir=DIR] [--quiet]\n",
+        fprintf(stderr, "usage: %s <core.so> <cart.pxt64> <frames> [--data-dir=DIR] [--quiet] [--gc-heap=SIZE]\n",
                 argv[0]);
         return 2;
     }
@@ -396,6 +413,12 @@ int main(int argc, char** argv) {
             snprintf(g_data_dir, sizeof(g_data_dir), "%s", argv[i] + 11);
         else if (strcmp(argv[i], "--quiet") == 0)
             g_quiet = 1;
+        else if (strcmp(argv[i], "--reject-rgb565") == 0)
+            g_reject_rgb565 = 1;
+        else if (strncmp(argv[i], "--gc-heap=", 10) == 0) {
+            g_gc_heap_size = (unsigned)strtoul(argv[i] + 10, NULL, 0);
+            if (g_gc_heap_size < (1u << 20)) g_gc_heap_size = (1u << 20);
+        }
         else if (strncmp(argv[i], "--seq=", 6) == 0) {
             char* s = argv[i] + 6;
             for (char* tok = strtok(s, ","); tok && g_seq_n < MAX_INJ; tok = strtok(NULL, ",")) {
@@ -471,6 +494,21 @@ int main(int argc, char** argv) {
     g_core.set_audio_sample_batch(audio_batch_cb);
     g_core.set_input_poll(input_poll_cb);
     g_core.set_input_state(input_state_cb);
+    // 注入 GC 堆必须在 init 之前（VM 线程尚未启动）。用普通 calloc 地址，
+    // 刻意避开 0x20000000 —— 若核心能跑通，证明旁路表/只读判定已不依赖
+    // 该固定地址，3DS/Vita 的静态堆路径可用。
+    if (g_gc_heap_size && g_set_gc_heap) {
+        void *heap = calloc(1, g_gc_heap_size);
+        if (!heap) {
+            fprintf(stderr, "[host] gc-heap alloc FAIL (%u bytes)\n", g_gc_heap_size);
+            return 3;
+        }
+        say("[host] injecting GC heap @ %p (%u bytes)", heap, g_gc_heap_size);
+        g_set_gc_heap(heap, g_gc_heap_size);
+    } else if (g_gc_heap_size && !g_set_gc_heap) {
+        fprintf(stderr, "[host] --gc-heap requested but core has no mca_vm_set_gc_heap\n");
+        return 3;
+    }
     g_core.init();
 
     struct retro_system_info si;

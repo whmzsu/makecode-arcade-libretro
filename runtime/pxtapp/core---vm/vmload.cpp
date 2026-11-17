@@ -6,9 +6,23 @@
 #include <unistd.h>
 #endif
 
+#if !defined(_WIN32) && (defined(_PXT_CTR) || defined(_PXT_VITA))
+// newlib 默认特性可见性下不声明 usleep（废弃 POSIX），裸机平台补声明；
+// 实现由 newlib/libctru(libc) 提供，静态库阶段无需链接。
+// 参数用 unsigned 而非 useconds_t：后者同样受特性可见性守卫，未必可见；
+// 32 位平台上 useconds_t 就是 unsigned int，两者 ABI 一致。
+extern "C" int usleep(unsigned);
+#endif
+
 // MCA PATCH 3：VM 线程栈大小（见 spinThread 里的说明）
 #ifndef MCA_VM_STACK_SIZE
 #define MCA_VM_STACK_SIZE (8 * 1024 * 1024)
+#endif
+
+#ifdef MCA_GC_HWM_LOG
+// MCA 诊断：GC 堆高水位（定义在 scheduler.cpp，DLLEXPORT=extern "C"，故 C 链接）。
+// 声明必须在 namespace pxt 外，且带 extern "C" 与定义的链接属性一致。
+extern "C" unsigned mca_gc_heap_hwm(void);
 #endif
 
 // NX 诊断：core 侧提供的运行期日志（裸 POSIX IO，堆坏了也能写出去）。
@@ -68,9 +82,29 @@ static void vmStartCore(uint8_t *data, unsigned len) {
 
     gcPreStartup();
 
+#ifdef PXT32
+    // P0 探针（probe/pxt32）：pxtbase.h:525 的 RefObject 构造在
+    // PXT32 && PXT_VM && !PXT_ESP32 下要求 vtable 地址 < 0x10000000
+    // （Cortex-M 的 flash/RAM 布局假设）。32 位 Linux/Android 的 .so 是
+    // ET_DYN，由动态链接器加载到高地址 —— 这条日志用来一次性判定该假设
+    // 是否成立，决定本分支是否值得继续投入 P1。只在 PXT32 构建里编译。
+    dmesg("PXT32: number_vt=0x%x lowaddr=%s", (unsigned)(uintptr_t)&number_vt,
+          ((uint32_t)(uintptr_t)&number_vt & 0xf0000000) ? "VIOLATED" : "ok");
+#endif
+
     auto state = vm_alloc_patch_state();
-    vm_patch_image(state, data, len);
+    const char *patchErr = vm_patch_image(state, data, len);
     vm_finish_patch(state);
+    if (patchErr) {
+        // 上游的 PXT32 分支至今留着 "TODO: NumberBoxes"（非 VM 目标由
+        // embedVTs() 直接填 vtable，VM 目标留 0xffffffff 占位等宿主 patch）。
+        // 原实现丢弃返回值继续 loadVMImage()，最终只报 1064，看不出真正的
+        // 失败点。P0 探针只把补丁错误打出来，**不改变后续装载路径**：
+        // 镜像未打补丁，loadVMImage 仍会报 1064，两条日志一起给出完整链路。
+        // 不在这里提前 return/free，是为了不引入镜像所有权与野指针问题
+        // （该问题连同「load_game 谎报成功」一起留给 P1 处理）。
+        dmesg("image patch failed: %s", patchErr);
+    }
 
     auto img = loadVMImage(data, len);
     if (img->errorCode) {
@@ -140,6 +174,9 @@ static void *multiStart(void *) {
     // 提前 pthread_join 一个还在跑清理的线程 —— 真机上就是"卡住不动"。
     mcaVmExited = 1;
     mcaTrace("[vm] thread exit");
+#ifdef MCA_GC_HWM_LOG
+    mcaTrace("[vm] gc heap hwm=%u KB", mca_gc_heap_hwm() / 1024);
+#endif
     return NULL;
 }
 

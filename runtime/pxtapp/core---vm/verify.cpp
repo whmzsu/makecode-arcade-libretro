@@ -46,6 +46,11 @@ struct VMPatchState {
     uint8_t patchOff;
     const char *error;
     uint64_t patch[VM_MAX_PATCH];
+    // MCA P1 (probe/pxt32): NumberBoxes 段里每个 box 是 12 字节
+    // [vtable 4B 占位][double 8B]，与 8 字节补丁块错开。占位按 3 块周期
+    // 落在第 0 块的低 4B / 第 1 块的高 4B，只替换这 4 字节，不能整块覆盖。
+    uint8_t boxPhase;
+    uint8_t inNumberBoxes;
 };
 
 static const VTable *vtFor(VMImageSection *sect) {
@@ -107,12 +112,18 @@ const char *vm_patch_image(VMPatchState *state, uint8_t *data, uint32_t len) {
 
             memset(state->patch, 0, sizeof(state->patch));
             state->patchOff = 1;
+            state->boxPhase = 0;
+            state->inNumberBoxes = 0;
 
             const VTable *vt = NULL;
 #ifdef PXT32
             if (sect.type == SectionType::NumberBoxes) {
-                return (state->error = "TODO: NumberBoxes");
-            }
+                // 编译器按 32 位装箱规则生成 12 字节 box，vtable 留
+                // 0xffffffff 占位等宿主填 &number_vt。这里不整块 memcpy
+                // （会破坏相邻 double），改由下面的块循环按 3 块周期替换。
+                state->inNumberBoxes = 1;
+                state->patchOff = 0;
+            } else
 #endif
             if (sect.type == SectionType::Literal || sect.type == SectionType::Function) {
                 vt = vtFor(&sect);
@@ -130,6 +141,14 @@ const char *vm_patch_image(VMPatchState *state, uint8_t *data, uint32_t len) {
                 dest[2] = (void *)pxt::RefRecord_scan;
                 dest[3] = (void *)pxt::RefRecord_gcsize;
             }
+        } else if (state->inNumberBoxes) {
+            uint32_t *w = (uint32_t *)data;
+            if (state->boxPhase == 0 && w[0] == 0xffffffff)
+                w[0] = (uint32_t)(uintptr_t)&pxt::number_vt;
+            else if (state->boxPhase == 1 && w[1] == 0xffffffff)
+                w[1] = (uint32_t)(uintptr_t)&pxt::number_vt;
+            if (++state->boxPhase == 3)
+                state->boxPhase = 0;
         } else if (state->patchOff != 0) {
             uint64_t p = state->patch[state->patchOff - 1];
             if (p)

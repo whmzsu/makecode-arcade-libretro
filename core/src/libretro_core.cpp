@@ -23,6 +23,8 @@
 
 // NX（Switch）诊断宏：非 Switch 平台展开成 (void)0，实现见 nx_diag.cpp
 #include "nx_diag.h"
+// 3DS/Vita 静态链接平台的 GC 堆注入：非目标平台展开成 (void)0
+#include "platform_gc_heap.h"
 
 using namespace mca;
 
@@ -326,6 +328,9 @@ void retro_set_input_state(retro_input_state_t cb) { g_input_state = cb; }
 
 void retro_init(void) {
     MCA_NX_BOOT("[boot] retro_init enter");
+    // 3DS/Vita：静态链接平台在 VM 启动前注入 GC 堆（绕开 mmap）。
+    // 其它平台这里是 (void)0，零开销零符号。
+    MCA_PLATFORM_GC_HEAP_INIT();
     g_frame = 0;
     g_game_loaded = false;
 #ifdef _WIN32

@@ -72,6 +72,126 @@
 #define GC_CHECK(cond, code) ((void)0)
 #endif
 
+// ============================================================================
+// MCA A-scheme (probe/pxt32-gc-a): 32 位 GC 块标记旁路表
+//
+// 上游把 FREE/ARRAY/PERMA 三个块类型标记编码进对象 vtable word 的 bit31/30/29，
+// 并要求真 vtable 地址 < 0x10000000（Cortex-M flash/RAM 布局）。32 位 Linux/
+// Android 的 .so 是 ET_DYN，vtable 落在 0xf7xxxxxx —— bit31=1 使每个活对象都
+// 被 sweep 判成 free block，VAR_BLOCK_WORDS 解出巨大 size 后 memset 越界。
+//
+// A 方案把这 3 个标记从 vtable word 搬到按 GC word 地址索引的旁路字节表：
+//   * MARK(bit0) 保留 —— vtable 4 字节对齐，getVTable() 的 &~1 与
+//     VAR_BLOCK_WORDS 的 (vt<<4)>>6 都对 bit0 免疫，无需改动。
+//   * size 的 (<<2) 编码保留 —— VAR_BLOCK_WORDS 在去掉高位 MASK 后仍然正确。
+//   * 对象内存布局与 .pxt64 镜像格式零改动。
+//
+// 下面这组宏把"读写标记"抽象成对象指针操作：PXT32 走旁路表，PXT64 展开成
+// 与原来逐字相同的位运算 —— 因此 64 位产物的机器码与行为完全不变。
+// ============================================================================
+#ifdef PXT32
+#define MCA_GCT_FREE  0x01
+#define MCA_GCT_ARRAY 0x02
+#define MCA_GCT_PERMA 0x04
+
+static uint8_t *mcaGcTags;
+static uintptr_t mcaGcTagsWords;
+
+// 返回 p 对应 GC word 的 tag 字节槽，按需扩容（按 2 的幂）。
+static inline uint8_t *mcaGctSlot(void *p) {
+    uintptr_t idx = ((uintptr_t)p - (uintptr_t)mca_gc_base) >> 2;
+    GC_CHECK((uintptr_t)p >= (uintptr_t)mca_gc_base && idx < (1U << 30), 42);
+    if (idx >= mcaGcTagsWords) {
+        uintptr_t ncap = mcaGcTagsWords ? mcaGcTagsWords : (1U << 16);
+        while (ncap <= idx)
+            ncap <<= 1;
+        auto n = (uint8_t *)xmalloc(ncap);
+        if (mcaGcTags) {
+            memcpy(n, mcaGcTags, mcaGcTagsWords);
+            xfree(mcaGcTags);
+        }
+        mcaGcTags = n;
+        mcaGcTagsWords = ncap;
+    }
+    return &mcaGcTags[idx];
+}
+
+// 读 tag 不扩容：不在表内的地址（尚未分配的对象）tag 视为 0。
+static inline uint8_t mcaGct(void *p) {
+    uintptr_t idx = ((uintptr_t)p - (uintptr_t)mca_gc_base) >> 2;
+    return (mcaGcTags && (uintptr_t)p >= (uintptr_t)mca_gc_base && idx < mcaGcTagsWords)
+               ? mcaGcTags[idx]
+               : 0;
+}
+
+// —— 读标记（参数是对象/块头指针）——
+#define GC_IS_FREE(p)       (mcaGct(p) & MCA_GCT_FREE)
+#define GC_IS_ARRAY(p)      (mcaGct(p) & MCA_GCT_ARRAY)
+#define GC_IS_PERMA(p)      (mcaGct(p) & MCA_GCT_PERMA)
+#define GC_IS_VAR(p)        (mcaGct(p) & (MCA_GCT_FREE | MCA_GCT_ARRAY))
+#define GC_IS_LIVE(p)                                                                              \
+    (IS_MARKED(VT(p)) || (mcaGct(p) == (MCA_GCT_ARRAY | MCA_GCT_PERMA)))
+#define GC_IS_PERMAARRAY(p) (mcaGct(p) == (MCA_GCT_ARRAY | MCA_GCT_PERMA))
+
+// —— 写标记（p 是 RefObject* / RefBlock*，words 是块大小，单位为 word）——
+#define GC_SET_FREE(p, words)                                                                      \
+    do {                                                                                           \
+        (p)->setVT((uintptr_t)(words) << 2);                                                       \
+        *mcaGctSlot(p) = MCA_GCT_FREE;                                                             \
+    } while (0)
+#define GC_SET_ARRAY(p, words)                                                                     \
+    do {                                                                                           \
+        (p)->setVT((uintptr_t)(words) << 2);                                                       \
+        *mcaGctSlot(p) = MCA_GCT_ARRAY;                                                            \
+    } while (0)
+#define GC_SET_ARRAY_PERMA(p, words)                                                               \
+    do {                                                                                           \
+        (p)->setVT((uintptr_t)(words) << 2);                                                       \
+        *mcaGctSlot(p) = MCA_GCT_ARRAY | MCA_GCT_PERMA;                                            \
+    } while (0)
+#define GC_ADD_PERMA(p)  (*mcaGctSlot(p) |= MCA_GCT_PERMA)
+#define GC_ADD_FREE(p)   (*mcaGctSlot(p) |= MCA_GCT_FREE)
+// 分配出去的对象：清掉原 free 块残留的标记，变成普通对象。
+#define GC_CLEAR_TAG(p)  (*mcaGctSlot(p) = 0)
+
+// —— 裸 word 指针版本（gcAllocateArray / app_alloc_at 用 uintptr_t*）——
+#define GC_SET_ARRAY_WORD(r, words)                                                                \
+    do {                                                                                           \
+        *(r) = (uintptr_t)(words) << 2;                                                            \
+        *mcaGctSlot(r) = MCA_GCT_ARRAY;                                                            \
+    } while (0)
+#define GC_SET_ARRAY_PERMA_WORD(r, words)                                                          \
+    do {                                                                                           \
+        *(r) = (uintptr_t)(words) << 2;                                                            \
+        *mcaGctSlot(r) = MCA_GCT_ARRAY | MCA_GCT_PERMA;                                            \
+    } while (0)
+#define GC_ADD_PERMA_WORD(r) (*mcaGctSlot(r) |= MCA_GCT_PERMA)
+#define GC_ADD_FREE_WORD(r)  (*mcaGctSlot(r) |= MCA_GCT_FREE)
+
+#else // PXT64 —— 全部展开成与原来逐字相同的表达式
+
+#define GC_IS_FREE(p)       IS_FREE(VT(p))
+#define GC_IS_ARRAY(p)      IS_ARRAY(VT(p))
+#define GC_IS_PERMA(p)      IS_PERMA(VT(p))
+#define GC_IS_VAR(p)        IS_VAR_BLOCK(VT(p))
+#define GC_IS_LIVE(p)       IS_LIVE(VT(p))
+#define GC_IS_PERMAARRAY(p) (((uintptr_t)VT(p) >> (HIGH_SHIFT + 1)) == 3)
+
+#define GC_SET_FREE(p, words)       (p)->setVT(FREE_MASK | ((uintptr_t)(words) << 2))
+#define GC_SET_ARRAY(p, words)      (p)->setVT(ARRAY_MASK | ((uintptr_t)(words) << 2))
+#define GC_SET_ARRAY_PERMA(p, words)                                                               \
+    (p)->setVT(ARRAY_MASK | PERMA_MASK | ((uintptr_t)(words) << 2))
+#define GC_ADD_PERMA(p)  (p)->setVT(VT(p) | PERMA_MASK)
+#define GC_ADD_FREE(p)   (p)->setVT(VT(p) | FREE_MASK)
+#define GC_CLEAR_TAG(p)  ((void)0)
+
+#define GC_SET_ARRAY_WORD(r, words)       *(r) = ARRAY_MASK | ((uintptr_t)(words) << 2)
+#define GC_SET_ARRAY_PERMA_WORD(r, words) *(r) = ARRAY_MASK | PERMA_MASK | ((uintptr_t)(words) << 2)
+#define GC_ADD_PERMA_WORD(r)              *(r) |= PERMA_MASK
+#define GC_ADD_FREE_WORD(r)               *(r) |= FREE_MASK
+
+#endif // PXT32 vs PXT64
+
 namespace pxt {
 
 // keep in sync with base/control.ts, function gcStats()
@@ -242,8 +362,11 @@ static bool inGCArea(void *ptr) {
 
 #define NO_MAGIC(vt) ((VTable *)vt)->magic != VTABLE_MAGIC
 #define VT(p) (*(uintptr_t *)(p))
+// MCA A-scheme：ARRAY 标记走 GC_IS_ARRAY(p)（PXT32 旁路表 / PXT64 位测试），
+// 其余两项（只读、mark）保持原样。64 位下 GC_IS_ARRAY(p) == IS_ARRAY(VT(p))，
+// 与原来的 (VT(p) & ARRAY_MASK) 逐位等价。
 #define SKIP_PROCESSING(p)                                                                         \
-    (isReadOnly(p) || (VT(p) & (ANY_MARKED_MASK | ARRAY_MASK)) || NO_MAGIC(VT(p)))
+    (isReadOnly(p) || (VT(p) & ANY_MARKED_MASK) || GC_IS_ARRAY(p) || NO_MAGIC(VT(p)))
 
 void gcMarkArray(void *data) {
     auto segBl = (uintptr_t *)data - 1;
@@ -384,21 +507,23 @@ static uint32_t getObjectSize(RefObject *o) {
     auto vt = o->vt() & ~ANY_MARKED_MASK;
     uint32_t r;
     GC_CHECK(vt != 0, 49);
-    if (IS_VAR_BLOCK(vt)) {
+    // MCA A-scheme：变长块（free/array）标记在 PXT32 下已搬到旁路表，
+    // 不能再从 vt 高位判断；GC_IS_VAR/GC_IS_FREE 在 PXT64 下仍是基于 vt 位测试。
+    if (GC_IS_VAR(o)) {
         r = VAR_BLOCK_WORDS(vt);
     } else {
         auto sz = getSizeMethod(vt);
         // GC_CHECK(0x2000 <= (intptr_t)sz && (intptr_t)sz <= 0x100000, 47);
         r = sz(o);
     }
-    GC_CHECK(1 <= r && (r <= BYTES_TO_WORDS(GC_MAX_ALLOC_SIZE) || IS_FREE(vt)), 41);
+    GC_CHECK(1 <= r && (r <= BYTES_TO_WORDS(GC_MAX_ALLOC_SIZE) || GC_IS_FREE(o)), 41);
     return r;
 }
 
 static void setupFreeBlock(GCBlock *curr) {
     gcStats.numBlocks++;
     gcStats.totalBytes += curr->blockSize;
-    curr->data[0].setVT(FREE_MASK | (TOWORDS(curr->blockSize) << 2));
+    GC_SET_FREE(&curr->data[0], TOWORDS(curr->blockSize));
     ((RefBlock *)curr->data)[0].nextFree = firstFree;
     firstFree = (RefBlock *)curr->data;
     midPtr = (uint8_t *)curr->data + curr->blockSize / 4;
@@ -501,18 +626,18 @@ static void sweep(int flags) {
         totalSize += words;
         VLOG("sweep: %p - %p", d, end);
         while (d < end) {
-            if (IS_LIVE(d->vtable)) {
+            if (GC_IS_LIVE(d)) {
                 VVLOG("Live %p", d);
                 d->setVT(d->vt() & ~MARKED_MASK);
                 d += getObjectSize(d);
             } else {
                 auto start = (RefBlock *)d;
                 while (d < end) {
-                    if (IS_FREE(d->vtable)) {
+                    if (GC_IS_FREE(d)) {
                         VVLOG("Free %p", d);
-                    } else if (IS_LIVE(d->vtable)) {
+                    } else if (GC_IS_LIVE(d)) {
                         break;
-                    } else if (IS_ARRAY(d->vtable)) {
+                    } else if (GC_IS_ARRAY(d)) {
                         VVLOG("Dead Arr %p", d);
                     } else {
                         VVLOG("Dead Obj %p", d);
@@ -529,7 +654,7 @@ static void sweep(int flags) {
 #ifdef PXT_GC_CHECKS
                 memset((void *)start, 0xff, WORDS_TO_BYTES(sz));
 #endif
-                start->setVT((sz << 2) | FREE_MASK);
+                GC_SET_FREE(start, sz);
                 if (sz > 1) {
                     start->nextFree = NULL;
                     if (!prevFreePtr) {
@@ -619,7 +744,7 @@ extern "C" void *realloc(void *ptr, size_t size) {
 
         if (ptr != NULL && mem != NULL) {
             auto r = (uintptr_t *)ptr;
-            GC_CHECK((r[-1] >> (HIGH_SHIFT + 1)) == 3, 41);
+            GC_CHECK(GC_IS_PERMAARRAY(r - 1), 41);
             size_t blockSize = VAR_BLOCK_WORDS(r[-1]);
             memcpy(mem, ptr, min(blockSize * sizeof(void *), size));
             free(ptr);
@@ -636,7 +761,7 @@ void *gcAllocateArray(int numbytes) {
     numbytes = ALIGN_TO_WORD(numbytes);
     numbytes += sizeof(void *);
     auto r = (uintptr_t *)gcAllocate(numbytes);
-    *r = ARRAY_MASK | (TOWORDS(numbytes) << 2);
+    GC_SET_ARRAY_WORD(r, TOWORDS(numbytes));
     return r + 1;
 }
 
@@ -647,18 +772,19 @@ static void *gcAllocAt(void *hint, int numbytes) {
     for (auto p = firstFree; p; p = p->nextFree) {
         GC_CHECK(!isReadOnly((TValue)p), 49);
         auto vt = p->vtable;
-        GC_CHECK(IS_FREE(vt), 43);
+        GC_CHECK(GC_IS_FREE(p), 43);
         int offset = BYTES_TO_WORDS((uint8_t *)hint - (uint8_t *)p);
         int left = (int)(VAR_BLOCK_WORDS(vt) - numwords - offset);
         // we give ourselves some space here, so we don't get some strange overlaps
         if (offset >= 8 && left >= 8) {
             auto nf = (RefBlock *)((void **)p + numwords + offset);
-            nf->setVT((left << 2) | FREE_MASK);
+            GC_SET_FREE(nf, left);
             nf->nextFree = p->nextFree;
             p->nextFree = nf;
-            p->setVT((offset << 2) | FREE_MASK);
+            GC_SET_FREE(p, offset);
             p = (RefBlock *)((void **)p + offset);
             p->setVT(0);
+            GC_CLEAR_TAG(p);
             return p;
         }
     }
@@ -676,7 +802,7 @@ void *app_alloc_at(void *at, int numbytes) {
     auto r = (uintptr_t *)gcAllocAt((uintptr_t *)at - 1, numbytes);
     if (!r)
         return NULL;
-    *r = ARRAY_MASK | PERMA_MASK | (TOWORDS(numbytes) << 2);
+    GC_SET_ARRAY_PERMA_WORD(r, TOWORDS(numbytes));
     gc(0);
     return r + 1;
 }
@@ -687,14 +813,14 @@ void *app_alloc(int numbytes) {
 
     // gc(0);
     auto r = (uintptr_t *)gcAllocateArray(numbytes);
-    r[-1] |= PERMA_MASK;
+    GC_ADD_PERMA_WORD(r - 1);
     return r;
 }
 
 void *app_free(void *ptr) {
     auto r = (uintptr_t *)ptr;
-    GC_CHECK((r[-1] >> (HIGH_SHIFT + 1)) == 3, 41);
-    r[-1] |= FREE_MASK;
+    GC_CHECK(GC_IS_PERMAARRAY(r - 1), 41);
+    GC_ADD_FREE_WORD(r - 1);
     return r;
 }
 
@@ -733,6 +859,12 @@ void gcForgetAllBlocks() {
     firstBlock = NULL;
     firstFree = NULL;
     midPtr = NULL;
+#ifdef PXT32
+    // MCA A-scheme：重启后堆地址回绕到 GC_BASE，旁路表里的旧标记全部作废；
+    // 新一局 setupFreeBlock / gcAllocate 会按需重新写入。
+    if (mcaGcTags)
+        memset(mcaGcTags, 0, mcaGcTagsWords);
+#endif
     memset(&gcStats, 0, sizeof(gcStats));
     // 旧堆里的一切都不再有效：globals 指针必须一起丢掉。
     // 否则新一局第一次 gc() 会拿上一局的 globals 去 mark 已被复用的内存
@@ -783,7 +915,7 @@ void *gcAllocate(int numbytes) {
             }
             GC_CHECK(!isReadOnly((TValue)p), 49);
             auto vt = p->vtable;
-            if (!IS_FREE(vt))
+            if (!GC_IS_FREE(p))
                 oops(43);
             int left = (int)(VAR_BLOCK_WORDS(vt) - numwords);
             VVLOG("%p %d - %d = %d", (void *)vt, (int)VAR_BLOCK_WORDS(vt), (int)numwords, left);
@@ -792,7 +924,7 @@ void *gcAllocate(int numbytes) {
                 auto nextFree = p->nextFree; // p and nf can overlap when allocating 4 bytes
                 // VVLOG("nf=%p nef=%p", nf, nextFree);
                 if (left)
-                    nf->setVT((left << 2) | FREE_MASK);
+                    GC_SET_FREE(nf, left);
                 if (left >= 2) {
                     nf->nextFree = nextFree;
                 } else {
@@ -803,6 +935,7 @@ void *gcAllocate(int numbytes) {
                 else
                     firstFree = nf;
                 p->setVT(0);
+                GC_CLEAR_TAG(p);
                 VVLOG("GC=>%p %d %p -> %p,%p", p, numwords, nf, nf ? nf->nextFree : 0,
                       nf ? (void *)nf->vtable : 0);
                 GC_CHECK(!nf || !nf->nextFree || !isReadOnly((TValue)nf->nextFree), 48);
