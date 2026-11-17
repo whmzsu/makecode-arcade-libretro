@@ -315,6 +315,37 @@ jobs:
           make -f /tmp/ra/Makefile.ctr -C /tmp/ra retroarch_3ds.cia >> "$log" 2>&1 || true
           ls -l /tmp/ra/retroarch_3ds.3dsx /tmp/ra/retroarch_3ds.cia
 
+      - name: 核心 CIA（官方"每核心一个 CIA"同构，定制身份）
+        run: |
+          set -u
+          export DEVKITPRO="${DEVKITPRO:-/opt/devkitpro}"
+          export DEVKITARM="$DEVKITPRO/devkitARM"
+          export PATH="$DEVKITARM/bin:$DEVKITPRO/tools/bin:$PATH"
+          cd /tmp/ra
+          # RA 模板（pkg/ctr/tools/template.rsf）全参数化：APP_TITLE/
+          # PRODUCT_CODE/UNIQUE_ID/ICON/BANNER 都是 make 变量。
+          # 先删按 RA 默认值生成的 .bnr/.icn/.smdh/.cia——make 按 mtime
+          # 跳过，不删则身份改动不生效（同 build_target.sh 的 mtime 坑）。
+          # UniqueId 0xF1CA1 / CTR-P-MCA2：与极简前端 CIA（0xF1CA0 /
+          # CTR-P-MCA1）可共存安装，互不覆盖。
+          rm -f retroarch_3ds.bnr retroarch_3ds.icn retroarch_3ds.smdh retroarch_3ds.cia
+          make -f Makefile.ctr retroarch_3ds.cia \
+            APP_TITLE="MakeCode Arcade" \
+            APP_DESCRIPTION="MakeCode Arcade (RetroArch core)" \
+            APP_AUTHOR="MCA (unofficial)" \
+            APP_PRODUCT_CODE="CTR-P-MCA2" \
+            APP_UNIQUE_ID=0xF1CA1 \
+            APP_ICON="$GITHUB_WORKSPACE/frontends/ctr/icon48.png" \
+            APP_BANNER="$GITHUB_WORKSPACE/frontends/ctr/banner256.png" \
+            APP_AUDIO="$GITHUB_WORKSPACE/frontends/ctr/banner.wav" \
+            >> /tmp/ra-ctr.log 2>&1 || {
+              echo "::error::核心 CIA 打包失败"
+              tail -15 /tmp/ra-ctr.log | cut -c1-300 | sed 's/^/::error::  /'
+              exit 1
+            }
+          cp retroarch_3ds.cia mca_libretro.cia
+          ls -l mca_libretro.cia
+
       - name: 校验 core 真链进 ELF
         run: |
           set +e
@@ -341,13 +372,14 @@ jobs:
           fi
           tail -5 "$out"
 
-      - name: 上传 RA 3DS 包（3dsx + cia）
+      - name: 上传 RA 3DS 包（3dsx + cia + 核心 cia）
         uses: actions/upload-artifact@v4
         with:
           name: ctr-ra-pack
           path: |
             /tmp/ra/retroarch_3ds.3dsx
             /tmp/ra/retroarch_3ds.cia
+            /tmp/ra/mca_libretro.cia
           if-no-files-found: error
 
   # ============================================================ RA 完整前端（Vita）
