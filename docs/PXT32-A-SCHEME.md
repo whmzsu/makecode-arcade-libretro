@@ -393,3 +393,59 @@ main 单独 cherry-pick 该 yml（`0b1ed6b`，仅一个 dispatch-only CI 文件�
 对既有平台零行为变化。原 9.4 清单第 3、4 项中，pthread 的**编译期**风险
 已随实编通过解除（头文件、类型都在），**链接/运行期**栈语义与前端实测
 仍需真机（3DS 栈紧、Vita memblock 接入），是本分支剩余的全部工作。
+
+## 10. 追加：pthread 栈语义定案 + VM 栈/GC 堆定容（2026-11-17）
+
+### 10.1 pthread 语义（从真工具链二进制反汇编核实，非文档推断）
+
+| 平台 | 实现层 | NULL attr 默认栈 | setstacksize |
+|---|---|---|---|
+| 3DS | devkitARM `libsysbase.a` 的 pthread 层 → `__syscall_thread_create`（libctru.a syscalls.o）→ libctru `threadCreate` | 32KB（0x8000） | 忠实传递（attr+4 → threadCreate stackSize；attr+0 必须 NULL） |
+| Vita | vitasdk `libpthread.a`（PTE/pthread-embedded，vita_osal.o）→ `sceKernelCreateThread` | 0 → **最低 4KB** | 忠实传递（attr+8，`max(stack,4096)`） |
+
+mutex/cond 两平台都有真实现；`PTHREAD_MUTEX_INITIALIZER` 可用（codalemu 的
+irqMutex 我们本就显式 init）。libretro 路径上**唯一的线程**是 VM 线程
+（`spinThread`，显式 attr；NULL attr 的 `vmStartFromUser` 只属于官方 sim 宿主，
+重置路径 `vm_request_reset` 只置标志、重启走 `pxt_vm_start_buffer → spinThread`）。
+
+**结论：pthread 不是 3DS/Vita 的阻塞项，内存预算才是。**
+
+### 10.2 实测定容（2026-11-17，tool69）
+
+方法：x86-32 zig 构建（PXT32，与 3DS/Vita 同指针宽度）+ 32 位 C 宿主，
+64 卡 × 600 帧 × 6 档 `MCA_VM_STACK_SIZE`（8MB/2MB/512K/256K/128K/64K），
+每组**强制清 build/dist 全量重编**（`needs_build` 按 mtime 跳过、换宏不触发
+重编译——首轮 6 组因此全部跑了同一个 8MB 产物，已用 `so_sizes` + 反汇编
+`mov r1, #0x40000` 复核修正）；GC 高水位用新增诊断 `-DMCA_GC_HWM_LOG=1`
+（scheduler.cpp bump 点单调累计，VM 线程退出打 `[vm] gc heap hwm=… KB`）。
+
+结果：
+- **VM 栈真实需求 < 64KB**：64KB 档全部卡带末帧与 8MB 档逐位一致、rc=0；
+  sm64thign（已知坏卡 rc=5）与 Horizontally_Spinning_Rat（已知墙钟抖动）
+  在所有档位表现一致，与本变量无关。
+- **GC 堆高水位最大 128KB**（stereoscopic_3d / low-poly_picachu），
+  中位数 64KB；Mouse_Adventure 补测 64KB（旧记录"382KB"口径不同，作废）。
+  hwm 与栈尺寸完全无关（自洽）。
+
+### 10.3 落地参数（`-D` 可覆盖）
+
+| 参数 | 值 | 余量 | 位置 |
+|---|---|---|---|
+| VM 线程栈 | 256KB | 4× | `core/Makefile` ctr/vita 目标 `-DMCA_VM_STACK_SIZE=262144` |
+| GC 堆 | 2MB | 16× | `platform_gc_heap_{ctr,vita}.cpp` `MCA_GC_HEAP_SIZE` 默认值（原 64MB） |
+
+OLD3DS 应用内存 ~64MB：2MB 堆 + 256KB 栈 + ~1MB 代码段，给前端留足空间。
+堆越界走 `gc heap exhausted` 明确 panic，不会静默写坏。Vita（512MB）与 3DS
+同口径，便于问题对照。
+
+附带改动：`tools/build_target.sh` 支持环境注入 `EXTRA_CXXFLAGS/EXTRA_CFLAGS`；
+GC 高水位诊断（`MCA_GC_HWM_LOG`）保留为常设诊断开关。真工具链重建验证：
+ctr.a 482382 B / vita.a 455364 B，39 对象、25 retro_*、注入函数与 hook 符号
+齐全，`vmload.o` 内栈常量 `#0x40000` 落位；64 位默认构建 golden 三例
+（`0556e78f` / `e82844f7` / `0eb7884c`）逐位一致，零回归。
+
+### 10.4 剩余（需真机/前端）
+
+静态库链进 RA 3DS/Vita 前端跑 golden + 8 键；3DS 真机为 OLD3DS 时重点看
+内存是否够（前端自身分配）。若某卡带 2MB 堆不足，先开 HWM 诊断实测再调
+`MCA_GC_HEAP_SIZE`。

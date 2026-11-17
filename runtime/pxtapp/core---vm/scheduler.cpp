@@ -73,6 +73,14 @@ uint8_t *mca_gc_base = (uint8_t *)GC_BASE;
 // MCA P1 (probe/pxt32): PXT32 GC 堆的实际堆顶（按需 mmap，无固定上限）。
 // PXT_IS_READONLY() 用它把「堆内可写」与「DSO/镜像只读」精确分开。
 uint8_t *mca_gc_top = (uint8_t *)GC_BASE;
+// MCA 诊断（-DMCA_GC_HWM_LOG=1）：GC 堆高水位字节数，用于 3DS/Vita 堆定容。
+// 跨重启单调（取历史最大），进程内全程累计；只在 vm 线程退出时读出打日志。
+#ifdef MCA_GC_HWM_LOG
+static uintptr_t mca_gc_hwm = 0;
+DLLEXPORT unsigned mca_gc_heap_hwm(void) {
+    return (unsigned)mca_gc_hwm;
+}
+#endif
 // GC 分配游标（原定义在 gcAllocBlock 之前，因 mca_vm_set_gc_heap 需重置而前移）。
 static uint8_t *gcAllocPtr = (uint8_t *)GC_BASE;
 
@@ -945,6 +953,21 @@ void *gcAllocBlock(size_t sz) {
     currPtr = (uint8_t *)r + sz;
     // MCA P1: 堆顶随分配前进，必须在本函数末尾的 isReadOnly(r) 检查之前更新。
     mca_gc_top = currPtr;
+#ifdef MCA_GC_HWM_LOG
+    {
+        // 基址选择：PXT64/MinGW 路径的堆是 gcBase = malloc 得来的 1MB 池，
+        // 与 mca_gc_base（固定常量）无关，必须按分支取真实池首。
+        const uint8_t *hwmBase =
+#if defined(PXT64) || defined(__MINGW32__)
+            gcBase ? gcBase : mca_gc_base;
+#else
+            mca_gc_base;
+#endif
+        uintptr_t used = (uintptr_t)currPtr - (uintptr_t)hwmBase;
+        if (used > mca_gc_hwm)
+            mca_gc_hwm = used;
+    }
+#endif
 #endif
 
     if (isReadOnly((TValue)r)) {

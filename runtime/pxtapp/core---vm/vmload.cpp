@@ -19,6 +19,12 @@ extern "C" int usleep(unsigned);
 #define MCA_VM_STACK_SIZE (8 * 1024 * 1024)
 #endif
 
+#ifdef MCA_GC_HWM_LOG
+// MCA 诊断：GC 堆高水位（定义在 scheduler.cpp，DLLEXPORT=extern "C"，故 C 链接）。
+// 声明必须在 namespace pxt 外，且带 extern "C" 与定义的链接属性一致。
+extern "C" unsigned mca_gc_heap_hwm(void);
+#endif
+
 // NX 诊断：core 侧提供的运行期日志（裸 POSIX IO，堆坏了也能写出去）。
 // weak 引用 —— 没有 core 的构建（官方 sim / 其他宿主）里它是 NULL。
 // 只有诊断构建（-DMCA_NX_DIAG=1）才会真正打点，正式包里这条宏是空的。
@@ -168,6 +174,9 @@ static void *multiStart(void *) {
     // 提前 pthread_join 一个还在跑清理的线程 —— 真机上就是"卡住不动"。
     mcaVmExited = 1;
     mcaTrace("[vm] thread exit");
+#ifdef MCA_GC_HWM_LOG
+    mcaTrace("[vm] gc heap hwm=%u KB", mca_gc_heap_hwm() / 1024);
+#endif
     return NULL;
 }
 

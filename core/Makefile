@@ -116,6 +116,12 @@ ifneq (,$(findstring ctr,$(platform)))
    CFLAGS   := $(filter-out -fPIC,$(CFLAGS)) $(CTR_ARCH) -fdata-sections
    CXXFLAGS += -DARM11 -D_3DS -D__CTR__ -D_PXT_CTR
    CFLAGS   += -DARM11 -D_3DS -D__CTR__ -D_PXT_CTR
+   # VM 线程栈 256KB（默认 8MB 在 OLD3DS 上吃掉 1/8 应用内存）。
+   # 2026-11-17 实测：x86-32 64 卡全量 600 帧，VM 栈 64KB 即全部逐位一致；
+   # 256KB = 4 倍余量，防未覆盖的深递归路径。pthread 语义（libsysbase→
+   # libctru threadCreate）已反汇编核实：setstacksize 忠实传递。
+   CXXFLAGS += -DMCA_VM_STACK_SIZE=262144
+   CFLAGS   += -DMCA_VM_STACK_SIZE=262144
 else ifneq (,$(findstring vita,$(platform)))
    # PlayStation Vita (probe/pxt32-3ds-vita)：Cortex-A9 / ARMv7-A，vitaSDK(newlib)，
    # 同样是静态库 libretro_vita.a，链进 RetroArch 的 .vpk。
@@ -133,6 +139,11 @@ else ifneq (,$(findstring vita,$(platform)))
    CFLAGS   := $(filter-out -fPIC,$(CFLAGS)) $(VITA_ARCH) -fdata-sections
    CXXFLAGS += -DVITA -D__VITA__ -D_PXT_VITA
    CFLAGS   += -DVITA -D__VITA__ -D_PXT_VITA
+   # VM 线程栈 256KB（与 ctr 同口径；实测 VM 真实栈需求 < 64KB，见 ctr 分支注释）。
+   # pthread 语义（PTE→sceKernelCreateThread）已反汇编核实：setstacksize 忠实
+   # 传递、最低 4KB。Vita 512MB 本可给更多，统一 256KB 便于问题对照。
+   CXXFLAGS += -DMCA_VM_STACK_SIZE=262144
+   CFLAGS   += -DMCA_VM_STACK_SIZE=262144
 else ifneq (,$(findstring libnx,$(platform)))
    # Nintendo Switch：裸机 aarch64（newlib + libnx），没有动态链接。
    # 产物是静态库，由 RetroArch 的 Makefile.libnx 连同自身一起链进

@@ -142,6 +142,10 @@ CXXFLAGS=(
   -Wno-unused-parameter -Wno-unused-private-field -Wno-vla-cxx-extension
 )
 CFLAGS=("${TARGET_FLAGS[@]}" "${PIC[@]}" "${WIN_BASELINE[@]}" -O2 "${UNWIND[@]}")
+# 环境注入附加 flag（诊断/测量用，如 -DMCA_VM_STACK_SIZE=… -DMCA_GC_HWM_LOG=1）。
+# 空则不追加，正常构建行为不变。用 if 形式避免短路命令在 set -e 下误杀脚本。
+if [ -n "${EXTRA_CXXFLAGS:-}" ]; then CXXFLAGS+=($EXTRA_CXXFLAGS); fi
+if [ -n "${EXTRA_CFLAGS:-}" ]; then CFLAGS+=($EXTRA_CFLAGS); fi
 INC=(-I"$CORE/src" -I"$PXTAPP")
 
 needs_build() { [ ! -f "$2" ] || [ "$1" -nt "$2" ]; }
