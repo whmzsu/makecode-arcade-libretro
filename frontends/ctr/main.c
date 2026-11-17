@@ -99,7 +99,7 @@ static bool        g_audio_ok = false;
 
 static void audio_init(void) {
     if (R_FAILED(ndspInit())) {
-        printf("[mca] ndsp 初始化失败，无声运行\n");
+        printf("[mca] ndsp init failed, running without audio\n");
         return;
     }
     ndspSetOutputMode(NDSP_OUTPUT_STEREO);
@@ -202,7 +202,7 @@ static void scan_carts(void) {
     g_ncarts = 0;
     DIR *d = opendir(CART_DIR);
     if (!d) {
-        printf("[mca] 打不开 " CART_DIR "，请把 .pxt64 卡带放进去\n");
+        printf("[mca] cannot open " CART_DIR ", put .pxt64 files there\n");
         return;
     }
     struct dirent *e;
@@ -239,7 +239,7 @@ static bool load_cart(int idx) {
         return false;
     FILE *f = fopen(g_cart_path[idx], "rb");
     if (!f) {
-        printf("[mca] 打不开 %s\n", g_cart_path[idx]);
+        printf("[mca] cannot open %s\n", g_cart_path[idx]);
         return false;
     }
     fseek(f, 0, SEEK_END);
@@ -247,7 +247,7 @@ static bool load_cart(int idx) {
     fseek(f, 0, SEEK_SET);
     void *buf = malloc((size_t)size);
     if (!buf || fread(buf, 1, (size_t)size, f) != (size_t)size) {
-        printf("[mca] 读 %s 失败\n", g_cart_path[idx]);
+        printf("[mca] read %s failed\n", g_cart_path[idx]);
         free(buf);
         fclose(f);
         return false;
@@ -264,7 +264,7 @@ static bool load_cart(int idx) {
     info.data = buf;
     info.size = (size_t)size;
     if (!retro_load_game(&info)) {
-        printf("[mca] 装载失败: %s\n", g_cart_path[idx]);
+        printf("[mca] load failed: %s\n", g_cart_path[idx]);
         free(buf);
         return false;
     }
@@ -316,7 +316,7 @@ static void menu_clamp_top(void) {
 
 static void menu_draw(void) {
     consoleClear();
-    printf("== MCA 卡带列表 %d/%d ==\n\n", g_menu_cur + 1, g_ncarts);
+    printf("== MCA carts %d/%d ==\n\n", g_menu_cur + 1, g_ncarts);
     for (int i = 0; i < MENU_VIEW; i++) {
         int idx = g_menu_top + i;
         if (idx >= g_ncarts)
@@ -328,7 +328,7 @@ static void menu_draw(void) {
                idx == g_cartidx ? '*' : ' ',
                nm);
     }
-    printf("\n上/下=选择  A=装载  B=返回\n");
+    printf("\nUP/DOWN=select  A=load  B=back\n");
 }
 
 static void menu_enter(void) {
@@ -343,16 +343,16 @@ static void menu_enter(void) {
 
 static void print_status(void) {
     if (g_ncarts == 0) {
-        printf("[mca] " CART_DIR " 里没有 .pxt64 卡带\n");
+        printf("[mca] no .pxt64 in " CART_DIR "\n");
     } else if (g_cartidx >= 0) {
         char nm[64];
         cart_disp(g_cartidx, nm, sizeof(nm));
-        printf("[mca] 当前 %d/%d: %s\n", g_cartidx + 1, g_ncarts, nm);
+        printf("[mca] current %d/%d: %s\n", g_cartidx + 1, g_ncarts, nm);
     }
-    printf("操作: A/B=游戏键 十字=方向\n");
-    printf("      START=游戏内菜单 SELECT=重置\n");
-    printf("      START+SELECT=卡带列表 L/R=换卡带\n");
-    printf("      Y=退出\n");
+    printf("A/B=game keys  D-pad=move\n");
+    printf("  START=ingame menu  SELECT=reset\n");
+    printf("  START+SELECT=cart list  L/R=switch cart\n");
+    printf("  Y=exit\n");
 }
 
 static void menu_leave(void) {
@@ -401,10 +401,16 @@ int main(void) {
     /* RGB565 顶部屏 + 单缓冲（每帧整屏重绘，VSync 翻转无撕裂意义） */
     gfxSetScreenFormat(GFX_TOP, GSP_RGB565_OES);
     gfxSetDoubleBuffering(GFX_TOP, false);
+    /* 底屏也必须关双缓冲：consoleInit 固定捕获一块 framebuffer 指针，
+     * 双缓冲下每帧 swap 在两块缓冲间交替，console 永远只写其中一块，
+     * 屏幕上就是两帧内容叠加的鬼影/乱码（3DS homebrew 经典坑） */
+    gfxSetDoubleBuffering(GFX_BOTTOM, false);
 
     consoleInit(GFX_BOTTOM, NULL);
-    printf("MCA core 测试包 (probe/pxt32-3ds-vita)\n");
-    printf("=====================================\n");
+    /* 底屏文案一律 ASCII：3DS 系统共享字体是日文子集，简体字形缺失
+     * 会渲染成豆腐块，真机上看起来就是另一种"乱码" */
+    printf("MCA core test pack (pxt64)\n");
+    printf("===========================\n");
 
     audio_init();
 
@@ -423,6 +429,9 @@ int main(void) {
 
     u32 prev_held = 0;
     while (aptMainLoop()) {
+    /* 菜单态不跑 retro_run（core 不会再调 input_poll_cb），必须每圈自己
+     * 扫输入，否则 hidKeysHeld 永远是进菜单那一刻的缓存值，按键全失效 */
+    hidScanInput();
     u32 held = hidKeysHeld();
     u32 down = held & ~prev_held;
     prev_held = held;
