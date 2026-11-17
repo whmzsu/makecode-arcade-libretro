@@ -486,3 +486,19 @@ tool69 真工具链复验：两包零警告重建；64 位默认构建 golden �
 
 **剩余（真机）**：3DS 画面旋转宏如不对改 `blit_frame()` 一处；Vita
 `SetFrameBuf` 若个别固件不亮需换 GXM/vita2d（届时 CI 加 libvita2d job）。
+
+### 11.1 CIA 打包（2026-11-17 补）
+
+CI ctr job 装 makerom/bannertool（**不在 devkitPro pacman 源**，从 GitHub
+release 取：makerom v0.18.4 官方、bannertool 用 diasurgical fork 1.2.0——
+原 Steveice10 仓库已 404）打 `mca_ctr.cia`（346 048 B，UniqueId 0xF1CA0/
+CTR-P-MCA1，Logo Homebrew），artifact `ctr-testpack`（3dsx+cia）。
+
+图标/banner 由 `tools/gen_cia_assets.py` 生成（纯 Python PNG，无 PIL）：
+紫底白字 MCA + 1s 静音 wav（makebanner 的 `-a` 在 fork 里必填）。
+
+rsf 三轮实测踩平：①缺 `AccessControlInfo/CoreVersion` 报 ExHeader Not
+Found；②`EnableL2Memory` 键 makerom 不认；③还缺 `Priority` 与
+`SystemCallAccess`。最终按 PKSM assets/app.rsf 结构重写：全用户态 SVC 表 +
+本前端所需服务（fs:USER/gsp::Gpu/gsp::Lcd/hid:USER/dsp::DSP/APT:U/cfg:u）
++ 对应 Dependency 模块。bannertool makesmdh 参数按语言命名（-es/-el/-ep）。
