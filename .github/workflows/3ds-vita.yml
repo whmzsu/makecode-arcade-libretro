@@ -262,6 +262,11 @@ jobs:
           echo "eboot.bin: $(stat -c %s /tmp/eboot.bin) B, fSELF 头正确"
           unzip -p "$vpk" sce_sys/param.sfo | grep -aq MCAV00001 \
             || fail "param.sfo TITLE_ID 不是 MCAV00001"
+      # 上面任一项失败前先打印完整清单便于诊断（set -e 下 fail 会退出，
+      # 所以清单打印放在独立的容错步）
+      - name: vpk 清单（诊断用）
+        if: failure()
+        run: unzip -l frontends/vita/mca_vita.vpk
 
       - name: 上传 .a
         uses: actions/upload-artifact@v4

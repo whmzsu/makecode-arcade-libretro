@@ -6,7 +6,9 @@ endif
 PREFIX := $(VITASDK)/bin/arm-vita-eabi-
 
 TARGET     := mca_vita
-TITLE_ID   := MCAV00001   # Vita TITLE_ID 是 9 位（4 字母前缀 + 5 位数字），8 位会装不上
+# TITLE_ID 必须恰好 9 位（4 字母前缀 + 5 位数字，8 位会装不上）。
+# 注意：值后别写行尾注释——make 会把注释前的空格算进值里。
+TITLE_ID   := MCAV00001
 APP_VER    := 00.10
 TITLE      := MCA Core Test
 CORE_A     := ../../core/makecode_arcade_libretro_vita.a
