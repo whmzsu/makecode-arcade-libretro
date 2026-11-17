@@ -135,10 +135,10 @@ static size_t audio_batch_cb(const int16_t *data, size_t frames) {
     while (written < frames) {
         ndspWaveBuf *wb = &g_wb[g_aidx];
         if (wb->status != NDSP_WBUF_DONE && wb->status != NDSP_WBUF_FREE) {
-            /* 环满：等 1ms，还满就丢剩余（测试包可接受轻微断音） */
-            svcSleepThread(1000000ULL);
-            if (wb->status != NDSP_WBUF_DONE && wb->status != NDSP_WBUF_FREE)
-                break;
+            /* 环满直接丢剩余，绝不 sleep：svcSleepThread(1ms) 是在
+             * retro_run 内部（core 拉音频）调的，等于每帧阻塞 VM 1ms，
+             * New 3DS 上重卡带会明显掉帧。测试包可接受轻微断音。 */
+            break;
         }
         size_t n = frames - written;
         if (n > (size_t)ABUF_FRAMES)
@@ -374,15 +374,24 @@ static void menu_leave(void) {
 
 static void blit_frame(void) {
     u16 *fb = (u16 *)gfxGetFramebuffer(GFX_TOP, GFX_LEFT, NULL, NULL);
+    /* 2x 缩放按行展开：3DS 顶屏 framebuffer 是旋转存的，屏幕列 x 对应
+     * fb[row + col*240]。原版每个像素重算 (239-sy)+(sx)*240 两次乘法，
+     * 19200 像素 × 4 写全走乘法；这里每行只算一次基址，横向步进用
+     * SCALE*240 常量地址偏移，纵向两行预求（row1 = row0 - 1）。
+     * 实测目的：New 3DS 上 jumpy 这类重卡带的 blit 开销压到最小。 */
     for (int y = 0; y < GAME_H; y++) {
         const uint16_t *src = g_frame + y * GAME_W;
+        int row0 = 239 - (BLIT_Y + y * SCALE);
+        int row1 = row0 - (SCALE - 1);
+        u16 *d0 = fb + row0 + BLIT_X * 240;
+        u16 *d1 = fb + row1 + BLIT_X * 240;
         for (int x = 0; x < GAME_W; x++) {
             u16 c = src[x];
-            int sx = BLIT_X + x * SCALE;
-            int sy = BLIT_Y + y * SCALE;
-            for (int dy = 0; dy < SCALE; dy++)
-                for (int dx = 0; dx < SCALE; dx++)
-                    fb[(239 - (sy + dy)) + (sx + dx) * 240] = c;
+            /* SCALE=2 展开；改 SCALE 时需同步这里（当前固定 2） */
+            d0[0] = c;   d0[240] = c;
+            d1[0] = c;   d1[240] = c;
+            d0 += SCALE * 240;
+            d1 += SCALE * 240;
         }
     }
 }
