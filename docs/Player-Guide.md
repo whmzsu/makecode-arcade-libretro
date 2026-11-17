@@ -12,8 +12,8 @@ This guide is for people who just want to **play MakeCode Arcade games with Retr
 
 **Two easiest traps to fall into (read this first)**:
 
-1. **64-bit only.** If your device/OS is 32-bit (very old hardware), this core will install but show a black screen and won't run. The vast majority of handhelds, phones, and PCs today are 64-bit, so you're usually fine — but don't try to force it onto a 32-bit system.
-2. **It does NOT read `.png` cartridges.** MakeCode Arcade `.png` images you find online contain **source code only, not a directly playable file**. You must first "export" them into `.pxt64` to play them (see Section 4). The core's file browser also lists only `.pxt64`.
+1. **Desktop/handheld core packages are 64-bit only.** The Windows / Linux / Android core zips are all 64-bit — don't force them onto a 32-bit system (an old device's `retroarch32`), it will show a black screen. Most handhelds, phones, and PCs today are 64-bit. **Exception: the 3DS and PS Vita have dedicated all-in-one packages** (they're 32-bit machines and need no RetroArch install), see Section 4.
+2. **It does NOT read `.png` cartridges.** MakeCode Arcade `.png` images you find online contain **source code only, not a directly playable file**. You must first "export" them into `.pxt64` to play them (see Section 5). The core's file browser also lists only `.pxt64`.
 
 ---
 
@@ -33,6 +33,7 @@ Find the newest release (currently **core-v0.3.9**). Below it is a row of archiv
 | Linux handheld (ARM, e.g. RK3566 devices like RGB30 / RG CubeXX, Amlogic) | `makecode_arcade_linux-arm64.zip` |
 | Android phone / handheld (64-bit) | `makecode_arcade_android-arm64.zip` |
 | Lakka / LibreELEC systems (musl) | `makecode_arcade_lakka-arm64.zip` |
+| **3DS / PS Vita** | Not here — dedicated all-in-one packages, see Section 4 |
 
 > Not sure which one? Easiest is to try the Windows or Linux build on a PC first. Handheld owners: check your system docs; when in doubt, pick the one with `arm64`.
 
@@ -96,13 +97,47 @@ So: let RetroArch install the core into its **own private directory** (using "In
 
 **4. Load a game**
 
-Once the core is installed, it's the same as on PC: **Load Content → pick a `.pxt64` file** (`.png` still isn't accepted — convert it per the next section first).
+Once the core is installed, it's the same as on PC: **Load Content → pick a `.pxt64` file** (`.png` still isn't accepted — convert it per Section 5 first).
 
 > Verified: the Android arm64 build runs fine on multiple real devices (tested on Android 11 and Android 16). If you get a black screen after loading, first check point 3 above — is the core sitting in the noexec internal-storage root?
 
 ---
 
-## 4. Get playable games (`.pxt64` cartridges)
+## 4. 3DS / PS Vita only (all-in-one packages, no RetroArch install needed)
+
+On the 3DS and Vita you **don't install RetroArch yourself**. These two machines get dedicated "all-in-one" packages: the core and a small frontend are already bundled into a single installable file — once installed, an icon appears on the home menu, tap it and play. Boot time is far shorter than full RetroArch.
+
+### 3DS
+
+1. Copy your cartridges (`.pxt64` files) to **`sdmc:/mca/`** on the SD card (create it if missing).
+2. Copy `mca_ctr.cia` anywhere on the SD card and install it with **FBI** (homebrew-launcher users can use `mca_ctr.3dsx` instead and launch from the Homebrew Launcher).
+3. An **"MCA Core Test"** icon appears on the home menu. Launch it directly.
+
+Controls: **A/B = game keys, D-pad = direction, START = in-game menu, SELECT = restart the current game, L/R = switch cartridges, Y = back to the Homebrew Launcher**.
+
+**START + SELECT together = cartridge list** (a pause-state menu): up/down to pick, A to load, B to return — switching games keeps the VM state intact, so you resume where you left off.
+
+> Want full RetroArch (settings menus, video options, etc.)? Install `mca_libretro.cia` instead (an "MakeCode Arcade" icon appears on the home menu; it **coexists** with the minimal package above without interference). That package is a complete RetroArch — use it like desktop RA: Load Content and pick a `.pxt64`.
+
+### PS Vita
+
+1. Use VitaShell to copy `.pxt64` cartridges to **`ux0:/data/mca/`** (create it if missing).
+2. Use VitaShell to install `mca_vita.vpk`; an MCA icon appears on the home menu. Launch it.
+
+Controls: **CROSS = A, CIRCLE = B, D-pad = direction, START = in-game menu, SELECT = restart the current game, L/R = switch cartridges** (the picture is auto-scaled 4x and centered). **START + SELECT together** opens the same cartridge list.
+
+> If you already have RetroArch installed, you can alternatively install `mca_libretro.vpk` (standalone icon, coexists with RetroArch and shares its config), or drop `mca_libretro.self` + `mca_libretro.info` into your installed RetroArch's directory.
+
+### Where to download these packages
+
+They are **not in the official Release yet** (real-device acceptance in progress). Two routes:
+
+- **GitHub Actions artifacts**: repo → **Actions** → pick a 3DS/Vita build run → download from **Artifacts** at the bottom of the page (GitHub login required). Unzip to get the install packages above.
+- After acceptance they will be attached to the [Releases page](https://github.com/whmzsu/makecode-arcade-libretro/releases) for direct download.
+
+---
+
+## 5. Get playable games (`.pxt64` cartridges)
 
 ### Method 1: Export directly from the official editor (simplest, recommended)
 
@@ -127,7 +162,7 @@ On Windows, download the portable package and unzip; drag a `.png` onto `cartcon
 
 ---
 
-## 5. Start playing
+## 6. Start playing
 
 1. RetroArch main menu → **Load Content**.
 2. Find your `.pxt64` file and select it.
@@ -152,7 +187,7 @@ On Windows, download the portable package and unzip; drag a `.png` onto `cartcon
 
 ---
 
-## 6. Common operations
+## 7. Common operations
 
 | I want to… | How |
 |---|---|
@@ -165,12 +200,13 @@ On Windows, download the portable package and unzip; drag a `.png` onto `cartcon
 
 ---
 
-## 7. Something went wrong? Look here
+## 8. Something went wrong? Look here
 
 | Symptom | Cause / fix |
 |---|---|
 | **All black, nothing at all** | Probably a **32-bit system/frontend** — this core doesn't support it. Switch to a 64-bit environment. |
-| **My game doesn't show in the file browser** | Your file is `.png`, not `.pxt64`. Export/convert to `.pxt64` per Section 4. |
+| **My game doesn't show in the file browser** | Your file is `.png`, not `.pxt64`. Export/convert to `.pxt64` per Section 5. |
+| **Black screen on 3DS / Vita** | First check the cartridge directory (3DS: `sdmc:/mca/`, Vita: `ux0:/data/mca/`) and that the files are `.pxt64`. For hangs, check `sdmc:/mca/mca_trace.log` (3DS) or `ux0:/data/mca/mca_trace.log` (Vita). |
 | **`VM error 1014` after loading** | A single data section in this cartridge exceeds 32000 bytes; the core **explicitly rejects** it instead of black-screening. This isn't a core bug — the cartridge is just too big. Get a VM-compatible export, or have the author split the large arrays in the game source. (Such cartridges used to silently black-screen; now at least it tells you why.) |
 | **Red-on-white `VM PANIC xxxx` banner at the top** | The game crashed on its own (usually a game-code bug, e.g. using undefined as an array). Press SELECT to restart — usually recovers; the core won't take RetroArch down with it. |
 | **Pressing Start also pops up the RetroArch menu** | Hotkey conflict — see the "Controls" tip above; rebind in Hotkeys settings. |
@@ -178,8 +214,10 @@ On Windows, download the portable package and unzip; drag a `.png` onto `cartcon
 
 ---
 
-## 8. One-line summary
+## 9. One-line summary
 
 Download the zip for your platform → unzip → put the core and `.info` into RetroArch's matching directories → prepare a `.pxt64` cartridge → Load Content and play. Remember three things: **64-bit, `.pxt64`, remap keys in the Quick Menu's Controls**.
+
+3DS / Vita players have it even easier: install the all-in-one package → drop cartridges into the cartridge directory → tap the home-menu icon and play.
 
 Enjoy!
