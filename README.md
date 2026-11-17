@@ -45,6 +45,8 @@ makecode_arcade/
 ├── docs/
 │   ├── ROUTE-B-DESIGN.md   路线 B 总体设计（架构 / 数据流 / 里程碑 / 风险）
 │   ├── PNG-FORMAT.md       .png 卡带（隐写打包）格式规格
+│   ├── PXT32-A-SCHEME.md   32 位 A 方案（GC 标记旁路表）实测报告
+│   ├── DEVICE-LEDGER.md    真机台账（各设备的版本与测试状态）
 │   ├── M2-RUNTIME-NOTES.md pxt 运行时考古笔记（官方宿主 8 函数 ABI）
 │   ├── M3-VM-HOST.md       VM 宿主接入、验收记录与已知限制
 │   ├── CROSS-COMPILE.md    交叉编译（目标矩阵 / 用法 / 踩坑）
@@ -52,23 +54,27 @@ makecode_arcade/
 │   └── INPUT.md            按键与选项（映射、描述符、验证方法）
 ├── core/                   libretro core（C/C++）
 │   ├── libretro.h          官方头文件（来自 libretro-common，MIT）
-│   ├── Makefile            标准 libretro 构建（platform=unix/win/win64/osx/android）
+│   ├── Makefile            标准 libretro 构建（platform=unix/win/win64/osx/android/ctr/vita/libnx）
 │   ├── jni/                Android.mk + Application.mk（官方 CI 的 ndk-build 路径）
 │   ├── src/
 │   │   ├── libretro_core.cpp   libretro 入口 + 帧循环 + 视频/音频/输入接线
 │   │   ├── vm_host.cpp         pxt VM 宿主封装（镜像装载/按键沿/拉帧拉音频）
 │   │   └── platform.h          pxt VM 宿主 ABI（对齐官方 sdlmain.cpp）
 │   ├── tests/              假前端 core_test / 契约自检 contract_test / VM 冒烟 vm_smoke
+├── frontends/              3DS / Vita 极简前端（core 静态链接，不走 RetroArch）
+│   ├── ctr/                3DS：main.c + Makefile + app.rsf（3dsx / cia）
+│   └── vita/               Vita：main.c + Makefile + font8x8.h（vpk）
 ├── runtime/
-│   ├── pxtapp/             pxt 官方 VM 内核+引擎原语（vendored，已打 3 个补丁，游戏无关）
+│   ├── pxtapp/             pxt 官方 VM 内核+引擎原语（vendored，已打 14 个补丁，游戏无关）
 │   └── VENDORING.md
 ├── tools/
 │   ├── build_core.sh       一键构建：DLL + 三个测试程序（core_test / contract_test / vm_smoke）
 │   ├── make_local.sh       用 zig 驱动 core/Makefile（本地无目标工具链时）
 │   ├── build_target.sh     单目标交叉编译（zig；Android 走 NDK clang）
-│   ├── build_matrix.sh     发版矩阵（7 主流目标）/ --all 全架构
+│   ├── build_matrix.sh     发版矩阵（5 主流目标）/ --all 全架构
 │   ├── package_release.sh  打包发行 zip（core + .info + 说明）
 │   ├── inspect_binary.py   产物自检（架构/libc 基线/依赖/retro_* 导出，纯标准库）
+│   ├── setup_vita_gl_stack.sh  Vita GL 依赖链一键搭建（taiHEN → SceShaccCgExt → vitashark → math-neon → vitaGL）
 │   ├── make_probe_cartridge.py  探针卡带生成器（按键/生命周期回归用，调并列仓库的 pxt 工具链）
 │   ├── test_buttons.py     按键映射回归（16 用例）
 │   ├── test_lifecycle.py   生命周期回归（换游戏/卸载/重置后音频）
@@ -89,7 +95,7 @@ makecode_arcade/
 | M3 | pxt VM 字节码解释器接入，跑通第一个游戏 | ✅ **三款游戏全通**：vm_smoke（官方 ABI 直调）+ libretro 假前端路径（RGB565/按键沿/音频） |
 | M4 | 输入 / 音频合成 / 60fps 帧模型完整化 | ✅ 宿主接口全部打通：按键描述符/分键重绑、音频合成与峰值回归、帧驱动虚拟时钟（前端一圈一帧，快进=前端多取帧）、panic 横幅、存档目录对接（trace/数据走 `GET_SAVE_DIRECTORY`）、panic 自愈见 `test_lifecycle`。**v0.3.0 范围收敛：不做即时存档 / rewind（`retro_serialize*` 为 stub，前端自动禁用），核心只做官方模拟器同等的基本功能** |
 | M5 | 离线转换工具（PNG→bytecode）+ 游戏兼容性测试集 | ✅ 已拆分到独立仓库 [makecode-arcade-cartconv](https://github.com/whmzsu/makecode-arcade-cartconv)（cartconv 便携包 + png2pxt64.py 参照实现），三卡带实测通过 |
-| M6 | 交叉编译（掌机/桌面/移动）+ 性能验证 | ✅ **5 个 64 位主流目标全通并出 zip**（Windows x64/arm64、Linux x64/arm64、Android arm64）；32 位目标已整体移除（不再构建、不再发布）——PXT64 镜像在 32 位 VM 下跑不了，见下方「只支持 64 位前端」；✅ **RK3566 + ArkOS 真机验收通过**（v0.2.1→v0.3.0 全功能回归，满速 166~361fps）；✅ **RK3326 + ArkOS 下限机型验收通过**（v0.3.0，最重游戏 66fps）；✅ **Android arm64 验收通过**（v0.2.7） |
+| M6 | 交叉编译（掌机/桌面/移动）+ 性能验证 | ✅ **5 个 64 位主流目标全通并出 zip**（Windows x64/arm64、Linux x64/arm64、Android arm64）；✅ **32 位构建回归已进 CI 兜底**（A 方案 GC 旁路表进 main 后，PXT64 布局在 32 位平台可用，见 `docs/PXT32-A-SCHEME.md`；发版矩阵仍全 64 位，待真机验收后扩）；✅ **RK3566 + ArkOS 真机验收通过**（v0.2.1→v0.3.0 全功能回归，满速 166~361fps）；✅ **RK3326 + ArkOS 下限机型验收通过**（v0.3.0，最重游戏 66fps）；✅ **Android arm64 验收通过**（v0.2.7）；✅ **3DS / Vita 极简前端 + RA 完整前端 + 核心包已产出**（CI 可复现，真机验收进行中） |
 
 ## 环境要求与快速开始
 
@@ -157,7 +163,7 @@ tools/build_core.sh   # DLL + core_test + contract_test + vm_smoke
 
 ```bash
 tools/ci_regress.sh core/makecode_arcade_libretro.dll   # 末帧 MD5 比对（2 卡带 3 用例）
-python tools/check_pxt_patches.py --strict              # vendored pxt 树的 11 个补丁是否还在
+python tools/check_pxt_patches.py --strict              # vendored pxt 树的 14 个补丁是否还在
 ```
 
 `ci_regress.sh` 的基线在 `tools/fixtures/golden-frames.txt`；改核心或改帧数后
@@ -211,26 +217,23 @@ tools/package_release.sh  # 打包成可直接放进 RetroArch 的 zip
 | Lakka / LibreELEC ARM64（musl） | `makecode_arcade_lakka-arm64.zip` |
 | Nintendo Switch（NX） | `makecode_arcade_switch.zip`（NRO + `.info`） |
 
-> **只支持 64 位前端**（重要）。卡带里装的是 **PXT64** 字节码镜像：官方 pxt
-> 编译器（`pxt-core` 的 arcade target）**没有产出 32 位镜像的开关**，它唯一
-> 能适配 32 位目标的地方是把镜像就地补丁成原生布局，而这个函数
-> （`runtime/pxtapp/core---vm/verify.cpp` 的 `vm_patch_image`）的 `PXT32`
-> 分支至今是上游留下的 `return "TODO: NumberBoxes"`——从来没实现过，调用方
-> 也不检查返回值，于是镜像原样装载 → boxed number 的 vtable 是垃圾 → 校验报
-> 1064 → VM 线程几毫秒就退出。
+> **32 位与 64 位**（2026-11-17 起，重要）。卡带里装的是 **PXT64** 字节码镜像——
+> 官方 pxt 编译器唯一能产出的形态。32 位平台的硬阻断**不在镜像格式，而在
+> GC**：`gc.cpp` 在 32 位指针模式下把 FREE/ARRAY/PERMA 三个块类型标记编码进
+> vtable 指针的高 4 位，而 32 位 `.so` 的 vtable 地址高位必然非零，每个活对象
+> 都会被 sweep 判成 free block，`memset` 越界直接 SIGSEGV——根因分析与实测
+> 见 `docs/PXT32-A-SCHEME.md`。
 >
-> 真机实测（RK3566 / RK3326 各一台，`retroarch32` + armhf 核心）：前端能列出
-> 核心、能加载、日志还打 `VM started`，但 **VM 线程 3ms 就退出**
-> （trace `vm ready (online=0 live=0)`），画面全黑。
+> **A 方案（GC 标记搬旁路表）已进 main**：三个标记搬到按 GC word 地址索引的
+> 旁路字节表，对象内存布局与 `.pxt64` 镜像格式零改动，64 位产物机器码与行为
+> 完全不变。此后 **PXT64 布局在 32 位平台上可用**（3DS / Vita 线同一路径；
+> 本地 golden 三例 + 63 张卡带逐位一致）。PXT32 镜像（32 位原生布局，上游
+> `vm_patch_image` 的 TODO 分支）依旧不存在——也不再需要。
 >
-> 所以**核心不再支持、也不再构建 32 位目标**：armhf / armeabi-v7a / i686 等
-> 已从发版矩阵、GitHub Actions、buildbot 列表全部移除；CI 里没有 32 位 job，
-> `core/jni/Application.mk` 只列 `arm64-v8a`。32 位构建连编译验证都不做——
-> 上游那个 TODO 不解决，编出来的东西必然跑不了，留着只是噪音。
->
-> 补上游这个坑不在本项目范围内：PXT64 → 32 位原生布局的转换是编译器侧的
-> 职责，核心侧硬补等于自造一套 ABI，而且收益近零——两台真机的 64 位前端
-> 都跑得动。
+> 当前状态：CI 已补 32 位**构建回归**兜底（zig `x86-windows-gnu` /
+> `x86-linux-gnu.2.17` / `arm-linux-gnueabihf.2.17` + NDK `armeabi-v7a`），
+> 但**发版矩阵仍固定 6 平台全 64 位**——32 位（含 3DS / Vita 包）待真机
+> 验收通过后再进发版。
 
 ### Lakka / LibreELEC（musl）
 
@@ -252,6 +255,40 @@ docker run --rm -v "$PWD":/work -w /work \
 安装：把 `makecode_arcade_libretro.so` 和 `makecode_arcade_libretro.info` 放进
 Lakka 的 `/storage/cores/`（SSH 默认 root/lakka），刷新核心列表即可。行为回归
 由 CI 的 `behavior-miniretro (musl 全静态)` job 用 miniretro 跑 900 帧覆盖。
+
+### 3DS / PS Vita（frontends/）
+
+3DS 与 Vita **没有 `dlopen`、内存也紧**，核心在这里不是丢进 `cores/` 的
+`.so`，而是两种静态形态（可共存安装，互不干扰）：
+
+- **极简前端**（`frontends/ctr`、`frontends/vita`）：core 静态库 + 一个最小
+  libretro 前端，无菜单资产、启动最快。操作：A/B（Vita CROSS/CIRCLE）=
+  游戏键、十字=方向、START=游戏内菜单、SELECT=重置、L/R 换卡带；
+  **START+SELECT 同按**呼出暂停态卡带列表菜单（上下选、A/CROSS 装载、
+  B/CIRCLE 返回，VM 状态原地保留，选完接着玩）。
+- **核心包**（RetroArch 形态）：`mca_libretro.cia`（3DS）/ `mca_libretro.vpk`、
+  `mca_libretro.self`（Vita）——**RetroArch 完整前端 + core 静态链接**，与
+  libretro 官方"每核心一个 CIA / vpk"的分发形态同构；身份与极简包错开
+  （3DS UniqueId `0xF1CA1` vs 极简 `0xF1CA0`，Vita TITLE_ID `MCAC00001`），
+  已装 RetroArch 的机器也可以只把 `.self` 并进 RA 目录。
+
+构建（本机装好真工具链时）：
+
+```bash
+# 3DS（devkitPro）
+export DEVKITPRO=/opt/devkitpro
+make -C core platform=ctr && make -C frontends/ctr
+
+# Vita（vitasdk；GL 依赖链一键搭：tools/setup_vita_gl_stack.sh）
+export VITASDK=/path/to/vitasdk
+make -C core platform=vita && make -C frontends/vita
+```
+
+RetroArch 完整前端的两级构建（core 静态库 → 链进 RA 源码出 3dsx/cia/vpk 与
+核心 CIA/VPK/SELF）由独立的 `.github/workflows/3ds-vita.yml` 负责
+（**只手动 dispatch**，4 个 job：core-ctr / core-vita / ra-ctr / ra-vita；
+RA 版本默认 pin 已验证的 tip 快照）。测试包、安装步骤与真机验收清单见
+`out/3ds-vita/README.md`。
 
 ### Nintendo Switch（RetroArch NX）
 
@@ -304,7 +341,7 @@ hbmenu）拿完整内存。
 > `docs/DEVICE-TEST.md` 第五轮。
 
 ```bash
-tools/build_matrix.sh --all                    # 全架构验证（20 个 64 位目标全通过）
+tools/build_matrix.sh --all                    # 全架构验证（17 个 64 位目标全通过）
 tools/build_matrix.sh --prune                  # 回到发版 5 目标，并删掉其余目标的 dist/build 目录
 python tools/inspect_binary.py                 # 架构 + libc 基线 + 依赖 + retro_* 导出
 ```
@@ -330,13 +367,14 @@ cd ../makecode_arcade_cartconv/vm-build && npm install
 |---|---|---|
 | `linux-x64` / `linux-arm64` | Ubuntu 22.04 + gcc 交叉包 | `.so` |
 | `windows-x64` | mingw-w64（**-posix** 线程模型，pxt VM 用 pthread） | `.dll` |
-| `android-arm64` | 跑者自带 NDK + `core/jni/`（与官方模板同一套参数） | `.so` |
-| `zig-*`（x64/arm64 Windows + Linux x64/arm64） | **与本地发版同一工具链**（zig 0.17.0 + `tools/build_target.sh`） | `.so` / `.dll` |
+| `android-arm64` / `android-armv7a` | 跑者自带 NDK + `core/jni/`（与官方模板同一套参数）；arm64 是发版 ABI，armv7a 是 32 位回归兜底 | `.so` |
+| `zig-*`（x64/arm64 Windows + Linux x64/arm64 + 32 位三目标 `x86-windows-gnu` / `x86-linux-gnu.2.17` / `arm-linux-gnueabihf.2.17`） | **与本地发版同一工具链**（zig 0.17.0 + `tools/build_target.sh`）；32 位目标只做构建回归，不发版 | `.so` / `.dll` |
 | `macos-universal` | Xcode clang，arm64+x86_64 | `.dylib`（实验，`continue-on-error`） |
 | `lakka-musl` | dockcross `linux-arm64-musl` + GNU ld `-shared -static` | `.so`（**全静态，零 NEEDED**，给 Lakka/LibreELEC 这类 musl 系统） |
 | `behavior-miniretro` | 真 aarch64 runner（`ubuntu-24.04-arm`）+ 第三方前端 miniretro | 900 帧冒烟（行为层，不是编译层） |
-| `pxt-patches` | 纯 python，不编译 | 校验 vendored pxt 树里 9 个必要补丁还在（几秒） |
+| `pxt-patches` | 纯 python，不编译 | 校验 vendored pxt 树里 14 个必要补丁还在（几秒） |
 | `golden-hash` | gcc + `tools/libretro_host.py` | 2 张卡带 3 个用例的末帧 MD5 比对 —— 唯一能抓住"契约全绿但画面画错了"的断言 |
+| `crash-regression` | gcc + 3 张回归夹具 | 盯 PATCH 13/14（两处整数除零）与 PATCH 15（镜像校验失败时 `load_game` 不再谎报成功） |
 | `package` | 汇总发行版工具链产物 → `tools/package_release.sh`，再解包 dlopen 跑 60 帧 | 5 个 zip |
 | `release`（只在推 `core-v*` tag 时） | 汇总 `zig-*` + `android-*` + `lakka-musl` 产物 → `package_release.sh` → `gh release create` | **6 个 zip**（含只有 zig 能出的 `windows-arm64`，以及只有 musl 工具链能出的 `lakka-arm64`） |
 
@@ -344,6 +382,11 @@ NX（Switch）不在这张表里：它由独立的 `.github/workflows/nx.yml` �
 **推 `nx-v*` tag 时单独建一个 Release**（与核心发版分开，因为 NRO 要拉
 RetroArch 源码 + 装 portlibs，十几分钟，绑进主流水线会拖慢每次核心发版）。
 产物形态也不同——NRO 内含前端本体，不是可丢进 `cores/` 的 `.so`。
+
+3DS / Vita（含 RA 完整前端两级构建与核心包）同样不在这张表里：由独立的
+`.github/workflows/3ds-vita.yml` 负责，**只手动 dispatch**（4 个 job：
+core-ctr / core-vita / ra-ctr / ra-vita；RA 版本默认 pin 已验证的 tip 快照），
+产物挂 workflow artifact，安装包与验收清单见 `out/3ds-vita/README.md`。
 
 工具链**刻意分两套**，别合并：
 

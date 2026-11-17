@@ -34,10 +34,11 @@ MAIN_TARGETS=(
   aarch64-linux-android21
 )
 
-# 32 位目标（armhf / armv7 / x86 / i686-android…）**一律不构建**：
-# 卡带镜像是 PXT64，官方 pxt 编译器没有 32 位镜像输出，runtime 的 PXT32
-# 镜像补丁是上游未实现的 TODO（verify.cpp: "TODO: NumberBoxes"），所以
-# 32 位核心能装能识别但跑不了任何游戏。详见 README「只支持 64 位前端」。
+# 32 位目标（armhf / armv7 / x86 / i686-android…）**不在发版矩阵**：
+# A 方案 GC 旁路表进 main 后 PXT64 布局在 32 位平台已可用（见
+# docs/PXT32-A-SCHEME.md），GitHub CI 有 32 位构建回归兜底（zig 三目标 +
+# NDK armeabi-v7a），但发版仍固定 6 平台全 64 位，32 位待真机验收后再进矩阵。
+# 详见 README「32 位与 64 位」。
 
 # —— 扩展目标：--all 时追加 ——
 EXTRA_TARGETS=(

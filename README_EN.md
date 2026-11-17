@@ -47,6 +47,8 @@ makecode_arcade/
 ├── docs/
 │   ├── ROUTE-B-DESIGN.md   Route B overall design (architecture / data flow / milestones / risks)
 │   ├── PNG-FORMAT.md       .png cartridge (steganographic packing) format spec
+│   ├── PXT32-A-SCHEME.md   32-bit "scheme A" (GC tag side-table) test report
+│   ├── DEVICE-LEDGER.md    Device ledger (version & test status per device)
 │   ├── M2-RUNTIME-NOTES.md pxt runtime archaeology notes (the official host's 8-function ABI)
 │   ├── M3-VM-HOST.md       VM host integration, acceptance records, known limitations
 │   ├── CROSS-COMPILE.md    Cross-compiling (target matrix / usage / pitfalls)
@@ -54,15 +56,18 @@ makecode_arcade/
 │   └── INPUT.md            Buttons and options (mapping, descriptors, verification)
 ├── core/                   libretro core (C/C++)
 │   ├── libretro.h          Official header (from libretro-common, MIT)
-│   ├── Makefile            Standard libretro build (platform=unix/win/win64/osx/android)
+│   ├── Makefile            Standard libretro build (platform=unix/win/win64/osx/android/ctr/vita/libnx)
 │   ├── jni/                Android.mk + Application.mk (the official CI's ndk-build path)
 │   ├── src/
 │   │   ├── libretro_core.cpp   libretro entry points + frame loop + video/audio/input wiring
 │   │   ├── vm_host.cpp         pxt VM host wrapper (image load / button edges / frame+audio pulls)
 │   │   └── platform.h          pxt VM host ABI (mirrors the official sdlmain.cpp)
 │   ├── tests/              Fake-frontend core_test / contract self-check contract_test / VM smoke vm_smoke
+├── frontends/              3DS / Vita minimal frontends (core statically linked, no RetroArch)
+│   ├── ctr/                3DS: main.c + Makefile + app.rsf (3dsx / cia)
+│   └── vita/               Vita: main.c + Makefile + font8x8.h (vpk)
 ├── runtime/
-│   ├── pxtapp/             Official pxt VM kernel + engine primitives (vendored, 3 patches applied, game-agnostic)
+│   ├── pxtapp/             Official pxt VM kernel + engine primitives (vendored, 14 patches applied, game-agnostic)
 │   └── VENDORING.md
 ├── tools/
 │   ├── build_core.sh       One-shot build: DLL + the three test programs
@@ -71,6 +76,7 @@ makecode_arcade/
 │   ├── build_matrix.sh     Release matrix (5 mainstream targets) / --all for every architecture
 │   ├── package_release.sh  Package release zips (core + .info + install notes)
 │   ├── inspect_binary.py   Artifact self-check (arch / libc baseline / deps / retro_* exports, stdlib only)
+│   ├── setup_vita_gl_stack.sh  One-shot Vita GL dependency chain (taiHEN → SceShaccCgExt → vitashark → math-neon → vitaGL)
 │   ├── make_probe_cartridge.py  Probe-cartridge generator (button/lifecycle regression; uses the sibling repo's pxt toolchain)
 │   ├── test_buttons.py     Button mapping regression (16 cases)
 │   ├── test_lifecycle.py   Lifecycle regression (game switching / unload / audio after reset)
@@ -94,7 +100,7 @@ for cross-referencing.
 | M3 | Hook up the pxt VM bytecode interpreter, run the first game | ✅ **All three games pass**: vm_smoke (official ABI, direct calls) + the libretro fake-frontend path (RGB565 / button edges / audio) |
 | M4 | Input / audio synthesis / complete 60 fps frame model | ✅ Every host interface wired: button descriptors / per-button rebinding, audio synthesis with peak regression, frame-driven virtual clock (one frontend poll = one frame; fast-forward = the frontend polling faster), panic banner, save-directory hookup (trace/data go to `GET_SAVE_DIRECTORY`), panic self-healing — see `test_lifecycle`. **v0.3.0 scope cut: no savestates / rewind (`retro_serialize*` are stubs, the frontend auto-disables them); the core only does what the official emulator does** |
 | M5 | Offline conversion tool (.png → bytecode) + game compatibility test set | ✅ Split into the standalone repo [makecode-arcade-cartconv](https://github.com/whmzsu/makecode-arcade-cartconv) (portable cartconv package + png2pxt64.py reference implementation); verified on three cartridges |
-| M6 | Cross-compiling (handheld/desktop/mobile) + performance validation | ✅ **All 5 mainstream 64-bit targets build and ship as zips** (Windows x64/arm64, Linux x64/arm64, Android arm64); 32-bit targets were removed entirely (no longer built or released) — the PXT64 image cannot run on a 32-bit VM, see "64-bit frontends only" below; ✅ **RK3566 + ArkOS real-device acceptance passed** (full regression v0.2.1→v0.3.0, up to 166–361 fps); ✅ **RK3326 + ArkOS entry-level device accepted** (v0.3.0, heaviest game at 66 fps); ✅ **Android arm64 accepted** (v0.2.7) |
+| M6 | Cross-compiling (handheld/desktop/mobile) + performance validation | ✅ **All 5 mainstream 64-bit targets build and ship as zips** (Windows x64/arm64, Linux x64/arm64, Android arm64); ✅ **32-bit build regression is now in CI as a safety net** (after the GC tag side-table landed in main, the PXT64 layout works on 32-bit platforms — see `docs/PXT32-A-SCHEME.md`; the release matrix is still all-64-bit, pending real-device acceptance); ✅ **RK3566 + ArkOS real-device acceptance passed** (full regression v0.2.1→v0.3.0, up to 166–361 fps); ✅ **RK3326 + ArkOS entry-level device accepted** (v0.3.0, heaviest game at 66 fps); ✅ **Android arm64 accepted** (v0.2.7); ✅ **3DS / Vita minimal frontends + full RetroArch frontends + core packages produced** (CI-reproducible, real-device acceptance in progress) |
 
 ## Requirements and quick start
 
@@ -212,33 +218,29 @@ tools/package_release.sh  # Package into zips ready to drop into RetroArch
 | Lakka / LibreELEC ARM64 (musl) | `makecode_arcade_lakka-arm64.zip` |
 | Nintendo Switch (NX) | `makecode_arcade_switch.zip` (NRO + `.info`) |
 
-> **64-bit frontends only** (important). Cartridges contain a **PXT64**
-> bytecode image: the official pxt compiler (the arcade target of
-> `pxt-core`) **has no switch that emits 32-bit images**. Its only hook for
-> adapting to 32-bit targets is patching the image in place to the native
-> layout, and that function (`vm_patch_image` in
-> `runtime/pxtapp/core---vm/verify.cpp`) still has the upstream
-> `return "TODO: NumberBoxes"` in its `PXT32` branch — never implemented,
-> and callers don't check the return value either. So the image loads as-is →
-> boxed numbers get garbage vtables → validation fails with 1064 → the VM
-> thread exits within milliseconds.
+> **32-bit vs 64-bit** (as of 2026-11-17, important). Cartridges contain a
+> **PXT64** bytecode image — the only form the official pxt compiler emits.
+> The hard blocker on 32-bit platforms was **never the image format but the
+> GC**: under the 32-bit pointer mode, `gc.cpp` encodes the FREE/ARRAY/PERMA
+> block-type tags into the top 4 bits of the vtable pointer, and on a 32-bit
+> `.so` vtable addresses always have those bits set — every live object is
+> then judged a free block and `sweep()` `memset`s out of bounds (SIGSEGV).
+> Root cause and test evidence: `docs/PXT32-A-SCHEME.md`.
 >
-> Real-device testing (one RK3566 and one RK3326, `retroarch32` + armhf
-> core): the frontend lists the core, loading works, the log even prints
-> `VM started`, but the **VM thread exits after 3 ms**
-> (trace `vm ready (online=0 live=0)`) and the screen stays black.
+> **Scheme A (GC tags moved to a side table) is now in main**: the three tags
+> live in a byte table indexed by GC word address; the object memory layout
+> and the `.pxt64` image format are untouched, and 64-bit builds produce
+> byte-identical machine code and behavior. As a result, **the PXT64 layout
+> now works on 32-bit platforms** (same path as the 3DS/Vita line; golden
+> 3-case + 63-cartridge bit-identical locally). A PXT32 image (32-bit native
+> layout, the upstream `vm_patch_image` TODO branch) still does not exist —
+> and is no longer needed.
 >
-> Therefore **the core no longer supports or builds 32-bit targets**:
-> armhf / armeabi-v7a / i686 etc. are removed from the release matrix,
-> GitHub Actions, and the buildbot list; there are no 32-bit CI jobs, and
-> `core/jni/Application.mk` lists only `arm64-v8a`. We don't even do a
-> compile check for 32-bit — until upstream fixes that TODO, anything built
-> is guaranteed not to run, and keeping it is just noise.
->
-> Fixing that upstream hole is out of scope for this project: converting
-> PXT64 → 32-bit native layout is the compiler's job, and hard-patching it on
-> the core side would mean inventing a private ABI for near-zero benefit —
-> both real devices run fine with 64-bit frontends.
+> Current status: CI now carries 32-bit **build regression** jobs as a safety
+> net (zig `x86-windows-gnu` / `x86-linux-gnu.2.17` /
+> `arm-linux-gnueabihf.2.17` + NDK `armeabi-v7a`), but the **release matrix
+> stays fixed at 6 all-64-bit platforms** — 32-bit (including the 3DS/Vita
+> packages) joins the release matrix only after real-device acceptance.
 
 ### Lakka / LibreELEC (musl)
 
@@ -263,6 +265,46 @@ Install: drop `makecode_arcade_libretro.so` and `makecode_arcade_libretro.info`
 into `/storage/cores/` on Lakka (SSH defaults to root/lakka) and refresh the
 core list. A 900-frame miniretro smoke run covers it in CI
 (`behavior-miniretro (musl 全静态)`).
+
+### 3DS / PS Vita (frontends/)
+
+The 3DS and Vita have **no `dlopen` and tight memory**, so the core here is
+not a `.so` dropped into `cores/` but two static forms (co-installable,
+non-interfering):
+
+- **Minimal frontend** (`frontends/ctr`, `frontends/vita`): the core static
+  library plus a minimal libretro frontend — no menu assets, fastest boot.
+  Controls: A/B (CROSS/CIRCLE on Vita) = game keys, D-pad = direction,
+  START = in-game menu, SELECT = reset, L/R switch cartridges;
+  **START+SELECT together** opens the pause-state cartridge list menu
+  (up/down to pick, A/CROSS to load, B/CIRCLE to return — VM state is kept
+  intact, so you resume where you left off).
+- **Core package** (RetroArch form): `mca_libretro.cia` (3DS) /
+  `mca_libretro.vpk` + `mca_libretro.self` (Vita) — **the full RetroArch
+  frontend statically linked with the core**, isomorphic to libretro's
+  official "one CIA / vpk per core" distribution. Identities are offset from
+  the minimal packages (3DS UniqueId `0xF1CA1` vs `0xF1CA0`; Vita TITLE_ID
+  `MCAC00001`); on a device that already has RetroArch, you can alternatively
+  just drop the `.self` into the RA directory.
+
+Building (with the real toolchains installed):
+
+```bash
+# 3DS (devkitPro)
+export DEVKITPRO=/opt/devkitpro
+make -C core platform=ctr && make -C frontends/ctr
+
+# Vita (vitasdk; one-shot GL dependency chain: tools/setup_vita_gl_stack.sh)
+export VITASDK=/path/to/vitasdk
+make -C core platform=vita && make -C frontends/vita
+```
+
+The two-level RetroArch full-frontend builds (core static library → linked
+into the RA sources to produce 3dsx/cia/vpk and the core CIA/VPK/SELF) are
+handled by the standalone `.github/workflows/3ds-vita.yml` (**manual
+dispatch only**; 4 jobs: core-ctr / core-vita / ra-ctr / ra-vita; the RA
+version is pinned to a verified tip snapshot by default). Test packages,
+install steps, and acceptance checklists live in `out/3ds-vita/README.md`.
 
 ### Nintendo Switch (RetroArch NX)
 
@@ -323,7 +365,7 @@ onward); Android statically links libc++ and is 16 KB-page aligned
 > `docs/DEVICE-TEST.md`.
 
 ```bash
-tools/build_matrix.sh --all                    # Full-matrix validation (all 20 64-bit targets pass)
+tools/build_matrix.sh --all                    # Full-matrix validation (all 17 64-bit targets pass)
 tools/build_matrix.sh --prune                  # Back to the 5 release targets, removing other targets' dist/build dirs
 python tools/inspect_binary.py                 # Arch + libc baseline + deps + retro_* exports
 ```
@@ -353,11 +395,14 @@ bottom of the Actions run page).
 |---|---|---|
 | `linux-x64` / `linux-arm64` | Ubuntu 22.04 + gcc cross packages | `.so` |
 | `windows-x64` | mingw-w64 (**-posix** threading model; the pxt VM uses pthreads) | `.dll` |
-| `android-arm64` | Runner-provided NDK + `core/jni/` (same parameters as the official template) | `.so` |
-| `zig-*` (x64/arm64 Windows + Linux x64/arm64) | **Same toolchain as local releases** (zig 0.17.0 + `tools/build_target.sh`) | `.so` / `.dll` |
+| `android-arm64` / `android-armv7a` | Runner-provided NDK + `core/jni/` (same parameters as the official template); arm64 is the release ABI, armv7a is the 32-bit regression safety net | `.so` |
+| `zig-*` (x64/arm64 Windows + Linux x64/arm64 + the three 32-bit targets `x86-windows-gnu` / `x86-linux-gnu.2.17` / `arm-linux-gnueabihf.2.17`) | **Same toolchain as local releases** (zig 0.17.0 + `tools/build_target.sh`); the 32-bit targets are build-regression only, never released | `.so` / `.dll` |
 | `macos-universal` | Xcode clang, arm64+x86_64 | `.dylib` (experimental, `continue-on-error`) |
 | `lakka-musl` | dockcross `linux-arm64-musl` + GNU ld `-shared -static` | `.so` (**fully static, zero `NEEDED`**, for musl systems like Lakka/LibreELEC) |
 | `behavior-miniretro` | real aarch64 runner (`ubuntu-24.04-arm`) + third-party frontend miniretro | 900-frame smoke run (behaviour layer, not compile layer) |
+| `golden-hash` | gcc + `tools/libretro_host.py` | Last-frame MD5 over 2 cartridges × 3 cases — the only assertion that catches "contract all green but the picture is drawn wrong" |
+| `crash-regression` | gcc + 3 regression fixtures | Watches PATCH 13/14 (two integer division-by-zero fixes) and PATCH 15 (`load_game` no longer lies on image validation failure) |
+| `pxt-patches` | pure Python, no compiling | Verifies the 14 required patches in the vendored pxt tree are still present (seconds) |
 | `package` | Collects distro-toolchain artifacts → `tools/package_release.sh` | 5 zips |
 | `release` (only on `core-v*` tags) | Collects `zig-*` + `android-*` + `lakka-musl` artifacts → `package_release.sh` → `gh release create` | **6 zips** (including `windows-arm64`, which only zig can produce, and `lakka-arm64`, which only the musl toolchain can produce) |
 
@@ -368,6 +413,14 @@ sources plus a pile of portlibs (a dozen-plus minutes), which would slow down
 every core release if chained into the main pipeline. The artifact shape
 differs too — an NRO embeds the frontend itself, it is not a `.so` you can
 drop into `cores/`.
+
+3DS / Vita (including the two-level full-RetroArch builds and the core
+packages) are likewise outside this table: the standalone
+`.github/workflows/3ds-vita.yml` handles them, **manual dispatch only**
+(4 jobs: core-ctr / core-vita / ra-ctr / ra-vita; the RA version is pinned
+to a verified tip snapshot by default). Artifacts land as workflow
+artifacts; install packages and acceptance checklists are in
+`out/3ds-vita/README.md`.
 
 The toolchains are **deliberately split in two** — don't merge them:
 
