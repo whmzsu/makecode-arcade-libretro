@@ -1,4 +1,6 @@
 # makerom rsf 模板：MCA 最小前端（3DS homebrew CIA）
+# AccessControlInfo/SystemControlInfo 是 ExHeader 必填项
+#（缺 CoreVersion 会报 [EXHEADER ERROR] Parameter Not Found，2026-11-17 实测）
 BasicInfo:
   Title        : "MCA Core Test"
   ProductCode  : "CTR-P-MCA1"
@@ -10,4 +12,12 @@ TitleInfo:
 
 SystemControlInfo:
   SaveDataSize : 0KB
+  StackSize    : '0x40000'    # 与 core 的 VM 栈 256KB 对齐
   RemasterVersion : 10
+
+AccessControlInfo:
+  CoreVersion      : 2
+  SystemMode       : '64MB'    # OLD3DS 64MB / NEW3DS 124MB 自动向上兼容
+  IdealProcessor   : 1
+  AffinityMask     : 1
+  EnableL2Memory   : false
