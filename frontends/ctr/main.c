@@ -4,13 +4,16 @@
  * 链接 core 的 libretro_ctr.a 静态库，职责只有测试需要的部分：
  *   - 顶部屏 2x 缩放（160x120 -> 320x240 居中），RGB565 直写 framebuffer
  *   - hid 8 键 -> RetroPad：A/B/十字键、START=游戏内菜单、SELECT=重置
- *   - L/R 肩键切换 sdmc:/mca 目录下的 .pxt64 卡带，Y 退回 Homebrew Launcher
+ *   - L/R 肩键切换 sdmc:/mca 目录下的 .pxt64 卡带
  *   - ndsp 立体声 44100Hz 输出
  *   - 底屏 console 显示状态
- *   - START+SELECT 进暂停态卡带列表（底屏渲染）：上下选、A 装载、B 返回
+ *   - START+SELECT 或 X 进暂停态卡带列表（底屏渲染）：上下选、A 装载、B 返回
+ *   - Y 长按 1 秒退回 Homebrew Launcher（短按无效，防逐键测试误触退出）
  *
  * 契约对齐 docs/INPUT.md：RetroPad A(id8)=MakeCode A、B(id0)=MakeCode B、
  * START(3)=菜单、SELECT(2)=重置（重置上升沿由 core 在 retro_run 内处理）。
+ * X/Y 不进 RetroPad、不传给 core —— MakeCode Arcade 没有 X/Y 语义
+ *（docs/INPUT.md: X/Y/L 未映射）；这里只做前端快捷键，probe 卡仍是白底。
  */
 #include <3ds.h>
 #include <stdio.h>
@@ -351,8 +354,8 @@ static void print_status(void) {
     }
     printf("A/B=game keys  D-pad=move\n");
     printf("  START=ingame menu  SELECT=reset\n");
-    printf("  START+SELECT=cart list  L/R=switch cart\n");
-    printf("  Y=exit\n");
+    printf("  X / START+SELECT=cart list  L/R=switch cart\n");
+    printf("  Y(hold 1s)=exit\n");
 }
 
 static void menu_leave(void) {
@@ -428,6 +431,7 @@ int main(void) {
     print_status();
 
     u32 prev_held = 0;
+    int g_y_hold = 0;   /* Y 长按帧计数（60 帧 ≈ 1 秒） */
     while (aptMainLoop()) {
     /* 菜单态不跑 retro_run（core 不会再调 input_poll_cb），必须每圈自己
      * 扫输入，否则 hidKeysHeld 永远是进菜单那一刻的缓存值，按键全失效 */
@@ -436,12 +440,19 @@ int main(void) {
     u32 down = held & ~prev_held;
     prev_held = held;
 
-    if (down & KEY_Y)
-        break;
+    /* Y 长按 1 秒才退出：短按不响应，避免逐键测试/游戏里误触直接退到 HBL。
+     * 60 帧 ≈ 1 秒（主循环每圈等一次 VBlank ≈ 60fps），松开即清零 */
+    if (held & KEY_Y) {
+        if (++g_y_hold >= 60)
+            break;
+    } else {
+        g_y_hold = 0;
+    }
 
-    /* START+SELECT 同按（至少一键是新按下）= 菜单开关 */
-    bool combo = (held & (KEY_START | KEY_SELECT)) == (KEY_START | KEY_SELECT)
-                 && (down & (KEY_START | KEY_SELECT)) != 0;
+    /* 菜单开关：X 单键，或 START+SELECT 同按（至少一键是新按下） */
+    bool combo = (down & KEY_X) != 0 ||
+                 ((held & (KEY_START | KEY_SELECT)) == (KEY_START | KEY_SELECT)
+                  && (down & (KEY_START | KEY_SELECT)) != 0);
 
     if (g_menu_open) {
         if (combo || (down & KEY_B)) {
