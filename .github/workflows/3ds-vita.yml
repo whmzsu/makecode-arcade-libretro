@@ -20,9 +20,9 @@ on:
   workflow_dispatch:
     inputs:
       retroarch_ref:
-        description: "RetroArch tag/branch（RA 完整前端两级构建用，与 nx.yml 一致；留空用默认）"
+        description: "RetroArch tag/commit（RA 完整前端两级构建用；留空用默认。注意：v1.22.2 的 Vita 路径用 vita2d，与新版 vitasdk GCC 硬冲突，3DS 路径强依赖 picasso（dkp-libs 无此包），默认用已验证的 tip 快照）"
         required: false
-        default: "v1.22.2"
+        default: "d7cc9bc"
 
 concurrency:
   group: 3dsvita-${{ github.ref }}
@@ -250,8 +250,9 @@ jobs:
   # ============================================================ RA 完整前端（3DS）
   # 第二级构建：core 静态库链进 RetroArch（Makefile.ctr），出带完整
   # XMB 菜单前端的 .3dsx/.cia——与官方"每核心一个分发物"同构。
-  # 链接只要 libctru，零新增依赖；makerom/bannertool 沿用上面 core-ctr
-  # job 的取法。RetroArch 版本用与 nx.yml 相同的 pin（v1.22.2）。
+  # 链接只要 libctru，零新增依赖（CIA 打包用 RA 仓库自带的
+  # pkg/ctr/tools/makerom-linux/bannertool-linux）。RetroArch 默认 pin
+  # tip 快照 d7cc9bc（tool69 实测组合），原因见 workflow_dispatch 输入说明。
   ra-ctr:
     name: RetroArch 3DS full (3dsx/cia)
     runs-on: ubuntu-24.04
@@ -275,26 +276,22 @@ jobs:
           fi
           ls -l core/makecode_arcade_libretro_ctr.a
 
-      - name: 拉 RetroArch（pin ${{ github.event.inputs.retroarch_ref || 'v1.22.2' }}）
+      - name: 拉 RetroArch（pin ${{ github.event.inputs.retroarch_ref || 'd7cc9bc' }}）
         env:
-          REF: ${{ github.event.inputs.retroarch_ref || 'v1.22.2' }}
+          REF: ${{ github.event.inputs.retroarch_ref || 'd7cc9bc' }}
           GIT_TERMINAL_PROMPT: "0"
         run: |
           set -u
           command -v git >/dev/null || { apt-get update -qq && apt-get install -y -qq git; }
+          # REF 可为 tag 或 commit SHA（init+fetch 支持 SHA，clone --branch 不支持）。
+          # 默认 d7cc9bc = tool69 实测通过组合：Vita 走 vitaGL（依赖链由
+          # tools/setup_vita_gl_stack.sh 装）、3DS 有 prebuilt shader fallback。
           rm -rf /tmp/ra
-          git clone --depth 1 --branch "$REF" --recursive \
-            https://github.com/libretro/RetroArch.git /tmp/ra
+          git init /tmp/ra
+          git -C /tmp/ra remote add origin https://github.com/libretro/RetroArch.git
+          git -C /tmp/ra fetch --depth 1 origin "$REF"
+          git -C /tmp/ra checkout FETCH_HEAD
           git -C /tmp/ra log --oneline -1
-
-      - name: 装 picasso（shader 编译器，v1.22.2 无 prebuilt fallback）
-        run: |
-          set -u
-          # v1.22.2 的 Makefile.ctr 无条件编 ctr_sprite.o（需要 picasso+bin2s），
-          # devkitarm 容器没有 picasso → Error 127（首跑实测）；
-          # tip 上才有"缺 picasso 用 prebuilt .S"的回退，picasso 仍装上更稳
-          dkp-pacman -Syy --noconfirm 3ds-picasso 2>&1 | tail -3
-          "${DEVKITPRO:-/opt/devkitpro}/tools/bin/picasso" --help 2>&1 | head -1 || true
 
       - name: 链 RA 3DS 完整前端（.3dsx + .cia）
         run: |
@@ -390,16 +387,18 @@ jobs:
           fi
           ls -l core/makecode_arcade_libretro_vita.a
 
-      - name: 拉 RetroArch（pin ${{ github.event.inputs.retroarch_ref || 'v1.22.2' }}）
+      - name: 拉 RetroArch（pin ${{ github.event.inputs.retroarch_ref || 'd7cc9bc' }}）
         env:
-          REF: ${{ github.event.inputs.retroarch_ref || 'v1.22.2' }}
+          REF: ${{ github.event.inputs.retroarch_ref || 'd7cc9bc' }}
           GIT_TERMINAL_PROMPT: "0"
         run: |
           set -u
           command -v git >/dev/null || { apt-get update -qq && apt-get install -y -qq git; }
           rm -rf /tmp/ra
-          git clone --depth 1 --branch "$REF" --recursive \
-            https://github.com/libretro/RetroArch.git /tmp/ra
+          git init /tmp/ra
+          git -C /tmp/ra remote add origin https://github.com/libretro/RetroArch.git
+          git -C /tmp/ra fetch --depth 1 origin "$REF"
+          git -C /tmp/ra checkout FETCH_HEAD
           git -C /tmp/ra log --oneline -1
 
       - name: 链 RA Vita 完整前端（.self）
