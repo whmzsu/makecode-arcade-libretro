@@ -8,8 +8,9 @@
 >   `cart.c` / `decompress.c` / `miniz` / `LzmaDec` 已从 core 删除；`.png` 卡带
 >   先用官方 IDE 导出或用 cartconv 转换（见 README「拿到 `.pxt64`」）。
 > - 下文出现的 `.mka` 字节码包、"ROM 双格式"、"MVP 接受 .png" 都是**废弃方案**。
-> - "骨架阶段""尚未编译验证"之类的描述均已过时：当前是 v0.3.5，6 个 64 位
->   目标 + Windows/Android/Linux 全矩阵在发版。
+> - "骨架阶段""尚未编译验证"之类的描述均已过时：当前是 v0.3.9，6 个 64 位
+>   目标 + Windows/Android/Linux 全矩阵在发版；3DS / Vita / Switch 另有
+>   专用前端与整包（见 README「3DS / PS Vita」与 Switch 小节）。
 
 ## 0. 目标与非目标
 

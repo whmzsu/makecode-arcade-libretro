@@ -30,7 +30,7 @@ if [ -z "$PYTHON_BIN" ]; then
   exit 2
 fi
 
-# 发版目标 = build_matrix.sh 的 MAIN_TARGETS（全部 64 位；32 位目标已整体移除）
+# 发版目标 = build_matrix.sh 的 MAIN_TARGETS（全部 64 位；32 位待真机验收后进矩阵，CI 已有构建回归兜底）
 MAIN_TARGETS=(
   x86_64-windows-gnu
   aarch64-windows-gnu
@@ -221,8 +221,8 @@ MakeCode Arcade — libretro core ($plat)
   （设置 → 配置 → 保存新配置 → 编辑该行 → 加载配置）。
   只装 .so 不装 .info 是不行的：实测选中游戏后「选择核心」列表里选不到本核心。
 
-  选包：Android 只有 64 位版（arm64-v8a）。本核心不支持 32 位设备——
-        卡带镜像是 PXT64，32 位 VM 跑不了任何游戏，详见 README。
+  选包：Android 只有 64 位版（arm64-v8a）。32 位设备请用对应平台的专门
+        整包（3DS / Vita），不要把这个 64 位核心塞进 retroarch32。
 
 内容格式：
   .pxt64  转换后的 VM 字节码镜像，核心只认这个格式（加载内容里也只列出它）

@@ -1,5 +1,10 @@
 # PXT32 A 方案实测报告（分支 `probe/pxt32-gc-a`）
 
+> **2026-11-17 状态更新**：本文写作时的"不合并 main、不进 CI"决策已随
+> 3DS/Vita 线改变——A 方案随 `probe/pxt32-3ds-vita` **合并进 main**
+> （`31d9969`），GitHub CI 补了 32 位构建回归兜底；发版矩阵仍全 64 位，
+> 待真机验收后再扩。`probe/pxt32*` 分支已删除，本文按当时分支状态留档。
+>
 > 2026-11-16。承接 `probe/pxt32`（P0/P1）——P1 实测证实 32 位硬阻断是 GC 的
 > vtable 高位标记位。本分支尝试 **A 方案：把 FREE/ARRAY/PERMA 标记搬到旁路表**，
 > 验证"自己能不能实现 32 位核心"。结论：**技术上跑通了**，但代价是长期 fork，
@@ -373,6 +378,7 @@ runner 没这个限制。新增 `.github/workflows/3ds-vita.yml`（仅 workflow_
 注意 workflow 文件必须存在于默认分支才能被 `gh workflow run` 发现——已在
 main 单独 cherry-pick 该 yml（`0b1ed6b`，仅一个 dispatch-only CI 文件，
 构建矩阵未动）；分支本体 `probe/pxt32-3ds-vita` 依旧不合 main。
+**（2026-11-17 追注：该分支后来已完整合并进 main，`31d9969`，分支已删。）**
 
 **首轮实编抓到 5 个只有真工具链才能暴露的问题**（全部已修，逐条零回归）：
 1. `core.cpp` `getConfig`：`vmImg->configData` 是 `int32_t*`，devkitARM 的

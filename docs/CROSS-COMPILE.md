@@ -13,10 +13,13 @@ tools/build_matrix.sh     # 默认只跑下面这 5 个
 tools/package_release.sh  # 打包成可直接放进 RetroArch 的 zip
 ```
 
-> **32 位目标已整体移除**（v0.3.1）。卡带镜像是 PXT64，官方 pxt 编译器没有
-> 32 位镜像输出，runtime 的 PXT32 镜像补丁是上游未实现的 TODO
->（`verify.cpp`: `"TODO: NumberBoxes"`），32 位核心装得上但跑不了任何游戏。
-> 详见 README「只支持 64 位前端」。
+> **发版矩阵仍全 64 位**（2026-11-17 更新）。32 位的硬阻断原本是 GC 的
+> vtable 高位标记位——A 方案（GC 标记搬旁路表）进 main 后，**PXT64 布局在
+> 32 位平台上已可用**（3DS/Vita 线同一路径）。GitHub CI 已补 32 位**构建
+> 回归**兜底（zig `x86-windows-gnu` / `x86-linux-gnu.2.17` /
+> `arm-linux-gnueabihf.2.17` + NDK `armeabi-v7a`），但**发版仍只出 6 个
+> 64 位包**——32 位待真机验收后再进发版矩阵。根因与决策过程见
+> `docs/PXT32-A-SCHEME.md` 与 README「32 位与 64 位」。
 
 | 目标三元组 | 平台 | 格式 | libc 基线 | 产物 | 备注 |
 |---|---|---|---|---|---|
@@ -134,7 +137,7 @@ zig 的 libc++ 用 `#include_next <math.h>` 找 C 数学头，而 bionic 的数�
 | 项 | 取值 |
 |---|---|
 | 编译器 | `$NDK/toolchains/llvm/prebuilt/<host>/bin/clang++.exe` |
-| 目标 | `--target=aarch64-linux-android21`（32 位 ABI 已移除，不再构建） |
+| 目标 | `--target=aarch64-linux-android21`（发版只出 arm64；armeabi-v7a 在 GitHub CI 有构建回归兜底，不入发版） |
 | sysroot | clang 自动按自身路径定位，无需显式传 |
 | NDK 位置 | `$ANDROID_NDK_HOME`，缺省回落到 `../common tools/android-ndk-r27c` |
 
@@ -154,11 +157,12 @@ Android 是 32 位，不在支持范围。
 
 ## 全架构验证（`--all`）
 
-`tools/build_matrix.sh --all`（**现在只跑 64 位目标**）：20 个目标全部通过。
+`tools/build_matrix.sh --all`（**仍只跑 64 位目标**）：17 个目标全部通过。
 
 > 下表是 v0.3.0 期间的历史实测记录，当时还包含 32 位目标（arm32/armeb/x86/
-> x32/riscv32）。这些条目已从 `--all` 移除——**32 位目标一律不构建**，原因见
-> 上方「32 位目标已整体移除」。保留这张表只是为了记下当时各架构的实际产物
+> x32/riscv32）。这些条目已从 `--all` 移除——发版工具不出 32 位（32 位的
+> 构建回归由 GitHub CI 直接调 `build_target.sh` 兜底，不经 build_matrix），
+> 待真机验收后再进矩阵。保留这张表只是为了记下当时各架构的实际产物
 > 尺寸与基线。
 
 | 目标 | 架构 | 格式 | libc 基线 | 产物大小 |
