@@ -107,8 +107,10 @@ jobs:
             https://github.com/3DSGuy/Project_CTR/releases/download/makerom-v0.18.4/makerom-v0.18.4-ubuntu_x86_64.zip
           unzip -o makerom.zip -d makerom
           install -m 755 makerom/makerom "$DEVKITPRO/tools/bin/makerom"
+          # bannertool 原仓库 Steveice10/bannertool 已 404（2026-11-17 实测），
+          # diasurgical fork 保留同名 release 资产（zip 内 linux-x86_64/bannertool）
           curl -fsSL -o bannertool.zip \
-            https://github.com/Steveice10/bannertool/releases/download/1.2.0/bannertool.zip
+            https://github.com/diasurgical/bannertool/releases/download/1.2.0/bannertool.zip
           unzip -o bannertool.zip -d bannertool
           install -m 755 bannertool/linux-x86_64/bannertool "$DEVKITPRO/tools/bin/bannertool"
           makerom -h 2>&1 | head -2 || true
