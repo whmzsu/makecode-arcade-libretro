@@ -283,15 +283,16 @@ jobs:
         run: |
           set -u
           command -v git >/dev/null || { apt-get update -qq && apt-get install -y -qq git; }
-          # REF 可为 tag 或 commit SHA（init+fetch 支持 SHA，clone --branch 不支持）。
+          # REF 可为 tag 或 commit SHA。GitHub 不支持按 SHA fetch（
+          # couldn't find remote ref，实测），走 codeload tarball：tag/SHA
+          # 通吃、不需要子模块（ctr/vita 构建的依赖都在树内）。
           # 默认 d7cc9bc = tool69 实测通过组合：Vita 走 vitaGL（依赖链由
           # tools/setup_vita_gl_stack.sh 装）、3DS 有 prebuilt shader fallback。
-          rm -rf /tmp/ra
-          git init /tmp/ra
-          git -C /tmp/ra remote add origin https://github.com/libretro/RetroArch.git
-          git -C /tmp/ra fetch --depth 1 origin "$REF"
-          git -C /tmp/ra checkout FETCH_HEAD
-          git -C /tmp/ra log --oneline -1
+          rm -rf /tmp/ra && mkdir -p /tmp/ra
+          curl -fsSL "https://github.com/libretro/RetroArch/archive/${REF}.tar.gz" \
+            | tar xz --strip-components=1 -C /tmp/ra
+          head -3 /tmp/ra/Makefile.ctr /tmp/ra/Makefile.vita >/dev/null
+          echo "RetroArch 树就绪"
 
       - name: 链 RA 3DS 完整前端（.3dsx + .cia）
         run: |
@@ -394,12 +395,13 @@ jobs:
         run: |
           set -u
           command -v git >/dev/null || { apt-get update -qq && apt-get install -y -qq git; }
-          rm -rf /tmp/ra
-          git init /tmp/ra
-          git -C /tmp/ra remote add origin https://github.com/libretro/RetroArch.git
-          git -C /tmp/ra fetch --depth 1 origin "$REF"
-          git -C /tmp/ra checkout FETCH_HEAD
-          git -C /tmp/ra log --oneline -1
+          # REF 可为 tag 或 commit SHA；GitHub 不支持按 SHA fetch（实测），
+          # 走 codeload tarball（依赖都在树内，不需要子模块）
+          rm -rf /tmp/ra && mkdir -p /tmp/ra
+          curl -fsSL "https://github.com/libretro/RetroArch/archive/${REF}.tar.gz" \
+            | tar xz --strip-components=1 -C /tmp/ra
+          head -3 /tmp/ra/Makefile.ctr /tmp/ra/Makefile.vita >/dev/null
+          echo "RetroArch 树就绪"
 
       - name: 链 RA Vita 完整前端（.self）
         run: |
