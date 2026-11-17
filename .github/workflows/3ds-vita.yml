@@ -447,18 +447,24 @@ jobs:
             export PATH="$VITASDK/bin:$PATH"
             cd /tmp/ra || exit 1
             fail() { echo "FAIL: $*"; exit 1; }
-            # eboot 必须是 fSELF（官方分发形态）
-            python3 - << 'EOF' || exit 1
-import sys, zipfile
-z = zipfile.ZipFile('/tmp/ra/mca_libretro.vpk')
-names = z.namelist()
-assert 'sce_sys/param.sfo' in names and 'eboot.bin' in names and 'sce_sys/icon0.png' in names, names
-sfo = z.read('sce_sys/param.sfo')
-assert b'MCAC00001' in sfo and b'MakeCode Arcade' in sfo, 'param.sfo 缺 TITLE_ID/标题'
-e = z.read('eboot.bin')
-assert e[:4] == b'SCE\x00', 'eboot.bin 不是 fSELF: %r' % e[:4]
-print('vpk 内容:', names, 'eboot fSELF', len(e), 'B')
-EOF
+            # 解 zip 用 unzip（vitasdk 容器不一定带，缺就 apt 装；
+            # 不用 python3——vitasdk 容器里未必有）
+            command -v unzip >/dev/null || { apt-get update -qq && apt-get install -y -qq unzip; }
+            unzip -l mca_libretro.vpk
+            unzip -l mca_libretro.vpk | grep -q 'sce_sys/param.sfo' || fail "vpk 缺 param.sfo"
+            unzip -l mca_libretro.vpk | grep -q 'sce_sys/icon0.png'  || fail "vpk 缺 icon0"
+            # eboot 必须是 fSELF（SCE\x00 头，官方分发形态；vita-pack-vpk
+            # 从 .self 直收，这一步断言防的是误把裸 velf 打进包）
+            unzip -p mca_libretro.vpk eboot.bin > /tmp/eboot.bin
+            printf 'SCE\x00' > /tmp/sce-magic
+            cmp -s /tmp/sce-magic /tmp/eboot.bin 2>/dev/null \
+              || { head -c 8 /tmp/eboot.bin | od -An -tx1; fail "eboot.bin 头不是 SCE 自识别 fSELF"; }
+            echo "eboot.bin: $(stat -c %s /tmp/eboot.bin) B, fSELF 头正确"
+            unzip -p mca_libretro.vpk sce_sys/param.sfo | grep -aq MCAC00001 \
+              || fail "param.sfo 缺 TITLE_ID=MCAC00001"
+            unzip -p mca_libretro.vpk sce_sys/param.sfo | grep -aq 'MakeCode Arcade' \
+              || fail "param.sfo 缺标题"
+            echo "param.sfo 校验通过"
             n=$(arm-vita-eabi-nm retroarch_vita.elf.unstripped.elf 2>/dev/null | grep -cE ' T retro_')
             echo "retro_* T 符号: $n 个"
             [ "$n" -ge 100 ] || fail "retro_* 符号过少（$n）"
