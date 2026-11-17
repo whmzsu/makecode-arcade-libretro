@@ -17,14 +17,21 @@
 #     Android 本地就是 NDK clang 编，由上面 android job 覆盖，无需 zig。
 # 两边都绿 = 发版产物（本地 zig）与收录产物（发行版 gcc）都有回归兜底。
 #
-# 矩阵只列验证过能编过的平台（**全部 64 位**；32 位目标已整体移除，
-# 原因见 README「只支持 64 位前端」）：
+# 矩阵只列验证过能编过的平台：
 #   linux-x64 / linux-arm64（.so）
 #   windows-x64（mingw-w64，.dll）
 #   android arm64-v8a（ndk-build，见 core/jni/）
 #   macOS 单独一个实验 job（continue-on-error，不阻塞）
-#   zig：x64/arm64 Windows + Linux x64/arm64（基线 2.17）
+#   zig：x64/arm64 Windows + Linux x64/arm64（基线 2.17）+ 32 位三目标
+#     （x86-windows-gnu / x86-linux-gnu.2.17 / arm-linux-gnueabihf.2.17，
+#     2026-11-16 本地全量实测：golden 三例 + 63 卡逐位一致，见
+#     docs/PXT32-A-SCHEME.md 第 6-8 节）
 #   lakka-musl：dockcross aarch64-musl 全静态 .so（Lakka 用，musl libc 例外不走 zig）
+#
+# 32 位口径（2026-11-17 起）：A 方案 GC 旁路表进 main 后，PXT64 布局在
+# 32 位平台上已可用（3DS/Vita 真机线同一路径）。CI 补 32 位构建做回归
+# 兜底，但**不发版**——release job 仍固定 6 平台全 64 位；32 位运行时
+# golden 依旧在本地跑（宿主是 32 位进程，CI 的 64 位 Python 载不了）。
 #   behavior-miniretro：真 aarch64 硬件 runner（ubuntu-24.04-arm，公开仓库
 #     免费）上用第三方前端 miniretro 跑 900 帧冒烟 —— 行为层验证
 #   golden-hash：末帧 MD5 比对（2 卡带 3 用例）—— 像素层验证，唯一能抓住
@@ -239,8 +246,9 @@ jobs:
           retention-days: 30
 
   # ---------------------------------------------------------------- Android
-  # 只构建 arm64-v8a：32 位 ABI 已整体移除（PXT64 镜像在 32 位 VM 下跑不了，
-  # 见 README「只支持 64 位前端」）。
+  # arm64-v8a 为发版 ABI；armeabi-v7a 是 CI 回归兜底（2026-11-16 本地
+  # NDK r27c 实测 62/63 卡逐位一致，且 32 位 RA 前端 com.retroarch.ra32
+  # 在 Mi Max 2 真机加载跑通），不发版。
   android:
     name: android-${{ matrix.abi }}
     runs-on: ubuntu-22.04
@@ -250,6 +258,8 @@ jobs:
         include:
           - abi: arm64-v8a
             triple: aarch64-linux-android21
+          - abi: armeabi-v7a
+            triple: armv7a-linux-androideabi21
     steps:
       - uses: actions/checkout@v4
 
@@ -285,12 +295,15 @@ jobs:
             echo "::error file=core/jni/Application.mk::依赖 libc++_shared.so，APP_STL 应为 c++_static"
             exit 1
           fi
-          # Android 15 起有 16KB 页设备，LOAD 段必须 0x4000 对齐
-          echo "== LOAD 对齐 =="
-          readelf -lW "$so" | awk '$1 == "LOAD" { print "  " $NF }' | sort -u
-          if readelf -lW "$so" | awk '$1 == "LOAD" { print $NF }' | grep -qv '^0x4000$'; then
-            echo "::error file=core/jni/Android.mk::LOAD 段不是 16KB 对齐，16KB 页设备无法 dlopen"
-            exit 1
+          # Android 15 起有 16KB 页设备，LOAD 段必须 0x4000 对齐——
+          # 只有 arm64-v8a 有 16KB 页设备，32 位 ABI 不做此断言
+          if [ "${{ matrix.abi }}" = "arm64-v8a" ]; then
+            echo "== LOAD 对齐 =="
+            readelf -lW "$so" | awk '$1 == "LOAD" { print "  " $NF }' | sort -u
+            if readelf -lW "$so" | awk '$1 == "LOAD" { print $NF }' | grep -qv '^0x4000$'; then
+              echo "::error file=core/jni/Android.mk::LOAD 段不是 16KB 对齐，16KB 页设备无法 dlopen"
+              exit 1
+            fi
           fi
           # 退出 139 的修复必须在 Android 包上也在：pxt static 析构 + RA 的
           # dlclose → 需要一个 DF_1_NODELETE 标志（ndk-build 走自己的 LDFLAGS，
@@ -337,6 +350,20 @@ jobs:
             ext: so
             apt: ''
           - triple: aarch64-linux-gnu.2.17
+            ext: so
+            apt: ''
+          # 32 位三目标：仅 CI 回归兜底，不发版（见文件头"32 位口径"）。
+          # 三条都是 2026-11-16 本地全量实测过的构型（golden 三例 +
+          # 63 卡逐位一致）；x86-windows-gnu 有一个已知观察项：
+          # platform.h 对 __MINGW32__ 走 64 位 GC_BASE，32 位截断成 0
+          # 功能正确但旁路表内存开销大，真做 Win32 发版前要优化。
+          - triple: x86-windows-gnu
+            ext: dll
+            apt: ''
+          - triple: x86-linux-gnu.2.17
+            ext: so
+            apt: ''
+          - triple: arm-linux-gnueabihf.2.17
             ext: so
             apt: ''
     steps:
