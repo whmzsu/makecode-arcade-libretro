@@ -72,6 +72,19 @@ def write_png(path, px, w, h):
     print(f'{path}: {w}x{h} {len(png)} B')
 
 
+def write_wav(path, seconds=1.0, rate=44100):
+    """静音 WAV（makebanner 的 -a 必填；banner 不配声就用静音占位）"""
+    import math
+    n = int(seconds * rate)
+    data = b''.join(struct.pack('<h', 0) for _ in range(n))
+    hdr = (b'RIFF' + struct.pack('<I', 36 + len(data)) + b'WAVE'
+           + b'fmt ' + struct.pack('<IHHIIHH', 16, 1, 1, rate, rate * 2, 2, 16)
+           + b'data' + struct.pack('<I', len(data)))
+    with open(path, 'wb') as f:
+        f.write(hdr + data)
+    print(f'{path}: {seconds}s {rate}Hz 静音 {len(hdr) + len(data)} B')
+
+
 def main(outdir):
     # 48x48 图标：紫底 + 白色 MCA
     w, h = 48, 48
@@ -85,6 +98,10 @@ def main(outdir):
     draw_centered(px, w, h, 'MCA CORE', 5, y_off=-14)
     draw_centered(px, w, h, '3DS', 3, y_off=18)
     write_png(f'{outdir}/banner256.png', px, w, h)
+
+    # bannertool makebanner 要求 -a 音频必填（diasurgical fork，源码实测），
+    # 无声 banner 用 1s 静音占位
+    write_wav(f'{outdir}/banner.wav')
 
 
 if __name__ == '__main__':

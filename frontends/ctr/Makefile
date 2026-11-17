@@ -39,8 +39,8 @@ $(TARGET).smdh: icon48.png
 	  -el "MCA libretro core minimal frontend (PXT32 static)" \
 	  -ep "mca-arcade" -i $< -o $@
 
-$(TARGET).bnr: banner256.png
-	$(TOOLBIN)/bannertool makebanner -i $< -o $@
+$(TARGET).bnr: banner256.png banner.wav
+	$(TOOLBIN)/bannertool makebanner -i banner256.png -a banner.wav -o $@
 
 $(TARGET).3dsx: $(TARGET).elf
 	$(TOOLBIN)/3dsxtool $< $@
