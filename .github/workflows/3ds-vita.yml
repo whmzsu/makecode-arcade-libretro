@@ -453,9 +453,12 @@ jobs:
             # eboot 必须是 fSELF（SCE\x00 头，官方分发形态；vita-pack-vpk
             # 从 .self 直收，这一步断言防的是误把裸 velf 打进包）
             unzip -p mca_libretro.vpk eboot.bin > /tmp/eboot.bin
-            printf 'SCE\x00' > /tmp/sce-magic
-            cmp -s /tmp/sce-magic /tmp/eboot.bin 2>/dev/null \
-              || { head -c 8 /tmp/eboot.bin | od -An -tx1; fail "eboot.bin 头不是 SCE 自识别 fSELF"; }
+            # 只比前 4 字节（cmp 全文必然 EOF 不等，第二轮实测）；
+            # \000 用八进制（dash 的 printf 不认 \xHH）
+            head -c 4 /tmp/eboot.bin > /tmp/eboot-head
+            printf 'SCE\000' > /tmp/sce-magic
+            cmp -s /tmp/sce-magic /tmp/eboot-head \
+              || { od -An -tx1 -N8 /tmp/eboot.bin; fail "eboot.bin 头不是 SCE 自识别 fSELF"; }
             echo "eboot.bin: $(stat -c %s /tmp/eboot.bin) B, fSELF 头正确"
             unzip -p mca_libretro.vpk sce_sys/param.sfo | grep -aq MCAC00001 \
               || fail "param.sfo 缺 TITLE_ID=MCAC00001"
