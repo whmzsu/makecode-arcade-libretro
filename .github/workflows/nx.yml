@@ -29,8 +29,12 @@ on:
       - main
     # 发版 tag。注意 paths 过滤器对 tag push 不一定生效，所以 release-notes
     # 也列进来——每次发版必然新增该文件，保证 tag 一定能触发。
+    # core-v* 同样触发：NRO zip 由 core-release-upload job 追加到核心发版的
+    # 同一个 Release（build.yml 的 release job 建后轮询上传）；nx-v* 仍是
+    # 独立的 NRO Release（release job）。
     tags:
       - "nx-v*"
+      - "core-v*"
     # 只在 core 侧或本 workflow 变动时跑（NRO 全量构建要十几分钟，
     # 不适合像 build.yml 那样每次 push 都跑）
     paths:
@@ -351,3 +355,48 @@ jobs:
       - name: 输出 Release 地址
         run: |
           echo "https://github.com/${GITHUB_REPOSITORY}/releases/tag/${GITHUB_REF#refs/tags/}"
+
+  # ------------------------------------------------------------ 核心发版追加
+  # 推 core-v* tag 时：把 Switch NRO zip 追加到核心发版的同一个 Release
+  #（build.yml 的 release job 负责建；这里轮询等待后 --clobber 上传，
+  # 重跑幂等）。nx-v* 的独立 Release 走上面的 release job，互不干扰。
+  core-release-upload:
+    name: upload Switch NRO to core release (core-v*)
+    if: startsWith(github.ref, 'refs/tags/core-v')
+    needs: [nro]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: nx-switch-nro
+          path: pkg
+
+      - name: 轮询等待 Release 并上传
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF#refs/tags/}"
+          z=pkg/makecode_arcade_switch.zip
+          [ -f "$z" ] || { echo "::error::没有 artifact $z"; exit 1; }
+          ls -l "$z"
+          echo "目标 Release: $tag"
+          for i in $(seq 1 60); do
+            if gh release view "$tag" >/dev/null 2>&1; then
+              echo "Release 已存在（第 $i 次检查）"
+              break
+            fi
+            echo "等待 Release 建立… ($i/60)"
+            sleep 60
+          done
+          gh release view "$tag" >/dev/null 2>&1 || {
+            echo "::error::60 分钟内 Release $tag 未建立（build.yml 的 release job 可能失败了），确认后重跑本 job"
+            exit 1
+          }
+          gh release upload "$tag" "$z" --clobber
+          echo "== Release 资产 =="
+          gh release view "$tag" --json assets --jq '.assets[] | "  " + .name + "  " + (.size|tostring) + " B"'

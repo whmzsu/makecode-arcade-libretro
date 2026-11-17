@@ -23,6 +23,16 @@ on:
         description: "RetroArch tag/commit（RA 完整前端两级构建用；留空用默认。注意：v1.22.2 的 Vita 路径用 vita2d，与新版 vitasdk GCC 硬冲突，3DS 路径强依赖 picasso（dkp-libs 无此包），默认用已验证的 tip 快照）"
         required: false
         default: "d7cc9bc"
+      upload_tag:
+        description: "把前端整包上传到哪个 core-v* Release（如 core-v0.3.10；留空=不上传，只构建）"
+        required: false
+        default: ""
+  push:
+    tags:
+      # 与 build.yml 的 release job 同一个 tag：本 workflow 出 3DS/Vita 前端
+      # 整包并追加到同一个 Release（frontend-release job 轮询等 Release 建好
+      # 再上传）。注意本 workflow 没有 paths 过滤，tag push 必触发。
+      - "core-v*"
 
 concurrency:
   group: 3dsvita-${{ github.ref }}
@@ -522,3 +532,69 @@ jobs:
             /tmp/ra/mca_libretro.self
             /tmp/ra/mca_libretro.info
           if-no-files-found: error
+
+  # ============================================================ 发版上传
+  # 推 core-v* tag（或 dispatch 带 upload_tag 输入）时：把 3DS/Vita 前端
+  # 整包追加到核心发版的同一个 Release。build.yml 的 release job 负责
+  # 建 Release（10 个核心 zip）；两条流水线并行，Release 建好的时间不定，
+  # 所以这里轮询等待（最长 60 分钟），出现后 --clobber 上传（重跑幂等）。
+  # 每个文件是什么、给谁用的，见 .github/release-notes/PLAYER-GUIDE-FOOTER.md
+  # 的资产分组表（发版正文尾部自动带）。
+  frontend-release:
+    name: upload 3DS/Vita packages to core release
+    needs: [core-ctr, core-vita, ra-ctr, ra-vita]
+    if: >-
+      ${{ startsWith(github.ref, 'refs/tags/core-v') ||
+          (github.event_name == 'workflow_dispatch' && inputs.upload_tag != '') }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: art
+
+      - name: 归集资产
+        run: |
+          set -euo pipefail
+          mkdir -p pkg
+          # 3DS：极简（3dsx + cia）+ 核心 CIA。RA 3DS 完整前端本体
+          #（retroarch_3ds.3dsx/.cia）不进 Release——想用完整 RA 的玩家装
+          # 核心 CIA 即可（其内含 RA 前端本体）。
+          cp art/ctr-testpack/mca_ctr.3dsx art/ctr-testpack/mca_ctr.cia pkg/
+          cp art/ctr-ra-pack/mca_libretro.cia pkg/
+          # Vita：极简 vpk + 核心 vpk / 裸 self / info
+          cp art/vita-testpack/mca_vita.vpk pkg/
+          cp art/vita-ra-pack/mca_libretro.vpk art/vita-ra-pack/mca_libretro.self pkg/
+          cp art/vita-ra-pack/mca_libretro.info pkg/
+          ls -l pkg/
+
+      - name: 轮询等待 Release 并上传
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -n "${{ inputs.upload_tag }}" ]; then
+            tag="${{ inputs.upload_tag }}"
+          else
+            tag="${GITHUB_REF#refs/tags/}"
+          fi
+          echo "目标 Release: $tag"
+          # 轮询：build.yml 的 release job 要等 zig/android/lakka 全编完才建
+          # Release，慢时几十分钟。60 分钟内出现即可；超时则红——确认主
+          # 流水线没挂后重跑本 job 即可，上传幂等（--clobber）。
+          for i in $(seq 1 60); do
+            if gh release view "$tag" >/dev/null 2>&1; then
+              echo "Release 已存在（第 $i 次检查）"
+              break
+            fi
+            echo "等待 Release 建立… ($i/60)"
+            sleep 60
+          done
+          gh release view "$tag" >/dev/null 2>&1 || {
+            echo "::error::60 分钟内 Release $tag 未建立（build.yml 的 release job 可能失败了），确认后重跑本 job"
+            exit 1
+          }
+          gh release upload "$tag" pkg/* --clobber
+          echo "== Release 资产 =="
+          gh release view "$tag" --json assets --jq '.assets[] | "  " + .name + "  " + (.size|tostring) + " B"'

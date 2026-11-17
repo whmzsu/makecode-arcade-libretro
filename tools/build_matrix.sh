@@ -2,7 +2,7 @@
 # build_matrix.sh — 交叉编译矩阵
 #
 # 档位：
-#   ./build_matrix.sh            # 主流目标（发版用，5 个：Win x64/arm64、Linux x86_64/aarch64、Android arm64）
+#   ./build_matrix.sh            # 主流目标（发版用，9 个：Win x64/arm64/x86、Linux x64/arm64/x86/armhf、Android arm64/armv7）
 #   ./build_matrix.sh --all      # 全架构（验证用，含 riscv/loongarch/ppc/s390x/musl/macOS/大端…，均 64 位）
 #   ./build_matrix.sh <triple>…  # 只跑指定目标
 #
@@ -23,22 +23,22 @@ DIST="$PROJ/core/dist"
 # —— 主流目标：发版矩阵 ——
 # Linux glibc 基线钉在 2.17（覆盖 2012 年后所有掌机固件；默认基线会到 2.29~2.34）
 # Android API 21（RetroArch Android 最低支持；NDK r27 的下限即 21）
+# 2026-11-17 起含 32 位四目标（A 方案 GC 旁路表进 main 后 PXT64 布局在
+# 32 位平台可用；详见 docs/PXT32-A-SCHEME.md 与 README「32 位与 64 位」）
 MAIN_TARGETS=(
   # Windows
   x86_64-windows-gnu
   aarch64-windows-gnu
+  x86-windows-gnu
   # Linux
   x86_64-linux-gnu.2.17
   aarch64-linux-gnu.2.17
+  x86-linux-gnu.2.17
+  arm-linux-gnueabihf.2.17
   # Android
   aarch64-linux-android21
+  armv7a-linux-androideabi21
 )
-
-# 32 位目标（armhf / armv7 / x86 / i686-android…）**不在发版矩阵**：
-# A 方案 GC 旁路表进 main 后 PXT64 布局在 32 位平台已可用（见
-# docs/PXT32-A-SCHEME.md），GitHub CI 有 32 位构建回归兜底（zig 三目标 +
-# NDK armeabi-v7a），但发版仍固定 6 平台全 64 位，32 位待真机验收后再进矩阵。
-# 详见 README「32 位与 64 位」。
 
 # —— 扩展目标：--all 时追加 ——
 EXTRA_TARGETS=(

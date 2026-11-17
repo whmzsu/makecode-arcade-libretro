@@ -71,7 +71,7 @@ makecode_arcade/
 │   ├── build_core.sh       一键构建：DLL + 三个测试程序（core_test / contract_test / vm_smoke）
 │   ├── make_local.sh       用 zig 驱动 core/Makefile（本地无目标工具链时）
 │   ├── build_target.sh     单目标交叉编译（zig；Android 走 NDK clang）
-│   ├── build_matrix.sh     发版矩阵（5 主流目标）/ --all 全架构
+│   ├── build_matrix.sh     发版矩阵（9 主流目标：64 位 5 + 32 位 4）/ --all 全架构
 │   ├── package_release.sh  打包发行 zip（core + .info + 说明）
 │   ├── inspect_binary.py   产物自检（架构/libc 基线/依赖/retro_* 导出，纯标准库）
 │   ├── setup_vita_gl_stack.sh  Vita GL 依赖链一键搭建（taiHEN → SceShaccCgExt → vitashark → math-neon → vitaGL）
@@ -95,7 +95,7 @@ makecode_arcade/
 | M3 | pxt VM 字节码解释器接入，跑通第一个游戏 | ✅ **三款游戏全通**：vm_smoke（官方 ABI 直调）+ libretro 假前端路径（RGB565/按键沿/音频） |
 | M4 | 输入 / 音频合成 / 60fps 帧模型完整化 | ✅ 宿主接口全部打通：按键描述符/分键重绑、音频合成与峰值回归、帧驱动虚拟时钟（前端一圈一帧，快进=前端多取帧）、panic 横幅、存档目录对接（trace/数据走 `GET_SAVE_DIRECTORY`）、panic 自愈见 `test_lifecycle`。**v0.3.0 范围收敛：不做即时存档 / rewind（`retro_serialize*` 为 stub，前端自动禁用），核心只做官方模拟器同等的基本功能** |
 | M5 | 离线转换工具（PNG→bytecode）+ 游戏兼容性测试集 | ✅ 已拆分到独立仓库 [makecode-arcade-cartconv](https://github.com/whmzsu/makecode-arcade-cartconv)（cartconv 便携包 + png2pxt64.py 参照实现），三卡带实测通过 |
-| M6 | 交叉编译（掌机/桌面/移动）+ 性能验证 | ✅ **5 个 64 位主流目标全通并出 zip**（Windows x64/arm64、Linux x64/arm64、Android arm64）；✅ **32 位构建回归已进 CI 兜底**（A 方案 GC 旁路表进 main 后，PXT64 布局在 32 位平台可用，见 `docs/PXT32-A-SCHEME.md`；发版矩阵仍全 64 位，待真机验收后扩）；✅ **RK3566 + ArkOS 真机验收通过**（v0.2.1→v0.3.0 全功能回归，满速 166~361fps）；✅ **RK3326 + ArkOS 下限机型验收通过**（v0.3.0，最重游戏 66fps）；✅ **Android arm64 验收通过**（v0.2.7）；✅ **3DS / Vita 极简前端 + RA 完整前端 + 核心包已产出**（CI 可复现，真机验收进行中） |
+| M6 | 交叉编译（掌机/桌面/移动）+ 性能验证 | ✅ **9 个主流目标全通并出 zip**（Windows x64/arm64/x86、Linux x64/arm64/x86/armhf、Android arm64/armv7）；✅ 32 位与 64 位走同一条 PXT64 镜像路径（A 方案 GC 旁路表，见 `docs/PXT32-A-SCHEME.md`；golden 三例 + 63 卡逐位一致）；✅ **RK3566 + ArkOS 真机验收通过**（v0.2.1→v0.3.0 全功能回归，满速 166~361fps）；✅ **RK3326 + ArkOS 下限机型验收通过**（v0.3.0，最重游戏 66fps）；✅ **Android arm64 验收通过**（v0.2.7）；✅ **3DS / Vita 极简前端 + RA 完整前端 + 核心包已产出**（CI 可复现，真机验收进行中） |
 
 ## 环境要求与快速开始
 
@@ -205,17 +205,18 @@ Hardware**，再把硬件切到 **VM**，同一个 Download 按钮就直接产�
 见下）：
 
 ```bash
-tools/build_matrix.sh     # 发版矩阵：5 个主流目标（全部 64 位，约 30 秒）
+tools/build_matrix.sh     # 发版矩阵：9 个主流目标（64 位 5 + 32 位 4，约 30 秒）
 tools/package_release.sh  # 打包成可直接放进 RetroArch 的 zip
 ```
 
 | 平台 | 产物 |
 |---|---|
-| Windows x64 / ARM64 | `makecode_arcade_windows-x64.zip` / `-arm64.zip` |
-| Linux x64 / ARM64 | `makecode_arcade_linux-x64.zip` / `-arm64.zip` |
-| Android ARM64 | `makecode_arcade_android-arm64.zip` |
+| Windows x64 / ARM64 / x86（32 位） | `makecode_arcade_windows-x64.zip` / `-arm64.zip` / `-x86.zip` |
+| Linux x64 / ARM64 / x86（32 位）/ ARMhf（32 位） | `makecode_arcade_linux-x64.zip` / `-arm64.zip` / `-x86.zip` / `-armhf.zip` |
+| Android ARM64 / ARMv7（32 位） | `makecode_arcade_android-arm64.zip` / `-armv7.zip` |
 | Lakka / LibreELEC ARM64（musl） | `makecode_arcade_lakka-arm64.zip` |
 | Nintendo Switch（NX） | `makecode_arcade_switch.zip`（NRO + `.info`） |
+| 3DS / PS Vita 整包 | `mca_ctr.3dsx`/`.cia`、`mca_libretro.cia`、`mca_vita.vpk`、`mca_libretro.vpk`/`.self`/`.info`（见下文 3DS/Vita 小节） |
 
 > **32 位与 64 位**（2026-11-17 起，重要）。卡带里装的是 **PXT64** 字节码镜像——
 > 官方 pxt 编译器唯一能产出的形态。32 位平台的硬阻断**不在镜像格式，而在
@@ -230,10 +231,11 @@ tools/package_release.sh  # 打包成可直接放进 RetroArch 的 zip
 > 本地 golden 三例 + 63 张卡带逐位一致）。PXT32 镜像（32 位原生布局，上游
 > `vm_patch_image` 的 TODO 分支）依旧不存在——也不再需要。
 >
-> 当前状态：CI 已补 32 位**构建回归**兜底（zig `x86-windows-gnu` /
-> `x86-linux-gnu.2.17` / `arm-linux-gnueabihf.2.17` + NDK `armeabi-v7a`），
-> 但**发版矩阵仍固定 6 平台全 64 位**——32 位（含 3DS / Vita 包）待真机
-> 验收通过后再进发版。
+> 当前状态（2026-11-17）：CI 的 32 位 job 既做**构建回归**兜底（zig
+> `x86-windows-gnu` / `x86-linux-gnu.2.17` / `arm-linux-gnueabihf.2.17` +
+> NDK `armeabi-v7a`），也进**发版矩阵**——推 `core-v*` tag 出 **10 个主包**
+> （6 全 64 位 + 4 个 32 位）。注意 3DS / Vita 的**真机验收尚未完成**，
+> 32 位玩家遇到问题请提 issue。
 
 ### Lakka / LibreELEC（musl）
 
@@ -286,9 +288,9 @@ make -C core platform=vita && make -C frontends/vita
 
 RetroArch 完整前端的两级构建（core 静态库 → 链进 RA 源码出 3dsx/cia/vpk 与
 核心 CIA/VPK/SELF）由独立的 `.github/workflows/3ds-vita.yml` 负责
-（**只手动 dispatch**，4 个 job：core-ctr / core-vita / ra-ctr / ra-vita；
-RA 版本默认 pin 已验证的 tip 快照）。测试包、安装步骤与真机验收清单见
-`out/3ds-vita/README.md`。
+（4 个 job：core-ctr / core-vita / ra-ctr / ra-vita；RA 版本默认 pin 已验证
+的 tip 快照；推 `core-v*` tag 时整包自动进核心发版 Release）。测试包、安装
+步骤与真机验收清单见 `out/3ds-vita/README.md`。
 
 ### Nintendo Switch（RetroArch NX）
 
@@ -296,9 +298,11 @@ Switch **没有 `dlopen`**，核心不能像桌面那样丢一个 `.so` 进核�
 的产物是**静态库**（`makecode_arcade_libretro_libnx.a`，devkitA64 +
 `-fPIE`），由 RetroArch 的 `Makefile.libnx` 连同前端一起链成 NRO——
 **一个 NRO 内含且仅含一个核心**（官方在线更新器分发的也是这样一个个 `.nro`）。
-`tools/package_release.sh` 不参与这条线，由独立 workflow 负责。产物也不进
-6 平台发版矩阵，而是推 `nx-v*` tag 时**单独发一个 Release**（版本号与
-`core-v*` 同步，例如 `nx-v0.3.3` ↔ `core-v0.3.3`）：
+`tools/package_release.sh` 不参与这条线，由独立 workflow 负责。独立 Release
+只发在 `nx-v*` tag（版本号与 `core-v*` 同步，例如 `nx-v0.3.3` ↔
+`core-v0.3.3`）；推 `core-v*` tag 时 nx.yml 会把 `makecode_arcade_switch.zip`
+**追加到核心发版的同一个 Release**（`core-release-upload` job，与 3DS/Vita
+整包的上传 job 同一套轮询机制）：
 
 ```bash
 # .github/workflows/nx.yml 等价命令（devkitpro/devkita64 容器内）
@@ -341,7 +345,7 @@ hbmenu）拿完整内存。
 > `docs/DEVICE-TEST.md` 第五轮。
 
 ```bash
-tools/build_matrix.sh --all                    # 全架构验证（17 个 64 位目标全通过）
+tools/build_matrix.sh --all                    # 全架构验证（21 个目标：64 位 17 + 32 位 4）
 tools/build_matrix.sh --prune                  # 回到发版 5 目标，并删掉其余目标的 dist/build 目录
 python tools/inspect_binary.py                 # 架构 + libc 基线 + 依赖 + retro_* 导出
 ```
@@ -376,7 +380,7 @@ cd ../makecode_arcade_cartconv/vm-build && npm install
 | `golden-hash` | gcc + `tools/libretro_host.py` | 2 张卡带 3 个用例的末帧 MD5 比对 —— 唯一能抓住"契约全绿但画面画错了"的断言 |
 | `crash-regression` | gcc + 3 张回归夹具 | 盯 PATCH 13/14（两处整数除零）与 PATCH 15（镜像校验失败时 `load_game` 不再谎报成功） |
 | `package` | 汇总发行版工具链产物 → `tools/package_release.sh`，再解包 dlopen 跑 60 帧 | 5 个 zip |
-| `release`（只在推 `core-v*` tag 时） | 汇总 `zig-*` + `android-*` + `lakka-musl` 产物 → `package_release.sh` → `gh release create` | **6 个 zip**（含只有 zig 能出的 `windows-arm64`，以及只有 musl 工具链能出的 `lakka-arm64`） |
+| `release`（只在推 `core-v*` tag 时） | 汇总 `zig-*` + `android-*` + `lakka-musl` 产物 → `package_release.sh` → `gh release create` | **10 个 zip**（6 全 64 位 + 4 个 32 位；含只有 zig 能出的 `windows-arm64`/`windows-x86`，以及只有 musl 工具链能出的 `lakka-arm64`） |
 
 NX（Switch）不在这张表里：它由独立的 `.github/workflows/nx.yml` 负责，
 **推 `nx-v*` tag 时单独建一个 Release**（与核心发版分开，因为 NRO 要拉
@@ -384,9 +388,11 @@ RetroArch 源码 + 装 portlibs，十几分钟，绑进主流水线会拖慢每�
 产物形态也不同——NRO 内含前端本体，不是可丢进 `cores/` 的 `.so`。
 
 3DS / Vita（含 RA 完整前端两级构建与核心包）同样不在这张表里：由独立的
-`.github/workflows/3ds-vita.yml` 负责，**只手动 dispatch**（4 个 job：
-core-ctr / core-vita / ra-ctr / ra-vita；RA 版本默认 pin 已验证的 tip 快照），
-产物挂 workflow artifact，安装包与验收清单见 `out/3ds-vita/README.md`。
+`.github/workflows/3ds-vita.yml` 负责（4 个 job：core-ctr / core-vita /
+ra-ctr / ra-vita；RA 版本默认 pin 已验证的 tip 快照）。平时只手动
+dispatch、产物挂 workflow artifact；**推 `core-v*` tag 时自动跑**，并由
+`frontend-release` job 把整包追加到核心发版的同一个 Release。安装包与
+验收清单见 `out/3ds-vita/README.md`。
 
 工具链**刻意分两套**，别合并：
 
@@ -417,19 +423,23 @@ core-ctr / core-vita / ra-ctr / ra-vita；RA 版本默认 pin 已验证的 tip �
 | `.gitlab-ci.yml` | libretro 官方 buildbot（镜像仓库） | 收录进 RetroArch Core Downloader 用 |
 
 **发布由 tag 触发**。推 `core-v*` tag 时，`release` job 等 `zig-*` 与
-`android-*` 编完，用与本地同一份 `tools/package_release.sh` 打 **6 个包**（仅 64 位），
-再创建 GitHub Release 并把 zip 挂上去。
+`android-*` 编完，用与本地同一份 `tools/package_release.sh` 打 **10 个包**
+（6 全 64 位 + 4 个 32 位），再创建 GitHub Release 并把 zip 挂上去；3DS/Vita
+整包（3ds-vita.yml）与 Switch NRO zip（nx.yml）由各自的上传 job **追加到
+同一个 Release**。每个资产是干什么用的，发版正文尾部带一张分组表
+（`.github/release-notes/PLAYER-GUIDE-FOOTER.md`），照着拿一个就行。
 
 - 打包时对 Linux/ELF 核心做 `strip`（未 strip 的 linux-arm64 是 5.0 MB，其中
-  4.3 MB 是 `.debug_*`；strip 后 732 KB，末帧哈希逐位不变）。三个 ELF 平台
-  （linux-x64 / linux-arm64 / lakka-arm64）另出一个
+  4.3 MB 是 `.debug_*`；strip 后 732 KB，末帧哈希逐位不变）。五个 ELF 平台
+  （linux-x64 / linux-arm64 / linux-x86 / linux-armhf / lakka-arm64）另出一个
   `makecode_arcade_<platform>-debuginfo.zip`，内含未 strip 的原件，只在需要把
   崩溃地址翻译回源码行时才下载。两个包靠 `-Wl,--build-id=sha1` 生成的
-  build-id 对齐，所以总共是 **9 个资产**（6 主包 + 3 调试包）。
+  build-id 对齐，所以核心部分总共是 **15 个资产**（10 主包 + 5 调试包），
+  另加 3DS/Vita 整包 7 件 + Switch zip 1 件。
 - 凭据用仓库内置 `GITHUB_TOKEN`（job 级 `contents: write`，全局仍是只读），
   **不需要 PAT**。Release 对象与附件上传只有 HTTPS API 提供，git/SSH 到不了
   这一层——SSH key 只能推 commit 和 tag。
-- 发版前硬断言：主包必须 6 个、调试包必须 3 个、每个主包 `.info` 的
+- 发版前硬断言：主包必须 10 个、调试包必须 5 个、每个主包 `.info` 的
   `display_version` 必须等于 tag，少一个或版本对不上就红，不会发出半套包。
   `package` job 还会断言发行包里的核心确实不含 `.debug_info`（防止打包时静默
   跳过 strip）。

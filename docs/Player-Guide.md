@@ -12,7 +12,7 @@ This guide is for people who just want to **play MakeCode Arcade games with Retr
 
 **Two easiest traps to fall into (read this first)**:
 
-1. **Desktop/handheld core packages are 64-bit only.** The Windows / Linux / Android core zips are all 64-bit — don't force them onto a 32-bit system (an old device's `retroarch32`), it will show a black screen. Most handhelds, phones, and PCs today are 64-bit. **Exception: the 3DS and PS Vita have dedicated all-in-one packages** (they're 32-bit machines and need no RetroArch install), see Section 4.
+1. **Don't install a core that doesn't match your system.** Every core zip is labeled with platform and architecture (`x64` / `arm64` / `x86` / `armhf` / `armv7`) — pick the one matching your device, a mismatch shows a black screen. **On 3DS and PS Vita you don't install a core at all** — dedicated all-in-one packages exist (see Section 4).
 2. **It does NOT read `.png` cartridges.** MakeCode Arcade `.png` images you find online contain **source code only, not a directly playable file**. You must first "export" them into `.pxt64` to play them (see Section 5). The core's file browser also lists only `.pxt64`.
 
 ---
@@ -29,11 +29,15 @@ Find the newest release (currently **core-v0.3.9**). Below it is a row of archiv
 |---|---|
 | Windows PC (64-bit x86) | `makecode_arcade_windows-x64.zip` |
 | Windows handheld / PC (ARM, e.g. Surface, Windows on ARM) | `makecode_arcade_windows-arm64.zip` |
+| Windows PC (old 32-bit x86) | `makecode_arcade_windows-x86.zip` |
 | Linux PC / handheld (x64) | `makecode_arcade_linux-x64.zip` |
-| Linux handheld (ARM, e.g. RK3566 devices like RGB30 / RG CubeXX, Amlogic) | `makecode_arcade_linux-arm64.zip` |
+| Linux handheld (64-bit ARM, e.g. RK3566 devices like RGB30 / RG CubeXX, Amlogic) | `makecode_arcade_linux-arm64.zip` |
+| Linux device (32-bit x86) | `makecode_arcade_linux-x86.zip` |
+| Linux handheld (32-bit ARM, `retroarch32` machines) | `makecode_arcade_linux-armhf.zip` |
 | Android phone / handheld (64-bit) | `makecode_arcade_android-arm64.zip` |
+| Android device (old 32-bit ARMv7) | `makecode_arcade_android-armv7.zip` |
 | Lakka / LibreELEC systems (musl) | `makecode_arcade_lakka-arm64.zip` |
-| **3DS / PS Vita** | Not here — dedicated all-in-one packages, see Section 4 |
+| **3DS / PS Vita / Switch** | Not here — dedicated all-in-one packages, see Section 4 |
 
 > Not sure which one? Easiest is to try the Windows or Linux build on a PC first. Handheld owners: check your system docs; when in doubt, pick the one with `arm64`.
 
@@ -130,10 +134,26 @@ Controls: **CROSS = A, CIRCLE = B, D-pad = direction, START = in-game menu, SELE
 
 ### Where to download these packages
 
-They are **not in the official Release yet** (real-device acceptance in progress). Two routes:
+Same [Releases page](https://github.com/whmzsu/makecode-arcade-libretro/releases)
+as the core packages — grab by name:
 
-- **GitHub Actions artifacts**: repo → **Actions** → pick a 3DS/Vita build run → download from **Artifacts** at the bottom of the page (GitHub login required). Unzip to get the install packages above.
-- After acceptance they will be attached to the [Releases page](https://github.com/whmzsu/makecode-arcade-libretro/releases) for direct download.
+| What you want | Download |
+|---|---|
+| 3DS minimal (recommended) | `mca_ctr.cia` (install with FBI) or `mca_ctr.3dsx` (Homebrew Launcher) |
+| 3DS full RetroArch | `mca_libretro.cia` |
+| Vita minimal (recommended) | `mca_vita.vpk` |
+| Vita full RetroArch (standalone app) | `mca_libretro.vpk` |
+| Vita, into an existing RetroArch | `mca_libretro.self` + `mca_libretro.info` |
+| Switch | `makecode_arcade_switch.zip` |
+
+> Files named `mca_ctr` / `mca_vita` are the **minimal frontend** (no menus,
+> fastest boot); files named `mca_libretro` are the **full RetroArch form**.
+> Either is fine, and they can coexist. The end of every release's notes has
+> a full "which asset to pick" grouped table.
+
+> Note: **real-device acceptance for 3DS/Vita is not finished yet.** If you
+> hit a black screen or wrong button mapping, please open an issue (attach
+> `mca_trace.log`).
 
 ---
 
@@ -204,7 +224,7 @@ On Windows, download the portable package and unzip; drag a `.png` onto `cartcon
 
 | Symptom | Cause / fix |
 |---|---|
-| **All black, nothing at all** | Probably a **32-bit system/frontend** — this core doesn't support it. Switch to a 64-bit environment. |
+| **All black, nothing at all** | Probably a **core/system architecture mismatch** (e.g. the x64 package installed on a 32-bit system). Re-pick the package per the table in Section 1. |
 | **My game doesn't show in the file browser** | Your file is `.png`, not `.pxt64`. Export/convert to `.pxt64` per Section 5. |
 | **Black screen on 3DS / Vita** | First check the cartridge directory (3DS: `sdmc:/mca/`, Vita: `ux0:/data/mca/`) and that the files are `.pxt64`. For hangs, check `sdmc:/mca/mca_trace.log` (3DS) or `ux0:/data/mca/mca_trace.log` (Vita). |
 | **`VM error 1014` after loading** | A single data section in this cartridge exceeds 32000 bytes; the core **explicitly rejects** it instead of black-screening. This isn't a core bug — the cartridge is just too big. Get a VM-compatible export, or have the author split the large arrays in the game source. (Such cartridges used to silently black-screen; now at least it tells you why.) |

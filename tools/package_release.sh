@@ -30,13 +30,20 @@ if [ -z "$PYTHON_BIN" ]; then
   exit 2
 fi
 
-# 发版目标 = build_matrix.sh 的 MAIN_TARGETS（全部 64 位；32 位待真机验收后进矩阵，CI 已有构建回归兜底）
+# 发版目标 = build_matrix.sh 的 MAIN_TARGETS + lakka musl。
+# 2026-11-17 起含 32 位（A 方案 GC 旁路表进 main 后 PXT64 布局在 32 位平台
+# 可用，CI 有构建回归兜底）；3DS/Vita/Switch 前端整包由 3ds-vita.yml /
+# nx.yml 在同一 tag 上另行上传到同一个 Release。
 MAIN_TARGETS=(
   x86_64-windows-gnu
   aarch64-windows-gnu
+  x86-windows-gnu
   x86_64-linux-gnu.2.17
   aarch64-linux-gnu.2.17
+  x86-linux-gnu.2.17
+  arm-linux-gnueabihf.2.17
   aarch64-linux-android21
+  armv7a-linux-androideabi21
   aarch64-linux-musl
 )
 
@@ -69,11 +76,15 @@ platform_of() {
   case "$1" in
     x86_64-windows-gnu)        echo "windows-x64" ;;
     aarch64-windows-gnu)       echo "windows-arm64" ;;
+    x86-windows-gnu)           echo "windows-x86" ;;
     x86_64-linux-gnu.2.17)     echo "linux-x64" ;;
     aarch64-linux-gnu.2.17)    echo "linux-arm64" ;;
+    x86-linux-gnu.2.17)        echo "linux-x86" ;;
+    arm-linux-gnueabihf.2.17)  echo "linux-armhf" ;;
     x86_64-linux-gnu)          echo "linux-x64" ;;
     aarch64-linux-gnu)         echo "linux-arm64" ;;
     aarch64-linux-android21)   echo "android-arm64" ;;
+    armv7a-linux-androideabi21) echo "android-armv7" ;;
     aarch64-linux-musl)        echo "lakka-arm64" ;;
     *)                         echo "${1//\//-}" ;;
   esac
@@ -123,6 +134,8 @@ do_strip() { # $1=源 $2=目标 $3=triple  → 成功返回 0
   case "$t" in
     x86_64-*)  cands=(x86_64-linux-gnu-strip llvm-strip strip) ;;
     aarch64-*) cands=(aarch64-linux-gnu-strip llvm-strip strip) ;;
+    x86-*)     cands=(i686-linux-gnu-strip llvm-strip strip) ;;
+    arm-*)     cands=(arm-linux-gnueabihf-strip llvm-strip strip) ;;
     *)         cands=(llvm-strip strip) ;;
   esac
   for c in "${cands[@]}"; do
@@ -221,8 +234,9 @@ MakeCode Arcade — libretro core ($plat)
   （设置 → 配置 → 保存新配置 → 编辑该行 → 加载配置）。
   只装 .so 不装 .info 是不行的：实测选中游戏后「选择核心」列表里选不到本核心。
 
-  选包：Android 只有 64 位版（arm64-v8a）。32 位设备请用对应平台的专门
-        整包（3DS / Vita），不要把这个 64 位核心塞进 retroarch32。
+  选包：64 位设备（近几年的手机/掌机）选 android-arm64，老 32 位设备
+        （armeabi-v7a）选 android-armv7。3DS / PS Vita 有专门的整包，
+        不要在它们上面装这个核心。
 
 内容格式：
   .pxt64  转换后的 VM 字节码镜像，核心只认这个格式（加载内容里也只列出它）

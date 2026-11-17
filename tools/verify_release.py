@@ -10,7 +10,8 @@
   * ELF/PE 机器类型与包名平台一致（血泪：x86 包混入 arm64、Win 包只有 .pdb）；
   * .info 的 display_version == 源码 kCoreVersion；
   * ELF 动态依赖白名单、glibc 基线、retro_* 导出数量；
-  * Android 无 libc++_shared、LOAD 段 16KB 对齐；
+  * Android arm64 无 libc++_shared、LOAD 段 16KB 对齐（armv7 不查——
+    32 位 ABI 无 16KB 页设备）；
   * **ELF 必须已 strip**（无 .debug_info）—— 0.3.7 之前 linux/arm64 带着
     4.3 MB 调试信息发给玩家，zip 从 287 KB 涨到 1.38 MB，固件仓库也拒收。
 
@@ -35,13 +36,18 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 
 # zip 平台短名 -> (期望格式, 机器类型)
-# ELF e_machine: 62=x86_64, 183=aarch64；PE Machine: 0x8664=x64, 0xaa64=ARM64
+# ELF e_machine: 3=x86, 40=arm, 62=x86_64, 183=aarch64
+# PE Machine: 0x14c=x86, 0x8664=x64, 0xaa64=ARM64, 0x1c4=ARMNT
 EXPECT = {
     "windows-x64":   ("PE", 0x8664),
     "windows-arm64": ("PE", 0xAA64),
+    "windows-x86":   ("PE", 0x14C),
     "linux-x64":     ("ELF", 62),
     "linux-arm64":   ("ELF", 183),
+    "linux-x86":     ("ELF", 3),
+    "linux-armhf":   ("ELF", 40),
     "android-arm64": ("ELF", 183),
+    "android-armv7": ("ELF", 40),
     "lakka-arm64":   ("ELF", 183),
 }
 # 需要 strip（因而需要 -debuginfo 包）的平台前缀
@@ -157,6 +163,7 @@ def main() -> int:
                         if ver > (2, 17):
                             notes.append(f"glibc 基线 {top} 超过 2.17")
                     if plat == "android-arm64":
+                        # 16KB 页设备只存在于 arm64（Android 15+）；armv7 不查
                         aligns = set(re.findall(r"^\s*LOAD.*?(0x[0-9a-f]+)\s*$",
                                                 sh(["readelf", "-lW", f.name]), re.M))
                         if aligns != {"0x4000"}:

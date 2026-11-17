@@ -73,7 +73,7 @@ makecode_arcade/
 │   ├── build_core.sh       One-shot build: DLL + the three test programs
 │   ├── make_local.sh       Drives core/Makefile through zig (when no target toolchain is installed)
 │   ├── build_target.sh     Single-target cross-compile (zig; Android uses NDK clang)
-│   ├── build_matrix.sh     Release matrix (5 mainstream targets) / --all for every architecture
+│   ├── build_matrix.sh     Release matrix (9 mainstream targets: 5×64-bit + 4×32-bit) / --all for every architecture
 │   ├── package_release.sh  Package release zips (core + .info + install notes)
 │   ├── inspect_binary.py   Artifact self-check (arch / libc baseline / deps / retro_* exports, stdlib only)
 │   ├── setup_vita_gl_stack.sh  One-shot Vita GL dependency chain (taiHEN → SceShaccCgExt → vitashark → math-neon → vitaGL)
@@ -100,7 +100,7 @@ for cross-referencing.
 | M3 | Hook up the pxt VM bytecode interpreter, run the first game | ✅ **All three games pass**: vm_smoke (official ABI, direct calls) + the libretro fake-frontend path (RGB565 / button edges / audio) |
 | M4 | Input / audio synthesis / complete 60 fps frame model | ✅ Every host interface wired: button descriptors / per-button rebinding, audio synthesis with peak regression, frame-driven virtual clock (one frontend poll = one frame; fast-forward = the frontend polling faster), panic banner, save-directory hookup (trace/data go to `GET_SAVE_DIRECTORY`), panic self-healing — see `test_lifecycle`. **v0.3.0 scope cut: no savestates / rewind (`retro_serialize*` are stubs, the frontend auto-disables them); the core only does what the official emulator does** |
 | M5 | Offline conversion tool (.png → bytecode) + game compatibility test set | ✅ Split into the standalone repo [makecode-arcade-cartconv](https://github.com/whmzsu/makecode-arcade-cartconv) (portable cartconv package + png2pxt64.py reference implementation); verified on three cartridges |
-| M6 | Cross-compiling (handheld/desktop/mobile) + performance validation | ✅ **All 5 mainstream 64-bit targets build and ship as zips** (Windows x64/arm64, Linux x64/arm64, Android arm64); ✅ **32-bit build regression is now in CI as a safety net** (after the GC tag side-table landed in main, the PXT64 layout works on 32-bit platforms — see `docs/PXT32-A-SCHEME.md`; the release matrix is still all-64-bit, pending real-device acceptance); ✅ **RK3566 + ArkOS real-device acceptance passed** (full regression v0.2.1→v0.3.0, up to 166–361 fps); ✅ **RK3326 + ArkOS entry-level device accepted** (v0.3.0, heaviest game at 66 fps); ✅ **Android arm64 accepted** (v0.2.7); ✅ **3DS / Vita minimal frontends + full RetroArch frontends + core packages produced** (CI-reproducible, real-device acceptance in progress) |
+| M6 | Cross-compiling (handheld/desktop/mobile) + performance validation | ✅ **All 9 mainstream targets build and ship as zips** (Windows x64/arm64/x86, Linux x64/arm64/x86/armhf, Android arm64/armv7); ✅ 32-bit and 64-bit share the same PXT64 image path (GC tag side-table, see `docs/PXT32-A-SCHEME.md`; golden 3-case + 63-cartridge bit-identical); ✅ **RK3566 + ArkOS real-device acceptance passed** (full regression v0.2.1→v0.3.0, up to 166–361 fps); ✅ **RK3326 + ArkOS entry-level device accepted** (v0.3.0, heaviest game at 66 fps); ✅ **Android arm64 accepted** (v0.2.7); ✅ **3DS / Vita minimal frontends + full RetroArch frontends + core packages produced** (CI-reproducible, real-device acceptance in progress) |
 
 ## Requirements and quick start
 
@@ -206,17 +206,18 @@ Pure C/C++ with no platform-specific dependencies; zig bundles the libc
 headers, so switching `-target` is all it takes:
 
 ```bash
-tools/build_matrix.sh     # Release matrix: 5 mainstream targets (all 64-bit, ~30 s)
+tools/build_matrix.sh     # Release matrix: 9 mainstream targets (5×64-bit + 4×32-bit, ~30 s)
 tools/package_release.sh  # Package into zips ready to drop into RetroArch
 ```
 
 | Platform | Artifact |
 |---|---|
-| Windows x64 / ARM64 | `makecode_arcade_windows-x64.zip` / `-arm64.zip` |
-| Linux x64 / ARM64 | `makecode_arcade_linux-x64.zip` / `-arm64.zip` |
-| Android ARM64 | `makecode_arcade_android-arm64.zip` |
+| Windows x64 / ARM64 / x86 (32-bit) | `makecode_arcade_windows-x64.zip` / `-arm64.zip` / `-x86.zip` |
+| Linux x64 / ARM64 / x86 (32-bit) / ARMhf (32-bit) | `makecode_arcade_linux-x64.zip` / `-arm64.zip` / `-x86.zip` / `-armhf.zip` |
+| Android ARM64 / ARMv7 (32-bit) | `makecode_arcade_android-arm64.zip` / `-armv7.zip` |
 | Lakka / LibreELEC ARM64 (musl) | `makecode_arcade_lakka-arm64.zip` |
 | Nintendo Switch (NX) | `makecode_arcade_switch.zip` (NRO + `.info`) |
+| 3DS / PS Vita all-in-one | `mca_ctr.3dsx`/`.cia`, `mca_libretro.cia`, `mca_vita.vpk`, `mca_libretro.vpk`/`.self`/`.info` (see the 3DS/Vita section below) |
 
 > **32-bit vs 64-bit** (as of 2026-11-17, important). Cartridges contain a
 > **PXT64** bytecode image — the only form the official pxt compiler emits.
@@ -236,11 +237,13 @@ tools/package_release.sh  # Package into zips ready to drop into RetroArch
 > layout, the upstream `vm_patch_image` TODO branch) still does not exist —
 > and is no longer needed.
 >
-> Current status: CI now carries 32-bit **build regression** jobs as a safety
-> net (zig `x86-windows-gnu` / `x86-linux-gnu.2.17` /
-> `arm-linux-gnueabihf.2.17` + NDK `armeabi-v7a`), but the **release matrix
-> stays fixed at 6 all-64-bit platforms** — 32-bit (including the 3DS/Vita
-> packages) joins the release matrix only after real-device acceptance.
+> Current status (2026-11-17): the CI 32-bit jobs serve both as **build
+> regression** safety nets (zig `x86-windows-gnu` / `x86-linux-gnu.2.17` /
+> `arm-linux-gnueabihf.2.17` + NDK `armeabi-v7a`) and as part of the
+> **release matrix** — a `core-v*` tag now produces **10 main packages**
+> (6 all-64-bit + 4×32-bit). Note that 3DS/Vita **real-device acceptance is
+> not finished yet**; if you hit problems on a 32-bit device, please open an
+> issue.
 
 ### Lakka / LibreELEC (musl)
 
@@ -301,10 +304,11 @@ make -C core platform=vita && make -C frontends/vita
 
 The two-level RetroArch full-frontend builds (core static library → linked
 into the RA sources to produce 3dsx/cia/vpk and the core CIA/VPK/SELF) are
-handled by the standalone `.github/workflows/3ds-vita.yml` (**manual
-dispatch only**; 4 jobs: core-ctr / core-vita / ra-ctr / ra-vita; the RA
-version is pinned to a verified tip snapshot by default). Test packages,
-install steps, and acceptance checklists live in `out/3ds-vita/README.md`.
+handled by the standalone `.github/workflows/3ds-vita.yml`
+(4 jobs: core-ctr / core-vita / ra-ctr / ra-vita; the RA version is pinned
+to a verified tip snapshot by default; on `core-v*` tags the packages land
+in the core release automatically). Test packages, install steps, and
+acceptance checklists live in `out/3ds-vita/README.md`.
 
 ### Nintendo Switch (RetroArch NX)
 
@@ -314,9 +318,10 @@ built with devkitA64, `-fPIE`) that RetroArch's `Makefile.libnx` links together
 with the frontend into a NRO - **one NRO carries exactly one core**, which is
 also the shape of the cores the official online updater distributes.
 `tools/package_release.sh` does not take part; a dedicated workflow handles it.
-Its output is also not part of the 6-platform release matrix — it gets **its own
-release on `nx-v*` tags** (version kept in sync with `core-v*`, e.g.
-`nx-v0.3.3` ↔ `core-v0.3.3`):
+A standalone Release is only created on `nx-v*` tags (version kept in sync with
+`core-v*`, e.g. `nx-v0.3.3` ↔ `core-v0.3.3`); on `core-v*` tags, nx.yml
+**appends `makecode_arcade_switch.zip` to the core release** (the
+`core-release-upload` job, same polling mechanism as the 3DS/Vita upload job):
 
 ```bash
 # equivalent to .github/workflows/nx.yml (inside devkitpro/devkita64)
@@ -365,7 +370,7 @@ onward); Android statically links libc++ and is 16 KB-page aligned
 > `docs/DEVICE-TEST.md`.
 
 ```bash
-tools/build_matrix.sh --all                    # Full-matrix validation (all 17 64-bit targets pass)
+tools/build_matrix.sh --all                    # Full-matrix validation (21 targets: 17×64-bit + 4×32-bit)
 tools/build_matrix.sh --prune                  # Back to the 5 release targets, removing other targets' dist/build dirs
 python tools/inspect_binary.py                 # Arch + libc baseline + deps + retro_* exports
 ```
@@ -404,7 +409,7 @@ bottom of the Actions run page).
 | `crash-regression` | gcc + 3 regression fixtures | Watches PATCH 13/14 (two integer division-by-zero fixes) and PATCH 15 (`load_game` no longer lies on image validation failure) |
 | `pxt-patches` | pure Python, no compiling | Verifies the 14 required patches in the vendored pxt tree are still present (seconds) |
 | `package` | Collects distro-toolchain artifacts → `tools/package_release.sh` | 5 zips |
-| `release` (only on `core-v*` tags) | Collects `zig-*` + `android-*` + `lakka-musl` artifacts → `package_release.sh` → `gh release create` | **6 zips** (including `windows-arm64`, which only zig can produce, and `lakka-arm64`, which only the musl toolchain can produce) |
+| `release` (only on `core-v*` tags) | Collects `zig-*` + `android-*` + `lakka-musl` artifacts → `package_release.sh` → `gh release create` | **10 zips** (6 all-64-bit + 4×32-bit; including `windows-arm64`/`windows-x86`, which only zig can produce, and `lakka-arm64`, which only the musl toolchain can produce) |
 
 NX (Switch) is not in this table: it is handled by a separate
 `.github/workflows/nx.yml` that **creates its own release on `nx-v*` tags**.
@@ -416,11 +421,13 @@ drop into `cores/`.
 
 3DS / Vita (including the two-level full-RetroArch builds and the core
 packages) are likewise outside this table: the standalone
-`.github/workflows/3ds-vita.yml` handles them, **manual dispatch only**
+`.github/workflows/3ds-vita.yml` handles them
 (4 jobs: core-ctr / core-vita / ra-ctr / ra-vita; the RA version is pinned
-to a verified tip snapshot by default). Artifacts land as workflow
-artifacts; install packages and acceptance checklists are in
-`out/3ds-vita/README.md`.
+to a verified tip snapshot by default). Outside of tag pushes it runs only
+via manual dispatch with artifacts as workflow artifacts; **on `core-v*`
+tags it runs automatically** and its `frontend-release` job appends the
+packages to the core release. Install packages and acceptance checklists are
+in `out/3ds-vita/README.md`.
 
 The toolchains are **deliberately split in two** — don't merge them:
 
@@ -457,17 +464,31 @@ Division of labor between the two CI files, don't mix them up:
 | `.gitlab-ci.yml` | The official libretro buildbot (mirrored repo) | For inclusion in the RetroArch Core Downloader |
 
 **Releases are tag-triggered.** Pushing a `core-v*` tag makes the `release`
-job wait for `zig-*` and `android-*`, package 5 zips (64-bit only) with the
-same local `tools/package_release.sh`, then create the GitHub Release and
-attach the zips.
+job wait for `zig-*` and `android-*`, package **10 zips** (6 all-64-bit +
+4×32-bit) with the same local `tools/package_release.sh`, then create the
+GitHub Release and attach the zips. The 3DS/Vita packages (3ds-vita.yml) and
+the Switch NRO zip (nx.yml) are **appended to the same Release** by their own
+upload jobs. What each asset is for is spelled out in a grouped table at the
+end of the release notes (`.github/release-notes/PLAYER-GUIDE-FOOTER.md`) —
+just pick one from each group.
 
+- Packaging strips Linux/ELF cores (unstripped linux-arm64 is 5.0 MB, 4.3 MB
+  of `.debug_*`; stripped it is 732 KB with a bit-identical last frame). The
+  five ELF platforms (linux-x64 / linux-arm64 / linux-x86 / linux-armhf /
+  lakka-arm64) also ship a `makecode_arcade_<platform>-debuginfo.zip`
+  containing the unstripped original, only needed to translate crash
+  addresses back to source lines. Both are tied together by the
+  `-Wl,--build-id=sha1` build-id, so the core part totals **15 assets**
+  (10 main + 5 debuginfo), plus the 3DS/Vita packages (7 files) and the
+  Switch zip (1).
 - Credentials use the repo's built-in `GITHUB_TOKEN` (job-level
   `contents: write`; globally still read-only). **No PAT needed.** Release
   objects and asset uploads only exist over the HTTPS API — git/SSH can't
   reach that layer; the SSH key only pushes commits and tags.
-- Hard assertions before release: exactly 6 packages, every package's `.info`
-  `display_version` must equal the tag — one short or mismatched version
-  turns the job red, so a partial release can't ship.
+- Hard assertions before release: exactly 10 main packages and 5 debuginfo
+  packages, every main package's `.info` `display_version` must equal the
+  tag — one short or mismatched version turns the job red, so a partial
+  release can't ship.
 - Release notes come from `.github/release-notes/<tag>.md`; falls back to
   `--generate-notes` if missing.
 - Re-run safe: if the Release exists, it goes through `upload --clobber` +

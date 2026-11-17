@@ -17,15 +17,19 @@
     JNI_PATH: core
 
 include:
-  # Windows x64（MinGW 交叉编译，产物 .dll）
+  # Windows x64 / x86 32 位（MinGW 交叉编译，产物 .dll）
   - project: 'libretro-infrastructure/ci-templates'
     file: '/windows-x64-mingw.yml'
+  - project: 'libretro-infrastructure/ci-templates'
+    file: '/windows-i686-mingw.yml'
 
-  # Linux x86_64 / aarch64（产物 .so）
+  # Linux x86_64 / aarch64 / x86 32 位（产物 .so）
   - project: 'libretro-infrastructure/ci-templates'
     file: '/linux-x64.yml'
   - project: 'libretro-infrastructure/ci-templates'
     file: '/linux-aarch64.yml'
+  - project: 'libretro-infrastructure/ci-templates'
+    file: '/linux-i686.yml'
 
   # Android（ndk-build，走 core/jni/Android.mk + Application.mk）
   - project: 'libretro-infrastructure/ci-templates'
@@ -47,6 +51,14 @@ libretro-build-windows-x64:
     # 这里断言产物真的生成了
     - test -f ${MAKEFILE_PATH}/${CORENAME}_libretro.dll
 
+libretro-build-windows-i686:
+  extends:
+    - .libretro-windows-i686-mingw-make-default
+    - .core-defs
+  script:
+    - make -C ${MAKEFILE_PATH} -f ${MAKEFILE} -j${NUMPROC}
+    - test -f ${MAKEFILE_PATH}/${CORENAME}_libretro.dll
+
 # ---------------------------------------------------------------- Linux
 libretro-build-linux-x64:
   extends:
@@ -64,14 +76,28 @@ libretro-build-linux-aarch64:
     - make -C ${MAKEFILE_PATH} -f ${MAKEFILE} -j${NUMPROC}
     - test -f ${MAKEFILE_PATH}/${CORENAME}_libretro.so
 
+libretro-build-linux-i686:
+  extends:
+    - .libretro-linux-i686-make-default
+    - .core-defs
+  script:
+    - make -C ${MAKEFILE_PATH} -f ${MAKEFILE} -j${NUMPROC}
+    - test -f ${MAKEFILE_PATH}/${CORENAME}_libretro.so
+
 # ---------------------------------------------------------------- Android
 android-arm64-v8a:
   extends:
     - .libretro-android-jni-arm64-v8a
     - .core-defs
 
-# 暂不列 32 位目标（android-armeabi-v7a 等）：发版/收录口径一致，均待 3DS/Vita
-# 真机验收通过后再进。技术上 32 位已可用（A 方案 GC 旁路表进 main，PXT64 布局
-# 在 32 位平台跑通），GitHub CI 有 32 位构建回归兜底，见 README「32 位与 64 位」
-# 与 docs/PXT32-A-SCHEME.md。buildbot 的产物会直接进 RetroArch 的 Core
-# Downloader，收录前必须先过真机验收，不能给玩家塞没验过的包。
+android-armeabi-v7a:
+  extends:
+    - .libretro-android-jni-armeabi-v7a
+    - .core-defs
+
+# 32 位口径（2026-11-17）：收录矩阵加 win-i686 / linux-i686 / android
+# armeabi-v7a（发版 zip 另有 linux-armhf，buildbot 没有标准 armhf .so
+# 模板所以不收录）。技术上 32 位已可用——A 方案 GC 旁路表进 main 后
+# PXT64 布局在 32 位平台跑通，见 README「32 位与 64 位」与
+# docs/PXT32-A-SCHEME.md。**注意：3DS/Vita 真机验收尚未完成**，Core
+# Downloader 的玩家如遇问题请反馈 issue。
