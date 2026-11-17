@@ -11,12 +11,18 @@
 # pthread 头、platform hook 编入）只有真工具链能验证。
 #
 # 只做手动触发（workflow_dispatch）：本分支不进常规 CI，按需实编。
-# 与 nx.yml 一致的两级构建里，这里只做第一级（静态库）；
-# 第二级（链进 RetroArch 前端出 .3dsx/.vpk）等静态库稳定后再加。
+# 两级构建都在：第一级（core 静态库 + 最小前端），第二级（core 静态库链进
+# RetroArch 完整前端，ra-ctr / ra-vita 两个 job，RetroArch 版本 pin 见
+# workflow_dispatch 输入，与 nx.yml 一致）。
 name: 3DS/Vita static core
 
 on:
   workflow_dispatch:
+    inputs:
+      retroarch_ref:
+        description: "RetroArch tag/branch（RA 完整前端两级构建用，与 nx.yml 一致；留空用默认）"
+        required: false
+        default: "v1.22.2"
 
 concurrency:
   group: 3dsvita-${{ github.ref }}
@@ -239,4 +245,242 @@ jobs:
         with:
           name: vita-testpack
           path: frontends/vita/mca_vita.vpk
+          if-no-files-found: error
+
+  # ============================================================ RA 完整前端（3DS）
+  # 第二级构建：core 静态库链进 RetroArch（Makefile.ctr），出带完整
+  # XMB 菜单前端的 .3dsx/.cia——与官方"每核心一个分发物"同构。
+  # 链接只要 libctru，零新增依赖；makerom/bannertool 沿用上面 core-ctr
+  # job 的取法。RetroArch 版本用与 nx.yml 相同的 pin（v1.22.2）。
+  ra-ctr:
+    name: RetroArch 3DS full (3dsx/cia)
+    runs-on: ubuntu-24.04
+    container:
+      image: devkitpro/devkitarm:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 编译 core 静态库
+        run: |
+          set -u
+          export DEVKITPRO="${DEVKITPRO:-/opt/devkitpro}"
+          export DEVKITARM="$DEVKITPRO/devkitARM"
+          export PATH="$DEVKITARM/bin:$DEVKITPRO/tools/bin:$PATH"
+          log=/tmp/ctr-core.log
+          if ! make -C core platform=ctr -j"$(nproc)" > "$log" 2>&1; then
+            echo "::error::core 构建失败"
+            grep -nE 'error:|Error [0-9]|undefined reference|cannot find' "$log" \
+              | head -15 | cut -c1-300 | sed 's/^/::error::  /'
+            exit 1
+          fi
+          ls -l core/makecode_arcade_libretro_ctr.a
+
+      - name: 装 makerom/bannertool（CIA 打包，取法同 core-ctr job）
+        run: |
+          set -u
+          export DEVKITPRO="${DEVKITPRO:-/opt/devkitpro}"
+          mkdir -p /tmp/ciatools && cd /tmp/ciatools
+          curl -fsSL -o makerom.zip \
+            https://github.com/3DSGuy/Project_CTR/releases/download/makerom-v0.18.4/makerom-v0.18.4-ubuntu_x86_64.zip
+          unzip -o makerom.zip -d makerom
+          install -m 755 makerom/makerom "$DEVKITPRO/tools/bin/makerom"
+          curl -fsSL -o bannertool.zip \
+            https://github.com/diasurgical/bannertool/releases/download/1.2.0/bannertool.zip
+          unzip -o bannertool.zip -d bannertool
+          install -m 755 bannertool/linux-x86_64/bannertool "$DEVKITPRO/tools/bin/bannertool"
+
+      - name: 拉 RetroArch（pin ${{ github.event.inputs.retroarch_ref || 'v1.22.2' }}）
+        env:
+          REF: ${{ github.event.inputs.retroarch_ref || 'v1.22.2' }}
+          GIT_TERMINAL_PROMPT: "0"
+        run: |
+          set -u
+          command -v git >/dev/null || { apt-get update -qq && apt-get install -y -qq git; }
+          rm -rf /tmp/ra
+          git clone --depth 1 --branch "$REF" --recursive \
+            https://github.com/libretro/RetroArch.git /tmp/ra
+          git -C /tmp/ra log --oneline -1
+
+      - name: 链 RA 3DS 完整前端（.3dsx + .cia）
+        run: |
+          set -u
+          export DEVKITPRO="${DEVKITPRO:-/opt/devkitpro}"
+          # Makefile.ctr 除了 DEVKITPRO 还要求 DEVKITARM（缺了报
+          # "recipe commences before first target" 的迷惑错误，tool69 实测）
+          export DEVKITARM="$DEVKITPRO/devkitARM"
+          export PATH="$DEVKITARM/bin:$DEVKITPRO/tools/bin:$PATH"
+          cp core/makecode_arcade_libretro_ctr.a /tmp/ra/libretro_ctr.a
+          log=/tmp/ra-ctr.log
+          if ! make -f /tmp/ra/Makefile.ctr -C /tmp/ra -j"$(nproc)" > "$log" 2>&1; then
+            echo "::error::RA 3DS 链接失败"
+            grep -nE 'error:|Error [0-9]|undefined reference|cannot find|No rule' "$log" \
+              | head -20 | cut -c1-300 | sed 's/^/::error::  /'
+            exit 1
+          fi
+          # 全量 make 若没带出 cia（部分版本 cia 是独立目标），补一刀
+          make -f /tmp/ra/Makefile.ctr -C /tmp/ra retroarch_3ds.cia >> "$log" 2>&1 || true
+          ls -l /tmp/ra/retroarch_3ds.3dsx /tmp/ra/retroarch_3ds.cia
+
+      - name: 校验 core 真链进 ELF
+        run: |
+          set +e
+          out=$(mktemp)
+          (
+            set -u
+            export DEVKITPRO="${DEVKITPRO:-/opt/devkitpro}"
+            export PATH="$DEVKITPRO/devkitARM/bin:$DEVKITPRO/tools/bin:$PATH"
+            cd /tmp/ra || exit 1
+            fail() { echo "FAIL: $*"; exit 1; }
+            n=$(arm-none-eabi-nm retroarch_3ds.elf 2>/dev/null | grep -cE ' T retro_')
+            echo "retro_* T 符号: $n 个"
+            [ "$n" -ge 100 ] || fail "retro_* 符号过少（$n）"
+            for s in retro_load_game mcaCtrInitGcHeap; do
+              arm-none-eabi-nm retroarch_3ds.elf | grep -qE " T $s\$" || fail "缺 $s"
+            done
+            echo "core 符号校验通过"
+          ) > "$out" 2>&1
+          rc=$?
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::校验失败（rc=$rc）"
+            tail -20 "$out" | cut -c1-300 | sed 's/^/::error::  /'
+            exit 1
+          fi
+          tail -5 "$out"
+
+      - name: 上传 RA 3DS 包（3dsx + cia）
+        uses: actions/upload-artifact@v4
+        with:
+          name: ctr-ra-pack
+          path: |
+            /tmp/ra/retroarch_3ds.3dsx
+            /tmp/ra/retroarch_3ds.cia
+          if-no-files-found: error
+
+  # ============================================================ RA 完整前端（Vita）
+  # 第二级构建 + 核心包：Makefile.vita 默认走 vitaGL 路径，需要 5 个
+  # 额外依赖库（taiHEN -> SceShaccCgExt -> vitashark -> math-neon ->
+  # vitaGL），由 tools/setup_vita_gl_stack.sh 固化（tool69 同配方）。
+  # 产物：官方 core-vpk 分发同构的 mca_libretro.vpk + 裸 mca_libretro.self
+  #（可并入用户已装的 RetroArch）+ mca_libretro.info。
+  ra-vita:
+    name: RetroArch Vita full + core pack (vpk/self)
+    runs-on: ubuntu-24.04
+    container:
+      image: vitasdk/vitasdk:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 装 vitaGL 依赖链（tools/setup_vita_gl_stack.sh）
+        run: |
+          set -u
+          export VITASDK="${VITASDK:-/opt/vitasdk}"
+          export PATH="$VITASDK/bin:$PATH"
+          arm-vita-eabi-gcc --version | head -1
+          command -v cmake >/dev/null || { apt-get update -qq && apt-get install -y -qq cmake; }
+          command -v git   >/dev/null || { apt-get update -qq && apt-get install -y -qq git; }
+          sh tools/setup_vita_gl_stack.sh
+
+      - name: 编译 core 静态库
+        run: |
+          set -u
+          export VITASDK="${VITASDK:-/opt/vitasdk}"
+          export PATH="$VITASDK/bin:$PATH"
+          log=/tmp/vita-core.log
+          if ! make -C core platform=vita -j"$(nproc)" > "$log" 2>&1; then
+            echo "::error::core 构建失败"
+            grep -nE 'error:|Error [0-9]|undefined reference|cannot find' "$log" \
+              | head -15 | cut -c1-300 | sed 's/^/::error::  /'
+            exit 1
+          fi
+          ls -l core/makecode_arcade_libretro_vita.a
+
+      - name: 拉 RetroArch（pin ${{ github.event.inputs.retroarch_ref || 'v1.22.2' }}）
+        env:
+          REF: ${{ github.event.inputs.retroarch_ref || 'v1.22.2' }}
+          GIT_TERMINAL_PROMPT: "0"
+        run: |
+          set -u
+          command -v git >/dev/null || { apt-get update -qq && apt-get install -y -qq git; }
+          rm -rf /tmp/ra
+          git clone --depth 1 --branch "$REF" --recursive \
+            https://github.com/libretro/RetroArch.git /tmp/ra
+          git -C /tmp/ra log --oneline -1
+
+      - name: 链 RA Vita 完整前端（.self）
+        run: |
+          set -u
+          export VITASDK="${VITASDK:-/opt/vitasdk}"
+          export PATH="$VITASDK/bin:$PATH"
+          cp core/makecode_arcade_libretro_vita.a /tmp/ra/libretro_vita.a
+          log=/tmp/ra-vita.log
+          if ! make -f /tmp/ra/Makefile.vita -C /tmp/ra retroarch_vita.self -j"$(nproc)" > "$log" 2>&1; then
+            echo "::error::RA Vita 链接失败"
+            grep -nE 'error:|Error [0-9]|undefined reference|cannot find|No rule' "$log" \
+              | head -20 | cut -c1-300 | sed 's/^/::error::  /'
+            exit 1
+          fi
+          ls -l /tmp/ra/retroarch_vita.self
+
+      - name: 打核心包（mca_libretro.vpk + self + info）
+        run: |
+          set -u
+          export VITASDK="${VITASDK:-/opt/vitasdk}"
+          export PATH="$VITASDK/bin:$PATH"
+          cd /tmp/ra || exit 1
+          # TITLE_ID 与已装官方 RetroArch（RETROVITA）独立，并存不冲突
+          vita-mksfoex -s TITLE_ID=MCAC00001 "MakeCode Arcade" -d ATTRIBUTE2=12 param_mca.sfo
+          # vita-pack-vpk 的 -a 是 --add src=dst（不是图标参数，tool69 实测）
+          vita-pack-vpk -s param_mca.sfo -b retroarch_vita.self \
+            -a "$GITHUB_WORKSPACE/frontends/vita/icon0.png=sce_sys/icon0.png" \
+            mca_libretro.vpk
+          cp retroarch_vita.self mca_libretro.self
+          cp "$GITHUB_WORKSPACE/frontends/vita/mca_libretro.info" mca_libretro.info
+          ls -l mca_libretro.vpk mca_libretro.self mca_libretro.info
+
+      - name: 校验核心包
+        run: |
+          set +e
+          out=$(mktemp)
+          (
+            set -u
+            export VITASDK="${VITASDK:-/opt/vitasdk}"
+            export PATH="$VITASDK/bin:$PATH"
+            cd /tmp/ra || exit 1
+            fail() { echo "FAIL: $*"; exit 1; }
+            # eboot 必须是 fSELF（官方分发形态）
+            python3 - << 'EOF' || exit 1
+import sys, zipfile
+z = zipfile.ZipFile('/tmp/ra/mca_libretro.vpk')
+names = z.namelist()
+assert 'sce_sys/param.sfo' in names and 'eboot.bin' in names and 'sce_sys/icon0.png' in names, names
+sfo = z.read('sce_sys/param.sfo')
+assert b'MCAC00001' in sfo and b'MakeCode Arcade' in sfo, 'param.sfo 缺 TITLE_ID/标题'
+e = z.read('eboot.bin')
+assert e[:4] == b'SCE\x00', 'eboot.bin 不是 fSELF: %r' % e[:4]
+print('vpk 内容:', names, 'eboot fSELF', len(e), 'B')
+EOF
+            n=$(arm-vita-eabi-nm retroarch_vita.elf.unstripped.elf 2>/dev/null | grep -cE ' T retro_')
+            echo "retro_* T 符号: $n 个"
+            [ "$n" -ge 100 ] || fail "retro_* 符号过少（$n）"
+            for s in retro_load_game mcaVitaInitGcHeap; do
+              arm-vita-eabi-nm retroarch_vita.elf.unstripped.elf | grep -qE " T $s\$" || fail "缺 $s"
+            done
+            echo "核心包校验通过"
+          ) > "$out" 2>&1
+          rc=$?
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::校验失败（rc=$rc）"
+            tail -25 "$out" | cut -c1-300 | sed 's/^/::error::  /'
+            exit 1
+          fi
+          tail -6 "$out"
+
+      - name: 上传 RA Vita 核心包（vpk + self + info）
+        uses: actions/upload-artifact@v4
+        with:
+          name: vita-ra-pack
+          path: |
+            /tmp/ra/mca_libretro.vpk
+            /tmp/ra/mca_libretro.self
+            /tmp/ra/mca_libretro.info
           if-no-files-found: error

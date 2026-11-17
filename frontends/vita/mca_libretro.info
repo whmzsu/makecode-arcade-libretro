@@ -1,0 +1,8 @@
+# mca_libretro.info -- libretro core metadata（放置于已装 RetroArch 的 info/ 目录）
+display_name = "MakeCode Arcade"
+corename = "MakeCode Arcade"
+authors = "Microsoft MakeCode Team (unofficial libretro port)"
+categories = "Emulator"
+license = "MIT"
+supported_extensions = "pxt64"
+hardware_description = "MakeCode Arcade games (PXT64 cart format)"
