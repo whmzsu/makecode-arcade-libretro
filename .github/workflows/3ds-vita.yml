@@ -248,6 +248,10 @@ jobs:
         # printf 不能用 \xHH（用八进制），都是 ra-vita 线踩过的坑
         run: |
           set -eu
+          # vitasdk 容器不保证带 unzip（血泪：以前没装，校验全报"缺 param.sfo"，
+          # 其实是 unzip: not found）——ra-vita 核心包那条线早有这个兜底，
+          # 测试包线漏抄，连红三轮。别用 python3，容器里也不一定有。
+          command -v unzip >/dev/null || { apt-get update -qq && apt-get install -y -qq unzip; }
           vpk=frontends/vita/mca_vita.vpk
           fail() { echo "::error::$1"; exit 1; }
           unzip -l "$vpk" | grep -q 'sce_sys/param.sfo' || fail "vpk 缺 param.sfo"
@@ -266,7 +270,9 @@ jobs:
       # 所以清单打印放在独立的容错步）
       - name: vpk 清单（诊断用）
         if: failure()
-        run: unzip -l frontends/vita/mca_vita.vpk
+        run: |
+          command -v unzip >/dev/null || { apt-get update -qq && apt-get install -y -qq unzip; }
+          unzip -l frontends/vita/mca_vita.vpk
 
       - name: 上传 .a
         uses: actions/upload-artifact@v4
