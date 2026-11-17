@@ -20,4 +20,3 @@ AccessControlInfo:
   SystemMode       : '64MB'    # OLD3DS 64MB / NEW3DS 124MB 自动向上兼容
   IdealProcessor   : 1
   AffinityMask     : 1
-  EnableL2Memory   : false
