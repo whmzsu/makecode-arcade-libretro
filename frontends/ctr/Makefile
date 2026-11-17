@@ -32,9 +32,12 @@ $(TARGET).cia: $(TARGET).elf $(TARGET).smdh $(TARGET).bnr app.rsf
 	  -rsf app.rsf -DAPP_TITLE="$(APP_TITLE)"
 
 $(TARGET).smdh: icon48.png
-	$(TOOLBIN)/bannertool makesmdh -s "$(APP_TITLE)" \
-	  -l "MCA libretro core 最小前端（PXT32 静态库）" \
-	  -st "mca-arcade" -i $< -o $@
+	# bannertool(diasurgical fork) 的标题/发布者参数按语言走：
+	# -es=英文短标题 -el=英文长标题 -ep=英文发布者
+	$(TOOLBIN)/bannertool makesmdh \
+	  -es "$(APP_TITLE)" \
+	  -el "MCA libretro core minimal frontend (PXT32 static)" \
+	  -ep "mca-arcade" -i $< -o $@
 
 $(TARGET).bnr: banner256.png
 	$(TOOLBIN)/bannertool makebanner -i $< -o $@
