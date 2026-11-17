@@ -20,3 +20,4 @@ AccessControlInfo:
   SystemMode       : '64MB'    # OLD3DS 64MB / NEW3DS 124MB 自动向上兼容
   IdealProcessor   : 1
   AffinityMask     : 1
+  Priority         : 30        # 应用主线程优先级（16-47，exheader 必填）
