@@ -417,7 +417,10 @@ void target_yield() {
 #endif
 }
 
-void sleep_ms(uint32_t ms) {
+// 参数用 unsigned 而不是 uint32_t：pxtbase.h 声明是 unsigned；devkitARM(newlib)
+// 的 uint32_t = long int，两种签名 mangle 不同（'j' vs 'm'），静态库内会 ABI 错位
+// （链接器报 undefined reference to _ZN3pxt8sleep_msEj，2026-11-17 3DS 实编踩到）。
+void sleep_ms(unsigned ms) {
     currentFiber->wakeTime = current_time_ms() + ms;
     schedule();
 }

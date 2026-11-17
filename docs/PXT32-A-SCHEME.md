@@ -449,3 +449,40 @@ ctr.a 482382 B / vita.a 455364 B，39 对象、25 retro_*、注入函数与 hook
 静态库链进 RA 3DS/Vita 前端跑 golden + 8 键；3DS 真机为 OLD3DS 时重点看
 内存是否够（前端自身分配）。若某卡带 2MB 堆不足，先开 HWM 诊断实测再调
 `MCA_GC_HEAP_SIZE`。
+
+## 11. 追加：真机测试包（最小前端 .3dsx / .vpk，2026-11-17）
+
+不走整编 RetroArch，core 以静态库链进自写的**最小 libretro 前端**，先把
+「真机 + 真平台 ABI + 视频/音频/输入全链路」在 homebrew 形态下验掉：
+
+| 包 | 平台/ABI | 产物 | 大小 |
+|---|---|---|---|
+| `frontends/ctr` | 3DS armv6k hard-float vfp（devkitARM） | `mca_ctr.3dsx` | 329 668 B |
+| `frontends/vita` | Vita armv7-a hard-float NEON（vitaSDK） | `mca_vita.vpk` | 234 414 B |
+
+前端职责（两边同构，各一文件 C）：环境回调（RGB565、bitmask、save/system
+目录指到卡带目录）、video 直写帧缓冲（3DS 顶部屏 RGB565 2x 居中 + 底屏
+console 状态；Vita `sceDisplaySetFrameBuf` RGBA 4x 居中——vitasdk snapshot
+无 vita2d/SDL，绕开 GXM）、音频（3DS ndsp 双缓冲环 / Vita sceAudioOut
+1024 帧块阻塞出队，无音频时回退 VBlank 节奏）、8 键映射对齐 docs/INPUT.md
+（3DS A/B/十字/START/SELECT 物理键直映；Vita CROSS=A、CIRCLE=B）、
+L/R 肩键切卡带（3DS Y 退出；卡带目录 `sdmc:/mca` / `ux0:/data/mca`）。
+
+实编踩到的平台坑（均已修）：
+1. **`pxt::sleep_ms` ABI 错位**：pxtbase.h 声明 `unsigned`（mangle 'j'）、
+   scheduler.cpp 定义 `uint32_t`——devkitARM(newlib) 的 uint32_t=long int
+   （mangle 'm'），静态库内 undefined reference。定义统一改 `unsigned`。
+2. **libctru 新版 API**：`hidKeysHeld()` 无参、`gspWaitForVBlank()`（不是
+   VSync）、`ndspWaveBuf` 无 nbytes 字段（nsamples 按 halfword 计，立体声
+   =帧数×2）。
+3. **vitasdk**：`sceDisplaySetFrameBuf` 走 `SceDisplayFrameBuf` 结构；
+   `sceAudioOutOutput(port, buf)` 固定端口块长（开端口时定 1024）；
+   `vita-pack-vpk -b` 直收 velf；无 SceNewlib_stub（newlib 粘合在 libc）；
+   链接一律用 g++（libstdc++/__aeabi_atexit）。
+
+tool69 真工具链复验：两包零警告重建；64 位默认构建 golden 三例
+（`0556e78f`/`e82844f7`/`0eb7884c`）逐位一致。安装/验收步骤见
+`out/3ds-vita/README.md`（probe 卡带逐键变色 + golden 基线）。
+
+**剩余（真机）**：3DS 画面旋转宏如不对改 `blit_frame()` 一处；Vita
+`SetFrameBuf` 若个别固件不亮需换 GXM/vita2d（届时 CI 加 libvita2d job）。
