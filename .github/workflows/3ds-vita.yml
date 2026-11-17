@@ -210,9 +210,33 @@ jobs:
           fi
           tail -10 "$out"
 
+      - name: 编译前端（最小 libretro 前端，.vpk）
+        run: |
+          set -u
+          export VITASDK="${VITASDK:-/opt/vitasdk}"
+          export PATH="$VITASDK/bin:$PATH"
+          log=/tmp/vita-fe.log
+          if ! make -C frontends/vita > "$log" 2>&1; then
+            echo "::error::前端构建失败"
+            grep -nE 'error:|undefined reference|cannot find|No such file|No rule' "$log" \
+              | head -20 | cut -c1-300 | sed 's/^/::error::  /'
+            echo "::error::日志尾部："
+            awk 'length($0) < 300' "$log" | tail -20 | cut -c1-300 | sed 's/^/::error::  /'
+            exit 1
+          fi
+          tail -5 "$log"
+          ls -l frontends/vita/mca_vita.vpk
+
       - name: 上传 .a
         uses: actions/upload-artifact@v4
         with:
           name: vita-core-static
           path: core/makecode_arcade_libretro_vita.a
+          if-no-files-found: error
+
+      - name: 上传 Vita 测试包（vpk）
+        uses: actions/upload-artifact@v4
+        with:
+          name: vita-testpack
+          path: frontends/vita/mca_vita.vpk
           if-no-files-found: error

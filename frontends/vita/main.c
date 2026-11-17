@@ -5,6 +5,8 @@
  *   - sceDisplaySetFrameBuf 直写 RGBA 帧缓冲（960x544，游戏 4x 缩放居中）
  *   - sceCtrl 8 键 -> RetroPad：CROSS=A、CIRCLE=B、十字键、
  *     START=游戏内菜单、SELECT=重置，L/R 肩键切换卡带
+ *   - START+SELECT 进暂停态卡带列表（内嵌 8x8 字体直绘）：上下选、
+ *     CROSS 装载、CIRCLE 返回
  *   - sceAudioOut 立体声 44100Hz 输出（有声音时兼作帧节奏）
  *   - 卡带目录 ux0:/data/mca（.pxt64 卡带放这里）
  *
@@ -23,6 +25,7 @@
 #include <stdarg.h>
 #include <dirent.h>
 
+#include "font8x8.h"
 #include "../../core/libretro.h"
 
 #define CART_DIR "ux0:/data/mca"
@@ -303,6 +306,99 @@ static void clear_screen(uint32_t c) {
 }
 
 /* ------------------------------------------------------------------ */
+/* 卡带列表菜单（暂停态，font8x8 直绘到 g_fb）                           */
+/*                                                                      */
+/* START+SELECT 同按进出；菜单态不跑 retro_run，VM 状态原地保留，         */
+/* CROSS 装载选中卡带（当前卡带则直接返回），CIRCLE 返回游戏。            */
+/* ------------------------------------------------------------------ */
+
+#define MENU_VIEW 22
+
+static bool g_menu_open = false;
+static int  g_menu_cur  = 0;
+static int  g_menu_top  = 0;
+
+/* 去掉目录前缀与 .pxt64 后缀的显示名 */
+static void cart_disp(int idx, char *buf, size_t n) {
+    snprintf(buf, n, "%s", g_cart_path[idx] + strlen(CART_DIR) + 1);
+    size_t l = strlen(buf);
+    if (l > 6 && strcmp(buf + l - 6, ".pxt64") == 0)
+        buf[l - 6] = '\0';
+}
+
+/* 8x8 点阵文本：font8x8 每字节一行、bit0=最左列 */
+static void draw_text(int x, int y, const char *s, uint32_t fg) {
+    for (; *s; s++, x += 8) {
+        unsigned char ch = (unsigned char)*s;
+        if (ch < 0x20 || ch > 0x7E)
+            ch = '?';
+        const unsigned char *g = font8x8[ch - 0x20];
+        for (int r = 0; r < 8; r++) {
+            uint32_t *row = g_fb + (y + r) * SCREEN_W + x;
+            for (int b = 0; b < 8; b++)
+                if (g[r] & (1u << b))
+                    row[b] = fg;
+        }
+    }
+}
+
+static void menu_clamp_top(void) {
+    if (g_menu_top > g_menu_cur - 3)
+        g_menu_top = g_menu_cur - 3;
+    if (g_menu_top > g_ncarts - MENU_VIEW)
+        g_menu_top = g_ncarts - MENU_VIEW;
+    if (g_menu_top < 0)
+        g_menu_top = 0;
+}
+
+static void menu_draw(void) {
+    clear_screen(0xFF201414);   /* 深底（0xAABBGGRR） */
+    char title[64];
+    snprintf(title, sizeof(title), "MCA carts  %d/%d",
+             g_menu_cur + 1, g_ncarts);
+    draw_text(16, 16, title, 0xFFFFFFFF);
+    for (int i = 0; i < MENU_VIEW; i++) {
+        int idx = g_menu_top + i;
+        if (idx >= g_ncarts)
+            break;
+        int y = 40 + i * 20;
+        if (idx == g_menu_cur) {
+            for (int r = 0; r < 16; r++) {
+                uint32_t *row = g_fb + (y - 2 + r) * SCREEN_W + 8;
+                for (int x = 0; x < SCREEN_W - 16; x++)
+                    row[x] = 0xFF603018;   /* 高亮条 */
+            }
+        }
+        char nm[64], line[80];
+        cart_disp(idx, nm, sizeof(nm));
+        snprintf(line, sizeof(line), "%c%c %s",
+                 idx == g_menu_cur ? '>' : ' ',
+                 idx == g_cartidx ? '*' : ' ',
+                 nm);
+        draw_text(16, y, line,
+                  idx == g_menu_cur ? 0xFFFFFFFF : 0xFFB0B0B0);
+    }
+    draw_text(16, 40 + MENU_VIEW * 20 + 16,
+              "UP/DOWN select   CROSS load   CIRCLE back",
+              0xFF808080);
+}
+
+static void menu_enter(void) {
+    if (g_ncarts == 0)
+        return;
+    g_menu_open = true;
+    g_menu_cur  = (g_cartidx >= 0) ? g_cartidx : 0;
+    g_menu_top  = 0;
+    menu_clamp_top();
+    menu_draw();
+}
+
+static void menu_leave(void) {
+    g_menu_open = false;
+    blit_frame();   /* 菜单盖掉了游戏画面，恢复 */
+}
+
+/* ------------------------------------------------------------------ */
 /* main                                                                */
 /* ------------------------------------------------------------------ */
 
@@ -328,8 +424,8 @@ int main(void) {
     else
         clear_screen(0xFF4040FF);   /* 红：没找到卡带 */
     printf("操作: CROSS=A CIRCLE=B 十字=方向\n");
-    printf("      START=菜单 SELECT=重置\n");
-    printf("      L/R=换卡带\n");
+    printf("      START=游戏内菜单 SELECT=重置\n");
+    printf("      START+SELECT=卡带列表 L/R=换卡带\n");
 
     /* 帧缓冲挂上屏幕 */
     SceDisplayFrameBuf dfb;
@@ -347,6 +443,38 @@ int main(void) {
         input_poll_cb();
         uint32_t down = g_pad.buttons & ~prev_btn;
         prev_btn = g_pad.buttons;
+
+        /* START+SELECT 同按（至少一键是新按下）= 菜单开关 */
+        uint32_t both = SCE_CTRL_START | SCE_CTRL_SELECT;
+        bool combo = (g_pad.buttons & both) == both
+                     && (down & both) != 0;
+
+        if (g_menu_open) {
+            if (combo || (down & SCE_CTRL_CIRCLE)) {
+                menu_leave();
+            } else if ((down & SCE_CTRL_DOWN) && g_menu_cur < g_ncarts - 1) {
+                g_menu_cur++;
+                menu_clamp_top();
+                menu_draw();
+            } else if ((down & SCE_CTRL_UP) && g_menu_cur > 0) {
+                g_menu_cur--;
+                menu_clamp_top();
+                menu_draw();
+            } else if (down & SCE_CTRL_CROSS) {
+                int pick = g_menu_cur;
+                menu_leave();
+                if (pick != g_cartidx)
+                    load_cart(pick);
+            }
+            sceDisplayWaitVblankStart();
+            continue;
+        }
+
+        if (combo) {
+            menu_enter();
+            sceDisplayWaitVblankStart();
+            continue;
+        }
 
         if (down & (SCE_CTRL_LTRIGGER | SCE_CTRL_RTRIGGER))
             switch_cart((down & SCE_CTRL_LTRIGGER) ? -1 : 1);

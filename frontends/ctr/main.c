@@ -7,6 +7,7 @@
  *   - L/R 肩键切换 sdmc:/mca 目录下的 .pxt64 卡带，Y 退回 Homebrew Launcher
  *   - ndsp 立体声 44100Hz 输出
  *   - 底屏 console 显示状态
+ *   - START+SELECT 进暂停态卡带列表（底屏渲染）：上下选、A 装载、B 返回
  *
  * 契约对齐 docs/INPUT.md：RetroPad A(id8)=MakeCode A、B(id0)=MakeCode B、
  * START(3)=菜单、SELECT(2)=重置（重置上升沿由 core 在 retro_run 内处理）。
@@ -284,6 +285,83 @@ static void switch_cart(int delta) {
 }
 
 /* ------------------------------------------------------------------ */
+/* 卡带列表菜单（暂停态，底屏 console 渲染）                              */
+/*                                                                      */
+/* START+SELECT 同按进出；菜单态不跑 retro_run，VM 状态原地保留，          */
+/* A 装载选中卡带（当前卡带则直接返回），B 返回游戏。                     */
+/* ------------------------------------------------------------------ */
+
+#define MENU_VIEW 22
+
+static bool g_menu_open = false;
+static int  g_menu_cur  = 0;
+static int  g_menu_top  = 0;   /* 滚动窗口首行下标 */
+
+/* 去掉目录前缀与 .pxt64 后缀的显示名 */
+static void cart_disp(int idx, char *buf, size_t n) {
+    snprintf(buf, n, "%s", g_cart_path[idx] + strlen(CART_DIR) + 1);
+    size_t l = strlen(buf);
+    if (l > 6 && strcmp(buf + l - 6, ".pxt64") == 0)
+        buf[l - 6] = '\0';
+}
+
+static void menu_clamp_top(void) {
+    if (g_menu_top > g_menu_cur - 3)
+        g_menu_top = g_menu_cur - 3;
+    if (g_menu_top > g_ncarts - MENU_VIEW)
+        g_menu_top = g_ncarts - MENU_VIEW;
+    if (g_menu_top < 0)
+        g_menu_top = 0;
+}
+
+static void menu_draw(void) {
+    consoleClear();
+    printf("== MCA 卡带列表 %d/%d ==\n\n", g_menu_cur + 1, g_ncarts);
+    for (int i = 0; i < MENU_VIEW; i++) {
+        int idx = g_menu_top + i;
+        if (idx >= g_ncarts)
+            break;
+        char nm[40];
+        cart_disp(idx, nm, sizeof(nm));
+        printf("%c%c %.35s\n",
+               idx == g_menu_cur ? '>' : ' ',
+               idx == g_cartidx ? '*' : ' ',
+               nm);
+    }
+    printf("\n上/下=选择  A=装载  B=返回\n");
+}
+
+static void menu_enter(void) {
+    if (g_ncarts == 0)
+        return;
+    g_menu_open = true;
+    g_menu_cur  = (g_cartidx >= 0) ? g_cartidx : 0;
+    g_menu_top  = 0;
+    menu_clamp_top();
+    menu_draw();
+}
+
+static void print_status(void) {
+    if (g_ncarts == 0) {
+        printf("[mca] " CART_DIR " 里没有 .pxt64 卡带\n");
+    } else if (g_cartidx >= 0) {
+        char nm[64];
+        cart_disp(g_cartidx, nm, sizeof(nm));
+        printf("[mca] 当前 %d/%d: %s\n", g_cartidx + 1, g_ncarts, nm);
+    }
+    printf("操作: A/B=游戏键 十字=方向\n");
+    printf("      START=游戏内菜单 SELECT=重置\n");
+    printf("      START+SELECT=卡带列表 L/R=换卡带\n");
+    printf("      Y=退出\n");
+}
+
+static void menu_leave(void) {
+    g_menu_open = false;
+    consoleClear();
+    print_status();
+}
+
+/* ------------------------------------------------------------------ */
 /* 视频（顶部屏直写 framebuffer）                                       */
 /*                                                                      */
 /* 3DS framebuffer 旋转存放：顶部屏 RGB565 缓冲 240x400，屏幕坐标        */
@@ -339,13 +417,9 @@ int main(void) {
     retro_init();
 
     scan_carts();
-    printf("找到 %d 张卡带\n", g_ncarts);
     if (g_ncarts > 0)
         load_cart(0);
-
-    printf("操作: A/B=游戏键 十字=方向\n");
-    printf("      START=菜单 SELECT=重置\n");
-    printf("      L/R=换卡带 Y=退出\n");
+    print_status();
 
     u32 prev_held = 0;
     while (aptMainLoop()) {
@@ -355,6 +429,38 @@ int main(void) {
 
     if (down & KEY_Y)
         break;
+
+    /* START+SELECT 同按（至少一键是新按下）= 菜单开关 */
+    bool combo = (held & (KEY_START | KEY_SELECT)) == (KEY_START | KEY_SELECT)
+                 && (down & (KEY_START | KEY_SELECT)) != 0;
+
+    if (g_menu_open) {
+        if (combo || (down & KEY_B)) {
+            menu_leave();
+        } else if ((down & KEY_DOWN) && g_menu_cur < g_ncarts - 1) {
+            g_menu_cur++;
+            menu_clamp_top();
+            menu_draw();
+        } else if ((down & KEY_UP) && g_menu_cur > 0) {
+            g_menu_cur--;
+            menu_clamp_top();
+            menu_draw();
+        } else if (down & KEY_A) {
+            int pick = g_menu_cur;
+            menu_leave();
+            if (pick != g_cartidx)
+                load_cart(pick);
+        }
+        gspWaitForVBlank();
+        continue;
+    }
+
+    if (combo) {
+        menu_enter();
+        gspWaitForVBlank();
+        continue;
+    }
+
     if (down & (KEY_L | KEY_R))
         switch_cart((down & KEY_L) ? -1 : 1);
 
