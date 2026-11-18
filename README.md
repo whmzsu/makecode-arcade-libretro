@@ -520,6 +520,10 @@ functions.json 逐字节一致）。
 > **只想玩、不想看技术细节？** 直接看玩家指南：
 > - 中文（小白版）：[`docs/玩家指南.md`](docs/玩家指南.md)
 > - English (beginner edition): [`docs/Player-Guide.md`](docs/Player-Guide.md)
+>
+> 本地开发相关：3DS/Vita 真机测试见 [`docs/3DS-VITA-TEST.md`](docs/3DS-VITA-TEST.md)，
+> tool69 工具机脚本归档在 [`tools/tool69/`](tools/tool69/)，
+> `out/` 工作目录的使用规范见 [`docs/OUT-DIRECTORY.md`](docs/OUT-DIRECTORY.md)。
 
 > **核心只运行 `.pxt64` 字节码，文件浏览器也只列出 `.pxt64`。** `.png` 卡带里
 > 只有**源码**（meta + source），不是可直接运行的游戏——拿到 `.pxt64` 有两条路：
