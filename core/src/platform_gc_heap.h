@@ -16,14 +16,9 @@
 // extern "C"：符号进静态库后要用 nm 直接可查（校验断言依赖），也与
 // 项目的导出符号风格一致
 extern "C" void mcaCtrInitGcHeap();
-// 诊断：retro_init 被调用了几次、堆落在哪个地址（屏幕 OSD 展示）
-extern "C" int mcaGcHeapInitCount;
-extern "C" void *mcaGcHeapBase;
 #define MCA_PLATFORM_GC_HEAP_INIT() mcaCtrInitGcHeap()
 #elif defined(_PXT_VITA)
 extern "C" void mcaVitaInitGcHeap();
-extern "C" int mcaGcHeapInitCount;
-extern "C" void *mcaGcHeapBase;
 #define MCA_PLATFORM_GC_HEAP_INIT() mcaVitaInitGcHeap()
 #else
 #define MCA_PLATFORM_GC_HEAP_INIT() ((void)0)

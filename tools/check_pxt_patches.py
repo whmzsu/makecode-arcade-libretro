@@ -294,6 +294,38 @@ PATCHES = [
         ],
         "forbid": [],
     },
+    {
+        "no": 19,
+        "title": "注入的 GC 堆必须清零（GC 对象按\"分配到的内存是零\"使用）",
+        "impact": "桌面 PXT32 走 mmap(MAP_FIXED|MAP_ANON)，重映射换上的是新零页；"
+                  "PXT64 分支对 malloc 堆显式 memset；唯独 3DS/Vita 的注入堆是平台层"
+                  "malloc/复用缓存的裸内存，长期不清零。缓冲池复用同一块堆时，上一局"
+                  "的字节全都还在，GC 对象会读到陈旧数据。"
+                  "注意：这一条是 GC 的正确性前提，**不是** 2026-11-18 真机偏色的"
+                  "成因 —— 那次偏色的真因是 PATCH 20；本条在同版本真机上单独验证过"
+                  "\"装了也不修偏色\"。",
+        "checks": [
+            ("core---vm/scheduler.cpp", r"memset\(base, 0, size\);"),
+        ],
+        "forbid": [],
+    },
+    {
+        "no": 20,
+        "title": "像素格式协商结果必须随 retro_init 作废（-z nodelete 下会跨会话粘住）",
+        "impact": "g_pixel_format_ok 是静态标志，而核心链了 -z nodelete：前端"
+                  "\"关闭内容\"不卸载 .so，标志一直是 true。重新打开内容时前端重建"
+                  "视频驱动、像素格式回落到 0RGB1555，核心却不再发 SET_PIXEL_FORMAT，"
+                  "继续按 RGB565 写、被按 1555 读 —— 绿变橙黄、棕变暗青绿，整屏系统性"
+                  "偏移且每次都一样，只有重启前端才恢复。3DS/Vita 真机偏色的真因。",
+        "checks": [
+            ("../../core/src/libretro_core.cpp",
+             r"PATCH 20：像素格式必须每次 init 重新协商"),
+            ("../../core/src/libretro_core.cpp", r"g_pixel_format_ok = false;"),
+            ("../../core/src/libretro_core.cpp",
+             r"g_pixel_format = RETRO_PIXEL_FORMAT_0RGB1555;"),
+        ],
+        "forbid": [],
+    },
 ]
 
 # 已退役：编号留着，防止旧文档/旧日志里的 PATCH 4 对不上号

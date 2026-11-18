@@ -128,7 +128,7 @@ pointers.cpp、functions.json、pxtconfig.h）逐字节一致（仅我们的 3 �
    整个测试在 VM 起跑前跑完，画面全黑（0xff000000 = screen.cpp 的 no-display 分支）。
 3. VM 日志每条重复两遍（官方宿主同样现象，pxt_get_logs 行为，不影响功能）。
 
-### 对 pxt 上游与宿主侧的 17 个补丁（PATCH 1/2/3/5~18；PATCH 4 已被 10 取代）
+### 对 pxt 上游与宿主侧的 19 个补丁（PATCH 1/2/3/5~20；PATCH 4 已被 10 取代）
 
 > **校验**：`python tools/check_pxt_patches.py`（CI 的 `pxt-patches` job 每次 push 都跑）。
 > 补丁没有独立 patch 文件、构建时也不重放，全靠这棵树本身带着——脚本是唯一能
@@ -194,9 +194,27 @@ pointers.cpp、functions.json、pxtconfig.h）逐字节一致（仅我们的 3 �
 > `mcaCtrInitGcHeap()` 原来每次都 `malloc` 一块新的 2MB 并覆盖
 > `mca_gc_base`，旧块永久泄漏；堆基址一变，上一局残留的静态指针就不再指向
 > 有效区间。桌面与 Android 走 PXT32 的 `mmap(MAP_FIXED)` 分支，地址恒为
-> `GC_BASE=0x20000000`，所以这个问题在桌面上完全看不见 —— 现象是"同一次前端
-> 会话里第二次加载后画面颜色错乱，重启前端又正常"。改成 static 缓存后重复
-> 调用只重新注入同一地址。
+> `GC_BASE=0x20000000`，所以这个问题在桌面上完全看不见。这是独立的正确性
+> 要求（基址稳定、旧块不泄漏），改成 static 缓存后重复调用只重新注入同一地址。
+> **注意**：2026-11-18 真机偏色的真因不是本条，而是 PATCH 20；本条在同版本
+> 真机上单独验证过"装上也不修偏色"。
+
+> **PATCH 19（v0.3.10，GC 零初始化前提）** `mca_vm_set_gc_heap()` 统一
+> `memset(base, 0, size)`。桌面 PXT32 走 `mmap(MAP_FIXED|MAP_ANON)`，重映射换上的
+> 页天然是零；PXT64 分支对 malloc 堆显式清零；唯独 3DS/Vita 的注入堆是平台层
+> 复用缓存的裸内存，长期不清零 —— 重开内容复用同一块堆时，上一局的字节全都还在，
+> 而 GC 对象是按"分配到的内存是零"来使用的。调用发生在 `pxt_vm_start` 之前，
+> 无并发；2MB memset 相对装载开销可忽略。**同样不是偏色的真因。**
+
+> **PATCH 20（v0.3.10，真机偏色的真因）** 像素格式协商结果必须随 `retro_init`
+> 作废。`g_pixel_format_ok` 是静态标志，核心又链了 `-z nodelete`：前端"关闭内容"
+> 不卸载 `.so`，标志一直是 `true`。重开内容时前端重建视频驱动、像素格式回落到
+> libretro 默认的 `0RGB1555`，核心却因为标志还粘着**不再发**
+> `SET_PIXEL_FORMAT`，于是继续按 RGB565 写、被按 1555 读：绿 `0x78dc52` 读成橙黄、
+> 棕 `0x91463d` 读成暗青绿 —— 整屏系统性偏移且每次都一样，只有重启前端（新进程、
+> 静态变量归零）才恢复。3DS 不重建视频驱动，所以从未暴露。
+> 桌面 RA 日志可验证：一次内容加载会走**两轮** `retro_init` + `set_environment`
+> （`SET_PIXEL_FORMAT: RGB565` 出现两次），即第二轮必须能重新协商。
 
 > PATCH 11（2026-11-09 发现）只改一行：`core---vm/verify.cpp` 的 `ALLOC_ARRAY`
 > 宏给 `sz` 补上括号。上游写法 `sizeof(tp) * sz` 遇到唯一传表达式的调用点

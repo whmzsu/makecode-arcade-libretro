@@ -71,7 +71,7 @@ makecode_arcade/
 │   ├── tests/              Fake-frontend core_test / contract self-check contract_test / VM smoke vm_smoke
 │   └── assets/ctr/         CIA packaging assets (icon48.png, banner256.png, banner.wav); info is generated from tools/core.info.in
 ├── runtime/
-│   ├── pxtapp/             Official pxt VM kernel + engine primitives (vendored, 17 patches applied, game-agnostic)
+│   ├── pxtapp/             Official pxt VM kernel + engine primitives (vendored, 19 patches applied, game-agnostic)
 │   └── VENDORING.md
 ├── tools/
 │   ├── build_core.sh       One-shot build: DLL + the three test programs
@@ -81,7 +81,7 @@ makecode_arcade/
 │   ├── build_musl.sh       Lakka package (fully static musl) build
 │   ├── package_release.sh  Package release zips (core + .info + notes + strip/debuginfo)
 │   ├── verify_release.py   Hard release assertions (arch / e_machine / 16KB / NODELETE / version)
-│   ├── check_pxt_patches.py  Table-driven check of the 17 vendored pxt patches
+│   ├── check_pxt_patches.py  Table-driven check of the 19 vendored pxt patches
 │   ├── setup_vita_gl_stack.sh  One-shot Vita GL dependency chain (taiHEN → SceShaccCgExt → vitashark → math-neon → vitaGL)
 │   ├── libretro_host.py    Fake frontend host + descriptor static self-check (--dry)
 │   ├── ci_regress.sh / coverage.sh / fuzz_pxt.sh / retroarch_smoke.sh  Regression / coverage / fuzz / real-frontend smoke

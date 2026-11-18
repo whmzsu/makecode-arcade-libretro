@@ -331,6 +331,17 @@ void retro_init(void) {
     // 3DS/Vita：静态链接平台在 VM 启动前注入 GC 堆（绕开 mmap）。
     // 其它平台这里是 (void)0，零开销零符号。
     MCA_PLATFORM_GC_HEAP_INIT();
+    // PATCH 20：像素格式必须每次 init 重新协商。
+    //
+    // g_pixel_format_ok 是跨会话粘住的静态标志，而核心链了 -z nodelete：
+    // 前端「关闭内容」不会卸载 .so，标志一直是 true。重新打开内容时前端会
+    // 重建视频驱动，像素格式回到 libretro 默认的 0RGB1555 —— 我们却因为
+    // 标志还粘着不再发 SET_PIXEL_FORMAT，于是继续按 RGB565 写、前端按 1555
+    // 解：绿变橙黄、棕变暗青绿，整个画面色彩系统性偏移且每次都一样，
+    // 只有重启前端（新进程、静态变量归零）才恢复。3DS 不重建视频驱动，
+    // 所以从来没暴露。
+    g_pixel_format_ok = false;
+    g_pixel_format = RETRO_PIXEL_FORMAT_0RGB1555;
     g_frame = 0;
     g_game_loaded = false;
 #ifdef _WIN32
@@ -346,6 +357,9 @@ void retro_deinit(void) {
     // 保险：有些前端不调 retro_unload_game 就 deinit，这里再兜一次
     vm_stop();
     g_game_loaded = false;
+    // 像素格式协商结果与本次前端会话绑定，deinit 时一并作废（见 retro_init）
+    g_pixel_format_ok = false;
+    g_pixel_format = RETRO_PIXEL_FORMAT_0RGB1555;
 }
 
 unsigned retro_api_version(void) { return RETRO_API_VERSION; }

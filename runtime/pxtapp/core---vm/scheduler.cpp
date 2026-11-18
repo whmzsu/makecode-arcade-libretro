@@ -95,6 +95,17 @@ static uintptr_t mca_gc_heap_limit = 0;
 __declspec(dllexport)
 #endif
 DLLEXPORT void mca_vm_set_gc_heap(void *base, unsigned size) {
+    // MCA PATCH 19：堆必须清零。桌面 PXT32 走 mmap(MAP_FIXED|MAP_ANON)，重映射
+    // 换上的页天然是零；PXT64 分支对 malloc 堆显式 memset；唯独本注入路径是
+    // 平台层 malloc/缓存复用的裸内存 —— 前端"关闭内容→重新打开"（-z nodelete
+    // 下 retro_init 会再调）复用缓存堆时，上一局的所有字节都还在。GC 对象按
+    // 零初始化假设使用分配到的块，残留数据会让对象读到上一局的字节。
+    // 注意：这是 GC 的正确性前提，不是 2026-11-18 真机偏色的成因 —— 那次
+    // 偏色的真因是 PATCH 20 的像素格式协商（见 core/src/libretro_core.cpp）。
+    // 调用发生在 pxt_vm_start 之前，VM 线程尚未运行，清零无并发问题；
+    // 2MB memset 相对装载开销可忽略。
+    if (base)
+        memset(base, 0, size);
     mca_gc_base = (uint8_t *)base;
     mca_gc_top = (uint8_t *)base;
     gcAllocPtr = (uint8_t *)base;
