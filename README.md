@@ -40,29 +40,34 @@ JS 引擎层**——JS 模拟层（DOM mock、promise 微任务、GC、JS 逐帧
 makecode_arcade/
 ├── README.md               本文件
 ├── LICENSE                 MIT
-├── .github/workflows/build.yml  GitHub Actions：全平台编译回归 + 测试产物
+├── .github/workflows/
+│   ├── build.yml           GitHub Actions：全平台编译回归 + 发版（tag 触发）
+│   ├── 3ds-vita.yml        3DS/Vita 核心静态库与 CIA/SELF（reusable，build.yml 调用）
+│   ├── nx.yml              Switch NRO（reusable，build.yml 调用；nx-v* 单独 Release）
+│   └── nx-diag.yml         NX 启动诊断（手动）
 ├── .gitlab-ci.yml          libretro 官方 buildbot 收录用（镜像仓库时生效）
 ├── docs/
 │   ├── ROUTE-B-DESIGN.md   路线 B 总体设计（架构 / 数据流 / 里程碑 / 风险）
-│   ├── PNG-FORMAT.md       .png 卡带（隐写打包）格式规格
+│   ├── PNG-FORMAT.md       .png 卡带（隐写打包）格式规格（工具链侧留档）
 │   ├── PXT32-A-SCHEME.md   32 位 A 方案（GC 标记旁路表）实测报告
 │   ├── DEVICE-LEDGER.md    真机台账（各设备的版本与测试状态）
+│   ├── DEVICE-TEST.md      真机验收记录（RK3566 + ArkOS，含故障复盘）
+│   ├── CROSS-COMPILE.md    交叉编译（目标矩阵 / 用法 / 踩坑）
+│   ├── ANDROID-2026-11-08.md  Android 测试方法（shell 宿主 / RA / 测试 APK）
+│   ├── 3DS-VITA-TEST.md    3DS/Vita 真机测试与验收（含本地构建流程）
+│   ├── TEST-CORPUS.md      卡带语料与回归方法
+│   ├── OUT-DIRECTORY.md    out/ 本地工作目录使用规范
+│   ├── 玩家指南.md / Player-Guide.md  小白版安装游玩指南（中/英）
 │   ├── M2-RUNTIME-NOTES.md pxt 运行时考古笔记（官方宿主 8 函数 ABI）
 │   ├── M3-VM-HOST.md       VM 宿主接入、验收记录与已知限制
-│   ├── CROSS-COMPILE.md    交叉编译（目标矩阵 / 用法 / 踩坑）
-│   ├── DEVICE-TEST.md      真机验收记录（RK3566 + ArkOS，含故障复盘）
 │   └── INPUT.md            按键与选项（映射、描述符、验证方法）
 ├── core/                   libretro core（C/C++）
 │   ├── libretro.h          官方头文件（来自 libretro-common，MIT）
 │   ├── Makefile            标准 libretro 构建（platform=unix/win/win64/osx/android/ctr/vita/libnx）
 │   ├── jni/                Android.mk + Application.mk（官方 CI 的 ndk-build 路径）
-│   ├── src/
-│   │   ├── libretro_core.cpp   libretro 入口 + 帧循环 + 视频/音频/输入接线
-│   │   ├── vm_host.cpp         pxt VM 宿主封装（镜像装载/按键沿/拉帧拉音频）
-│   │   └── platform.h          pxt VM 宿主 ABI（对齐官方 sdlmain.cpp）
+│   ├── src/                libretro_core.cpp 入口接线 / vm_host.cpp VM 宿主 / nx_diag 等
 │   ├── tests/              假前端 core_test / 契约自检 contract_test / VM 冒烟 vm_smoke
-├── core/assets/            3DS 核心打包素材（CIA 图标/banner）；info 统一由 tools/core.info.in 生成
-│   └── ctr/                CIA 图标/banner（icon48.png、banner256.png、banner.wav）
+│   └── assets/ctr/         CIA 打包素材（icon48.png、banner256.png、banner.wav）；info 统一由 tools/core.info.in 生成
 ├── runtime/
 │   ├── pxtapp/             pxt 官方 VM 内核+引擎原语（vendored，已打 14 个补丁，游戏无关）
 │   └── VENDORING.md
@@ -71,16 +76,26 @@ makecode_arcade/
 │   ├── make_local.sh       用 zig 驱动 core/Makefile（本地无目标工具链时）
 │   ├── build_target.sh     单目标交叉编译（zig；Android 走 NDK clang）
 │   ├── build_matrix.sh     发版矩阵（9 主流目标：64 位 5 + 32 位 4）/ --all 全架构
-│   ├── package_release.sh  打包发行 zip（core + .info + 说明）
-│   ├── inspect_binary.py   产物自检（架构/libc 基线/依赖/retro_* 导出，纯标准库）
+│   ├── build_musl.sh       Lakka 包（musl 全静态）专用构型
+│   ├── package_release.sh  打包发行 zip（core + .info + 说明 + strip/debuginfo）
+│   ├── verify_release.py   发版硬断言（平台/机器类型/16KB/NODELETE/版本号）
+│   ├── check_pxt_patches.py  表驱动校验 vendored pxt 树的 14 个补丁
 │   ├── setup_vita_gl_stack.sh  Vita GL 依赖链一键搭建（taiHEN → SceShaccCgExt → vitashark → math-neon → vitaGL）
-│   ├── make_probe_cartridge.py  探针卡带生成器（按键/生命周期回归用，调并列仓库的 pxt 工具链）
-│   ├── test_buttons.py     按键映射回归（16 用例）
-│   ├── test_lifecycle.py   生命周期回归（换游戏/卸载/重置后音频）
 │   ├── libretro_host.py    假前端宿主 + 描述符静态自检（--dry）
+│   ├── ci_regress.sh / coverage.sh / fuzz_pxt.sh / retroarch_smoke.sh  回归/覆盖率/fuzz/真前端冒烟
+│   ├── test_buttons.py / test_lifecycle.py  按键与生命周期回归
+│   ├── make_probe_cartridge.py / make_test_cartridge.py  探针/合成卡带生成器
 │   ├── extract_png_meta.py 独立 PNG 卡带解码验证工具（纯 Python 标准库）
-│   └── make_test_cartridge.py  合成测试卡带生成器（编解码回环自测）
-├── png_examples/           真实卡带样本（ping / jumpy / cube-land / falling-duck / destroy-the-castle）
+│   ├── gen_cia_assets.py   CIA 素材生成器；core_pc.py / check_pe.py / inspect_binary.py  产物体检
+│   ├── fixtures/           回归夹具（golden 末帧 / crash 卡带 / corpus.json）
+│   ├── lib/                shell 公共库（sources.sh）
+│   ├── android_test/       安卓真机测试（shell 宿主 / run_on_device）
+│   ├── nx-probe/           Switch 启动诊断与符号定位
+│   ├── muos/               muOS 真机安装与稳定性工具
+│   ├── win32_shim/         PXT32 探针线的 Windows dlopen shim（存档）
+│   ├── tool69/             工具机（192.168.1.69）运维脚本归档（机器上主拷贝在 /opt/mca-work/bin/）
+│   └── experimental/       实验线：firmware-pr（ArkOS/dArkOS/muOS/knulli/arkos4clone 收录 PR）
+├── png_examples/           真实卡带样本（ping / jumpy / cube-land / falling-duck / destroy-the-castle；转换样例与回归语料）
 └── test_cartridge.png      合成卡带样本（自测通过）
 ```
 
@@ -313,8 +328,7 @@ Switch **没有 `dlopen`**，核心不能像桌面那样丢一个 `.so` 进核�
 `tools/package_release.sh` 不参与这条线，由独立 workflow 负责。独立 Release
 只发在 `nx-v*` tag（版本号与 `core-v*` 同步，例如 `nx-v0.3.3` ↔
 `core-v0.3.3`）；推 `core-v*` tag 时 nx.yml 会把 `makecode_arcade_switch.zip`
-**追加到核心发版的同一个 Release**（`core-release-upload` job，与 3DS/Vita
-整包的上传 job 同一套轮询机制）：
+`core-release-upload` job 与 3DS/Vita 的上传 job 同构）：
 
 ```bash
 # .github/workflows/nx.yml 等价命令（devkitpro/devkita64 容器内）
@@ -391,6 +405,9 @@ cd ../makecode_arcade_cartconv/vm-build && npm install
 | `pxt-patches` | 纯 python，不编译 | 校验 vendored pxt 树里 14 个必要补丁还在（几秒） |
 | `golden-hash` | gcc + `tools/libretro_host.py` | 2 张卡带 3 个用例的末帧 MD5 比对 —— 唯一能抓住"契约全绿但画面画错了"的断言 |
 | `crash-regression` | gcc + 3 张回归夹具 | 盯 PATCH 13/14（两处整数除零）与 PATCH 15（镜像校验失败时 `load_game` 不再谎报成功） |
+| `retroarch-smoke` | ubuntu-24.04 + 发行版 RetroArch + Xvfb | 真前端冒烟：dlopen、`.info` 解析、像素格式协商、SAVE_DIRECTORY、截图（2 张夹具卡带各 120 帧） |
+| `3DS / Vita core files (reusable)` | devkitARM / vitasdk 容器 | 编 core 静态库 + 链 RA 完整前端出 CIA/SELF（调 `3ds-vita.yml`；tag 时进发版） |
+| `Switch NRO (reusable)` | devkitA64 容器 | 编 core 静态库 + 链 RA 出 NRO（调 `nx.yml`；tag 时进发版） |
 | `package` | 汇总发行版工具链产物 → `tools/package_release.sh`，再解包 dlopen 跑 60 帧 | 5 个 zip |
 | `release`（只在推 `core-v*` tag 时） | 汇总 `zig-*` + `android-*` + `lakka-musl` 产物 → `package_release.sh` → `gh release create` | **10 个 zip**（6 全 64 位 + 4 个 32 位；含只有 zig 能出的 `windows-arm64`/`windows-x86`，以及只有 musl 工具链能出的 `lakka-arm64`） |
 
@@ -446,8 +463,10 @@ dispatch、产物挂 workflow artifact；**推 `core-v*` tag 时自动跑**，�
   （linux-x64 / linux-arm64 / linux-x86 / linux-armhf / lakka-arm64）另出一个
   `makecode_arcade_<platform>-debuginfo.zip`，内含未 strip 的原件，只在需要把
   崩溃地址翻译回源码行时才下载。两个包靠 `-Wl,--build-id=sha1` 生成的
-  build-id 对齐，所以核心部分总共是 **15 个资产**（10 主包 + 5 调试包），
-  另加 3DS/Vita 整包 7 件 + Switch zip 1 件。
+  build-id 对齐，所以核心部分总共是 **15 个 zip**（10 主包 + 5 调试包），
+  另加 3 个平台 zip（`makecode_arcade_ctr.zip` / `_vita.zip` / `_switch.zip`，
+  3DS/Vita/Switch 的核心文件与 info 已各自打包，info 不单独作为资产），
+  一个 Release 共 18 个 zip。
 - 凭据用仓库内置 `GITHUB_TOKEN`（job 级 `contents: write`，全局仍是只读），
   **不需要 PAT**。Release 对象与附件上传只有 HTTPS API 提供，git/SSH 到不了
   这一层——SSH key 只能推 commit 和 tag。
@@ -455,7 +474,8 @@ dispatch、产物挂 workflow artifact；**推 `core-v*` tag 时自动跑**，�
   `display_version` 必须等于 tag，少一个或版本对不上就红，不会发出半套包。
   `package` job 还会断言发行包里的核心确实不含 `.debug_info`（防止打包时静默
   跳过 strip）。
-- 说明文本取 `.github/release-notes/<tag>.md`；没写就退回 `--generate-notes`。
+- 说明文本取 `.github/release-notes/<tag>.md`；没有就退回本地生成的
+  commit 列表。
 - 重跑安全：Release 已存在时走 `upload --clobber` + `edit`，不报错。
 
 真机验收（R1）仍然只能在设备上做，自动化不了。tag 发的包和本地

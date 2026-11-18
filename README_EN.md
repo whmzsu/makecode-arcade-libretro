@@ -42,29 +42,34 @@ makecode_arcade/
 ├── README.md               This file (Chinese)
 ├── README_EN.md            English readme
 ├── LICENSE                 MIT
-├── .github/workflows/build.yml  GitHub Actions: all-platform build regression + test artifacts
+├── .github/workflows/
+│   ├── build.yml           GitHub Actions: all-platform build regression + releases (tag-triggered)
+│   ├── 3ds-vita.yml        3DS/Vita core static libs + CIA/SELF (reusable, called by build.yml)
+│   ├── nx.yml              Switch NRO (reusable, called by build.yml; nx-v* gets its own Release)
+│   └── nx-diag.yml         NX boot diagnostics (manual)
 ├── .gitlab-ci.yml          For the official libretro buildbot (active on the mirrored repo)
 ├── docs/
 │   ├── ROUTE-B-DESIGN.md   Route B overall design (architecture / data flow / milestones / risks)
-│   ├── PNG-FORMAT.md       .png cartridge (steganographic packing) format spec
+│   ├── PNG-FORMAT.md       .png cartridge (steganographic packing) format spec (toolchain-side archive)
 │   ├── PXT32-A-SCHEME.md   32-bit "scheme A" (GC tag side-table) test report
 │   ├── DEVICE-LEDGER.md    Device ledger (version & test status per device)
+│   ├── DEVICE-TEST.md      Real-device acceptance records (RK3566 + ArkOS, incl. post-mortems)
+│   ├── CROSS-COMPILE.md    Cross-compiling (target matrix / usage / pitfalls)
+│   ├── ANDROID-2026-11-08.md  Android testing methods (shell host / RA / test APK)
+│   ├── 3DS-VITA-TEST.md    3DS/Vita real-device testing & acceptance (incl. local build flow)
+│   ├── TEST-CORPUS.md      Cartridge corpus & regression methodology
+│   ├── OUT-DIRECTORY.md    Usage convention for the out/ working directory
+│   ├── Player-Guide.md     Beginner install & play guide (English; 玩家指南.md is the Chinese one)
 │   ├── M2-RUNTIME-NOTES.md pxt runtime archaeology notes (the official host's 8-function ABI)
 │   ├── M3-VM-HOST.md       VM host integration, acceptance records, known limitations
-│   ├── CROSS-COMPILE.md    Cross-compiling (target matrix / usage / pitfalls)
-│   ├── DEVICE-TEST.md      Real-device acceptance records (RK3566 + ArkOS, incl. post-mortems)
 │   └── INPUT.md            Buttons and options (mapping, descriptors, verification)
 ├── core/                   libretro core (C/C++)
 │   ├── libretro.h          Official header (from libretro-common, MIT)
 │   ├── Makefile            Standard libretro build (platform=unix/win/win64/osx/android/ctr/vita/libnx)
 │   ├── jni/                Android.mk + Application.mk (the official CI's ndk-build path)
-│   ├── src/
-│   │   ├── libretro_core.cpp   libretro entry points + frame loop + video/audio/input wiring
-│   │   ├── vm_host.cpp         pxt VM host wrapper (image load / button edges / frame+audio pulls)
-│   │   └── platform.h          pxt VM host ABI (mirrors the official sdlmain.cpp)
+│   ├── src/                libretro_core.cpp entry points / vm_host.cpp VM host / nx_diag etc.
 │   ├── tests/              Fake-frontend core_test / contract self-check contract_test / VM smoke vm_smoke
-├── core/assets/            3DS core packaging assets (CIA icon/banner); info is generated from tools/core.info.in
-│   └── ctr/                CIA icon/banner (icon48.png, banner256.png, banner.wav)
+│   └── assets/ctr/         CIA packaging assets (icon48.png, banner256.png, banner.wav); info is generated from tools/core.info.in
 ├── runtime/
 │   ├── pxtapp/             Official pxt VM kernel + engine primitives (vendored, 14 patches applied, game-agnostic)
 │   └── VENDORING.md
@@ -73,16 +78,26 @@ makecode_arcade/
 │   ├── make_local.sh       Drives core/Makefile through zig (when no target toolchain is installed)
 │   ├── build_target.sh     Single-target cross-compile (zig; Android uses NDK clang)
 │   ├── build_matrix.sh     Release matrix (9 mainstream targets: 5×64-bit + 4×32-bit) / --all for every architecture
-│   ├── package_release.sh  Package release zips (core + .info + install notes)
-│   ├── inspect_binary.py   Artifact self-check (arch / libc baseline / deps / retro_* exports, stdlib only)
+│   ├── build_musl.sh       Lakka package (fully static musl) build
+│   ├── package_release.sh  Package release zips (core + .info + notes + strip/debuginfo)
+│   ├── verify_release.py   Hard release assertions (arch / e_machine / 16KB / NODELETE / version)
+│   ├── check_pxt_patches.py  Table-driven check of the 14 vendored pxt patches
 │   ├── setup_vita_gl_stack.sh  One-shot Vita GL dependency chain (taiHEN → SceShaccCgExt → vitashark → math-neon → vitaGL)
-│   ├── make_probe_cartridge.py  Probe-cartridge generator (button/lifecycle regression; uses the sibling repo's pxt toolchain)
-│   ├── test_buttons.py     Button mapping regression (16 cases)
-│   ├── test_lifecycle.py   Lifecycle regression (game switching / unload / audio after reset)
 │   ├── libretro_host.py    Fake frontend host + descriptor static self-check (--dry)
+│   ├── ci_regress.sh / coverage.sh / fuzz_pxt.sh / retroarch_smoke.sh  Regression / coverage / fuzz / real-frontend smoke
+│   ├── test_buttons.py / test_lifecycle.py  Button & lifecycle regression
+│   ├── make_probe_cartridge.py / make_test_cartridge.py  Probe / synthetic cartridge generators
 │   ├── extract_png_meta.py Standalone .png cartridge decoder verification tool (pure Python stdlib)
-│   └── make_test_cartridge.py  Synthetic test-cartridge generator (encode/decode round-trip self-test)
-├── png_examples/           Real cartridge samples (ping / jumpy / cube-land / falling-duck / destroy-the-castle)
+│   ├── gen_cia_assets.py   CIA asset generator; core_pc.py / check_pe.py / inspect_binary.py  artifact checks
+│   ├── fixtures/           Regression fixtures (golden last-frames / crash cartridges / corpus.json)
+│   ├── lib/                Shared shell library (sources.sh)
+│   ├── android_test/       Android real-device testing (shell host / run_on_device)
+│   ├── nx-probe/           Switch boot diagnostics & symbol lookup
+│   ├── muos/               muOS real-device install & stability tools
+│   ├── win32_shim/         Windows dlopen shim from the archived PXT32 probe line
+│   ├── tool69/             Archive of the tool69 build-node ops scripts (master copy lives at /opt/mca-work/bin/)
+│   └── experimental/       Experiment lines: firmware-pr (ArkOS/dArkOS/muOS/knulli/arkos4clone inclusion PRs)
+├── png_examples/           Real cartridge samples (ping / jumpy / cube-land / falling-duck / destroy-the-castle; conversion samples & regression corpus)
 └── test_cartridge.png      Synthetic cartridge sample (self-test passes)
 ```
 
@@ -335,7 +350,7 @@ also the shape of the cores the official online updater distributes.
 A standalone Release is only created on `nx-v*` tags (version kept in sync with
 `core-v*`, e.g. `nx-v0.3.3` ↔ `core-v0.3.3`); on `core-v*` tags, nx.yml
 **appends `makecode_arcade_switch.zip` to the core release** (the
-`core-release-upload` job, same polling mechanism as the 3DS/Vita upload job):
+`core-release-upload` job, structured like the 3DS/Vita upload job):
 
 ```bash
 # equivalent to .github/workflows/nx.yml (inside devkitpro/devkita64)
@@ -421,6 +436,9 @@ bottom of the Actions run page).
 | `behavior-miniretro` | real aarch64 runner (`ubuntu-24.04-arm`) + third-party frontend miniretro | 900-frame smoke run (behaviour layer, not compile layer) |
 | `golden-hash` | gcc + `tools/libretro_host.py` | Last-frame MD5 over 2 cartridges × 3 cases — the only assertion that catches "contract all green but the picture is drawn wrong" |
 | `crash-regression` | gcc + 3 regression fixtures | Watches PATCH 13/14 (two integer division-by-zero fixes) and PATCH 15 (`load_game` no longer lies on image validation failure) |
+| `retroarch-smoke` | ubuntu-24.04 + distro RetroArch + Xvfb | Real-frontend smoke: dlopen, `.info` parsing, pixel-format negotiation, SAVE_DIRECTORY, screenshots (2 fixture cartridges × 120 frames) |
+| `3DS / Vita core files (reusable)` | devkitARM / vitasdk containers | Core static libs + RA full-frontend CIA/SELF (calls `3ds-vita.yml`; lands in the release on tags) |
+| `Switch NRO (reusable)` | devkitA64 container | Core static lib + RA NRO (calls `nx.yml`; lands in the release on tags) |
 | `pxt-patches` | pure Python, no compiling | Verifies the 14 required patches in the vendored pxt tree are still present (seconds) |
 | `package` | Collects distro-toolchain artifacts → `tools/package_release.sh` | 5 zips |
 | `release` (only on `core-v*` tags) | Collects `zig-*` + `android-*` + `lakka-musl` artifacts → `package_release.sh` → `gh release create` | **10 zips** (6 all-64-bit + 4×32-bit; including `windows-arm64`/`windows-x86`, which only zig can produce, and `lakka-arm64`, which only the musl toolchain can produce) |
@@ -492,9 +510,11 @@ just pick one from each group.
   lakka-arm64) also ship a `makecode_arcade_<platform>-debuginfo.zip`
   containing the unstripped original, only needed to translate crash
   addresses back to source lines. Both are tied together by the
-  `-Wl,--build-id=sha1` build-id, so the core part totals **15 assets**
-  (10 main + 5 debuginfo), plus the 3DS/Vita packages (7 files) and the
-  Switch zip (1).
+  `-Wl,--build-id=sha1` build-id, so the core part totals **15 zips**
+  (10 main + 5 debuginfo), plus 3 platform zips (`makecode_arcade_ctr.zip` /
+  `_vita.zip` / `_switch.zip` — the 3DS/Vita/Switch core files and info are
+  bundled per platform, info is no longer a separate asset): 18 zips per
+  Release in total.
 - Credentials use the repo's built-in `GITHUB_TOKEN` (job-level
   `contents: write`; globally still read-only). **No PAT needed.** Release
   objects and asset uploads only exist over the HTTPS API — git/SSH can't
@@ -503,8 +523,8 @@ just pick one from each group.
   packages, every main package's `.info` `display_version` must equal the
   tag — one short or mismatched version turns the job red, so a partial
   release can't ship.
-- Release notes come from `.github/release-notes/<tag>.md`; falls back to
-  `--generate-notes` if missing.
+- Release notes come from `.github/release-notes/<tag>.md`; falls back to a
+  locally generated commit list if missing.
 - Re-run safe: if the Release exists, it goes through `upload --clobber` +
   `edit` without erroring.
 
