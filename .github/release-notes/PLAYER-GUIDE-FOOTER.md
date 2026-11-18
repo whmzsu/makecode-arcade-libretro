@@ -20,25 +20,25 @@
 `*-debuginfo.zip` 是对应 Linux/Lakka 包的调试符号，只有要把崩溃地址翻译回
 源码行时才需要，玩家跳过。
 
-**二、3DS / Vita / Switch 静态核心文件（这两个平台只出核心形态）**
+**二、3DS / Vita / Switch 静态核心文件（先装官方 RetroArch，再并入核心）**
 
 | 文件 | 给谁用 |
 |---|---|
-| `mca_libretro.cia` | 3DS 核心文件：完整 RetroArch，FBI 安装，new3ds 实测通过 |
-| `mca_libretro.info` | 3DS/Vita 核心元数据，跨平台通用（见下方 3DS 列表说明） |
-| `mca_libretro.self` + `mca_libretro.info` | PS Vita 核心文件：并入**已装**的 RetroArch |
+| `makecode_arcade_ctr.zip` | 3DS 核心（内含 `mca_libretro.cia` + `mca_libretro.info`）：解压后把 cia 复制进官方 RA 的 `cores/`、info 放 `cores/info/`，new3ds 实测通过 |
+| `makecode_arcade_vita.zip` | PS Vita 核心（内含 `mca_libretro.self` + `mca_libretro.info`）：解压后并入官方 RA 的 app 目录 + `info/` |
 | `makecode_arcade_switch.zip` | Nintendo Switch（NRO，放 `sdmc:/switch/`） |
 
-> 3DS / Vita **只提供核心形态**（`mca_libretro.*` + `.info`）：极简前端
-> （`mca_ctr.*` / `mca_vita.vpk`）与核心 VPK 已不再提供。
+> **3DS / Vita 都建议先装官方 RetroArch**（从 RetroArch 官网 / buildbot 下载），
+> 再把对应 zip 解压、按上面说明把里面的核心文件并入，和其他平台一样在 RA 里
+> 选核心、开游戏。极简前端（`mca_ctr.*` / `mca_vita.vpk`）与核心 VPK 已不再提供；
+> info 不再单独作为资产，已打进各平台 zip。
 >
-> **3DS 核心形态安装要点**：光装 `mca_libretro.cia` 只有一个独立图标；要让
-> RA 的 Load Core 列表识别，再把同一 `.cia` 拷到 `sdmc:/retroarch/cores/`、
-> 把 `mca_libretro.info` 拷到 `sdmc:/retroarch/cores/info/`，重启 RA。
-> 静态核心加不进另一个官方 RA 构建，须从「MakeCode Arcade」图标启动。
+> **3DS**：解压 `makecode_arcade_ctr.zip`，把 `mca_libretro.cia` 放到
+> `sdmc:/retroarch/cores/`、`mca_libretro.info` 放到 `sdmc:/retroarch/cores/info/`，
+> 重启 RA，Load Core 即出现 MakeCode Arcade。（也可直接用 FBI 装 CIA 得到独立图标入口。）
 >
-> **Vita 核心安装**：VitaShell 开权限，把 `mca_libretro.self` 放已装 RA 的
-> app 目录、`mca_libretro.info` 放其 `info/` 下。此前版本进游戏报
+> **Vita**：解压 `makecode_arcade_vita.zip`，VitaShell 开权限，把 `mca_libretro.self`
+> 放官方 RA 的 app 目录、`mca_libretro.info` 放其 `info/` 下。此前版本进游戏报
 > `C2-12828-1` 已定位修复，请用最新版 self 复验；若仍崩附 `psp2core-*.psp2dmp`。
 
 **三、卡带**

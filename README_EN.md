@@ -63,7 +63,7 @@ makecode_arcade/
 │   │   ├── vm_host.cpp         pxt VM host wrapper (image load / button edges / frame+audio pulls)
 │   │   └── platform.h          pxt VM host ABI (mirrors the official sdlmain.cpp)
 │   ├── tests/              Fake-frontend core_test / contract self-check contract_test / VM smoke vm_smoke
-├── core/assets/            3DS/Vita core packaging assets (shared mca_libretro.info)
+├── core/assets/            3DS core packaging assets (CIA icon/banner); info is generated from tools/core.info.in
 │   └── ctr/                CIA icon/banner (icon48.png, banner256.png, banner.wav)
 ├── runtime/
 │   ├── pxtapp/             Official pxt VM kernel + engine primitives (vendored, 14 patches applied, game-agnostic)
@@ -216,7 +216,7 @@ tools/package_release.sh  # Package into zips ready to drop into RetroArch
 | Android ARM64 / ARMv7 (32-bit) | `makecode_arcade_android-arm64.zip` / `-armv7.zip` |
 | Lakka / LibreELEC ARM64 (musl) | `makecode_arcade_lakka-arm64.zip` |
 | Nintendo Switch (NX) | `makecode_arcade_switch.zip` (NRO + `.info`) |
-| 3DS / PS Vita core files | `mca_libretro.cia` (3DS), `mca_libretro.self` + `mca_libretro.info` (Vita, merged into installed RA) (see the 3DS/Vita section below) |
+| 3DS / PS Vita core files | `makecode_arcade_ctr.zip` (3DS), `makecode_arcade_vita.zip` (Vita) — each contains the core file + info (see the 3DS/Vita section below) |
 
 > **32-bit vs 64-bit** (as of 2026-11-17, important). Cartridges contain a
 > **PXT64** bytecode image — the only form the official pxt compiler emits.
@@ -273,31 +273,32 @@ core list. A 900-frame miniretro smoke run covers it in CI
 
 ### 3DS / PS Vita (core file + info)
 
-The 3DS and Vita have **no `dlopen` and tight memory**, so the core here is
-not a `.so` dropped into `cores/` but is statically linked into the full
-RetroArch frontend and shipped as a single install file. **Only the core form
-is distributed on these two platforms** (`mca_libretro.*` + `.info`): the
-minimal frontend and the core VPK line have been retired from builds and
-distribution.
+The 3DS and Vita have **no `dlopen`**, so the core here is not a `.so` dropped
+into `cores/` but is statically linked into RetroArch and shipped as a single
+executable (3DS CIA / Vita SELF). **Only the core form is distributed on these
+two platforms**, bundled as one zip per platform (`makecode_arcade_ctr.zip` /
+`makecode_arcade_vita.zip`, each containing the core file + info), and on both
+the recommendation is
+to **install official RetroArch first, then drop in the core file** — same as
+every other platform: pick the core in RA, open a game. The minimal frontend
+and the core VPK line have been retired from builds and distribution.
 
-- **3DS core file**: `mca_libretro.cia` (UniqueId `0xF1CA1`) — install with
-  FBI; a "MakeCode Arcade" icon appears on the home menu, with RA's full
-  settings. Cartridges go in `sdmc:/mca/`. **Accepted on real new3ds**:
-  buttons, menu, and cartridge loading all pass, with video performance
-  clearly better than the earlier CPU-scaled frontend. Installing the CIA
-  alone only gives a standalone icon; to make it show up in RA's Load Core
-  list / content associations, also copy the same `.cia` into
-  `sdmc:/retroarch/cores/` and put `.info` into `sdmc:/retroarch/cores/info/`,
-  then restart RA. A static core cannot be added to a different official RA.
-- **Vita core file**: `mca_libretro.self` + `mca_libretro.info`, merged into
-  an installed RetroArch (enable permissions in VitaShell; put the self in
-  RA's app dir and the info in its `info/` dir). The official Vita RA uses a
-  static model (each core is a full RA+core SELF, switching cores execs a new
-  process — no dynamic loading). It previously crashed with `C2-12828-1`
-  right after `Validation OK → start main loop`: the cached `FILE*` in
-  `mcaTrace()` went dangling when RA reset stdio on content switch. Fixed on
-  2026-11-18 (Vita branch writes straight to stderr, no fopen/cache) and the
-  SELF rebuilt — pending real-device re-verification.
+- **3DS core file**: `mca_libretro.cia` (UniqueId `0xF1CA1`). Install official
+  3DS RA, copy the same `.cia` into `sdmc:/retroarch/cores/` and the `.info`
+  into `sdmc:/retroarch/cores/info/`, then restart RA — MakeCode Arcade appears
+  in Load Core; Load Content → pick a `.pxt64` from `sdmc:/mca/`. **Accepted on
+  real new3ds**: buttons, menu, and cartridge loading all pass, smooth. You can
+  also just install the CIA with FBI for a standalone icon (RA bundled inside);
+  both routes work, but unifying on official RA is recommended.
+- **Vita core file**: `mca_libretro.self` + `mca_libretro.info`. Install official
+  Vita RA (`RETROVITA`) first; with VitaShell permissions enabled, put the self
+  in its app dir and the info in `info/` — MakeCode Arcade appears in Load Core.
+  The official Vita RA uses a static model (each core is a full RA+core SELF,
+  switching cores execs a new process — no dynamic loading). It previously
+  crashed with `C2-12828-1` right after `Validation OK → start main loop`: the
+  cached `FILE*` in `mcaTrace()` went dangling when RA reset stdio on content
+  switch. Fixed on 2026-11-18 (Vita branch writes straight to stderr, no
+  fopen/cache) and the SELF rebuilt — pending real-device re-verification.
 
 `.info` (`mca_libretro.info`) is shared between 3DS and Vita
 (`supported_extensions = pxt64`). Test packages, install steps, and

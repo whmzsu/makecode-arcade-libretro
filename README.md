@@ -61,7 +61,7 @@ makecode_arcade/
 │   │   ├── vm_host.cpp         pxt VM 宿主封装（镜像装载/按键沿/拉帧拉音频）
 │   │   └── platform.h          pxt VM 宿主 ABI（对齐官方 sdlmain.cpp）
 │   ├── tests/              假前端 core_test / 契约自检 contract_test / VM 冒烟 vm_smoke
-├── core/assets/            3DS/Vita 核心打包素材（通用 mca_libretro.info）
+├── core/assets/            3DS 核心打包素材（CIA 图标/banner）；info 统一由 tools/core.info.in 生成
 │   └── ctr/                CIA 图标/banner（icon48.png、banner256.png、banner.wav）
 ├── runtime/
 │   ├── pxtapp/             pxt 官方 VM 内核+引擎原语（vendored，已打 14 个补丁，游戏无关）
@@ -215,7 +215,7 @@ tools/package_release.sh  # 打包成可直接放进 RetroArch 的 zip
 | Android ARM64 / ARMv7（32 位） | `makecode_arcade_android-arm64.zip` / `-armv7.zip` |
 | Lakka / LibreELEC ARM64（musl） | `makecode_arcade_lakka-arm64.zip` |
 | Nintendo Switch（NX） | `makecode_arcade_switch.zip`（NRO + `.info`） |
-| 3DS / PS Vita 核心文件 | `mca_libretro.cia`（3DS）、`mca_libretro.self` + `mca_libretro.info`（Vita，并入已装 RA）（见下文 3DS/Vita 小节） |
+| 3DS / PS Vita 核心文件 | `makecode_arcade_ctr.zip`（3DS）、`makecode_arcade_vita.zip`（Vita），各含核心文件 + info（见下文 3DS/Vita 小节） |
 
 > **32 位与 64 位**（2026-11-17 起，重要）。卡带里装的是 **PXT64** 字节码镜像——
 > 官方 pxt 编译器唯一能产出的形态。32 位平台的硬阻断**不在镜像格式，而在
@@ -261,25 +261,27 @@ Lakka 的 `/storage/cores/`（SSH 默认 root/lakka），刷新核心列表即�
 
 ### 3DS / PS Vita（core 文件 + info）
 
-3DS 与 Vita **没有 `dlopen`、内存也紧**，核心在这里不是丢进 `cores/` 的
-`.so`，而是把 core 静态链进 RetroArch 完整前端、出厂为单个安装文件。
-**这两个平台只分发核心形态**（`mca_libretro.*` + `.info`）：极简前端与
-核心 VPK 线已放下，不再构建/分发。
+3DS 与 Vita **没有 `dlopen`**，核心在这里不是丢进 `cores/` 的 `.so`，而是
+静态链进 RetroArch、出厂为单个可执行文件（3DS CIA / Vita SELF）。
+**这两个平台只分发核心形态**，且都建议
+**先装官方 RetroArch，再把核心文件并入**——与其他平台一样在 RA 里选核心、
+开游戏。核心文件与 info 各打成一个 zip（`makecode_arcade_ctr.zip` /
+`makecode_arcade_vita.zip`，解压一次拿全），极简前端与核心 VPK 线已放下，
+不再构建/分发。
 
-- **3DS 核心文件**：`mca_libretro.cia`（UniqueId `0xF1CA1`），FBI 安装后
-  主菜单出现「MakeCode Arcade」图标，走 RA 完整设置；卡带放 `sdmc:/mca/`。
-  **new3ds 真机验收通过**：按键、菜单、卡带装载全绿，画面性能明显优于
-  早先的 CPU 缩放前端。光装 CIA 只得到独立图标；要让 RA 的 Load Core 列表
-  /内容关联识别，还须把同一个 `.cia` 复制到 `sdmc:/retroarch/cores/`、
-  把 `.info` 放到 `sdmc:/retroarch/cores/info/`，重启 RA。静态核心加不进
-  另一个官方 RA。
-- **Vita 核心文件**：`mca_libretro.self` + `mca_libretro.info`，并入已装
-  RetroArch（VitaShell 开权限，self 放 RA app 目录、info 放其 `info/` 下）。
-  官方 Vita RA 是静态模型（每核心一个完整 RA+core 的 SELF，换核即 exec
-  重启，无动态加载）。此前 `Validation OK → start main loop` 后崩
-  `C2-12828-1`，根因是 `mcaTrace()` 缓存的 `FILE*` 在 RA 换 content 重置
-  stdio 后悬垂；2026-11-18 已修（Vita 分支直写 stderr、不 fopen 不缓存）
-  并重编 self，待真机复验。
+- **3DS 核心文件**：`mca_libretro.cia`（UniqueId `0xF1CA1`）。先装官方 3DS RA，
+  把同一 `.cia` 复制到 `sdmc:/retroarch/cores/`、`.info` 放到
+  `sdmc:/retroarch/cores/info/`，重启 RA 即在 Load Core 列表出现 MakeCode Arcade，
+  再 Load Content 选 `sdmc:/mca/` 下的 `.pxt64`。**new3ds 真机验收通过**：按键、
+  菜单、卡带装载全绿、流畅。也可直接用 FBI 装该 CIA 得到独立图标入口（内含 RA），
+  两种方式都能玩，推荐统一在官方 RA 里切核心。
+- **Vita 核心文件**：`mca_libretro.self` + `mca_libretro.info`。先装官方 Vita RA
+  （`RETROVITA`），VitaShell 开权限，self 放其 app 目录、info 放 `info/` 下，
+  Load Core 即出现 MakeCode Arcade。官方 Vita RA 是静态模型（每核心一个完整
+  RA+core 的 SELF，换核即 exec 重启，无动态加载）。此前 `Validation OK →
+  start main loop` 后崩 `C2-12828-1`，根因是 `mcaTrace()` 缓存的 `FILE*` 在
+  RA 换 content 重置 stdio 后悬垂；2026-11-18 已修（Vita 分支直写 stderr、
+  不 fopen 不缓存）并重编 self，待真机复验。
 
 `.info`（`mca_libretro.info`）3DS/Vita 通用，`supported_extensions = pxt64`。
 测试包、安装步骤与真机验收清单见 `out/3ds-vita/README.md`。

@@ -7,34 +7,46 @@
 #   nro         把 .a 改名 libretro_libnx.a 放进 RetroArch 源码，make -f Makefile.libnx
 #
 # 与主 build.yml 分开：NRO 要拉 RetroArch 源码 + 装一堆 portlibs，耗时十几分钟，
-# 不适合每次 push 都跑。触发方式有三种：
+# 不适合每次 push 都跑。触发方式：
 #   * push main（且改了 core/运行时）—— 回归，只出 artifact，不建 Release
-#   * workflow_dispatch             —— 手动回归，同上
-#   * push tag nx-v*                —— 发版，额外建 GitHub Release（见 release job）
+#   * workflow_dispatch             —— 手动回归 / 手动补传，见 upload_tag
+#   * push tag nx-v*                —— 独立 NRO Release（release job）
+#   * workflow_call（build.yml 在 core-v* tag 调用）—— 产物交回 build.yml 的
+#     release job 与其他平台一次上传；本 workflow 的上传 job 此时跳过。
 #
-# 为什么发版用独立的 nx-v* tag 而不是复用 core-v*：NRO 的产物形态与 6 个平台包
-# 完全不同（它内含前端本体），两者构建耗时也差一个量级，绑在一起会拖慢每一次
-# 核心发版。版本号仍与核心同步（nx-v0.3.3 ↔ core-v0.3.3）。
+# core-v* 不再直接触发本 workflow：改由 build.yml 统一调用 + 统一发布，
+# 避免两条流水线各自轮询同一个 Release 的竞态。nx-v* 仍是独立 NRO 发版。
+# 版本号仍与核心同步（nx-v0.3.3 ↔ core-v0.3.3）。
 name: NX (Switch)
 
 on:
+  # build.yml 在 core-v* tag 上调用本 workflow 构建，artifact（nx-switch-nro）
+  # 交回那边的 release job 统一上传。github.ref 在 workflow_call 下继承调用
+  # 方（即 tag），故 upload job 显式排除 workflow_call。
+  workflow_call:
+    inputs:
+      retroarch_ref:
+        description: "RetroArch tag/branch（留空用默认值）"
+        required: false
+        type: string
+        default: "v1.22.2"
   workflow_dispatch:
     inputs:
       retroarch_ref:
         description: "RetroArch tag/branch（留空用默认值）"
         required: false
         default: "v1.22.2"
+      upload_tag:
+        description: "把 NRO zip 上传到哪个已有 Release（如 core-v0.3.10；留空=不上传，只构建）"
+        required: false
+        default: ""
   push:
     branches:
       - main
     # 发版 tag。注意 paths 过滤器对 tag push 不一定生效，所以 release-notes
     # 也列进来——每次发版必然新增该文件，保证 tag 一定能触发。
-    # core-v* 同样触发：NRO zip 由 core-release-upload job 追加到核心发版的
-    # 同一个 Release（build.yml 的 release job 建后轮询上传）；nx-v* 仍是
-    # 独立的 NRO Release（release job）。
     tags:
       - "nx-v*"
-      - "core-v*"
     # 只在 core 侧或本 workflow 变动时跑（NRO 全量构建要十几分钟，
     # 不适合像 build.yml 那样每次 push 都跑）
     paths:
@@ -155,7 +167,7 @@ jobs:
 
       - name: 拉 RetroArch 源码
         env:
-          REF: ${{ github.event.inputs.retroarch_ref || 'v1.22.2' }}
+          REF: ${{ inputs.retroarch_ref || 'v1.22.2' }}
           GIT_TERMINAL_PROMPT: "0"
         run: |
           set +e
@@ -356,13 +368,14 @@ jobs:
         run: |
           echo "https://github.com/${GITHUB_REPOSITORY}/releases/tag/${GITHUB_REF#refs/tags/}"
 
-  # ------------------------------------------------------------ 核心发版追加
-  # 推 core-v* tag 时：把 Switch NRO zip 追加到核心发版的同一个 Release
-  #（build.yml 的 release job 负责建；这里轮询等待后 --clobber 上传，
-  # 重跑幂等）。nx-v* 的独立 Release 走上面的 release job，互不干扰。
+  # ------------------------------------------------------------ 手动补传
+  # 仅供手动排障：把已构建的 NRO zip 补传到指定 Release。
+  # 正常发版由 build.yml 通过 workflow_call 调用、产物交回那边统一上传，
+  # 故 workflow_call 下跳过，避免与 build.yml 双重上传。
   core-release-upload:
-    name: upload Switch NRO to core release (core-v*)
-    if: startsWith(github.ref, 'refs/tags/core-v')
+    name: upload Switch NRO to an existing release (manual)
+    if: >-
+      ${{ github.event_name == 'workflow_dispatch' && inputs.upload_tag != '' }}
     needs: [nro]
     runs-on: ubuntu-24.04
     permissions:
@@ -375,28 +388,22 @@ jobs:
           name: nx-switch-nro
           path: pkg
 
-      - name: 轮询等待 Release 并上传
+      - name: 补传到指定 Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          UPLOAD_TAG: ${{ inputs.upload_tag }}
         run: |
           set -euo pipefail
-          tag="${GITHUB_REF#refs/tags/}"
+          tag="$UPLOAD_TAG"
           z=pkg/makecode_arcade_switch.zip
+          [ -n "$tag" ] || { echo "::error::upload_tag 为空"; exit 1; }
           [ -f "$z" ] || { echo "::error::没有 artifact $z"; exit 1; }
           ls -l "$z"
-          echo "目标 Release: $tag"
-          for i in $(seq 1 60); do
-            if gh release view "$tag" >/dev/null 2>&1; then
-              echo "Release 已存在（第 $i 次检查）"
-              break
-            fi
-            echo "等待 Release 建立… ($i/60)"
-            sleep 60
-          done
           gh release view "$tag" >/dev/null 2>&1 || {
-            echo "::error::60 分钟内 Release $tag 未建立（build.yml 的 release job 可能失败了），确认后重跑本 job"
+            echo "::error::Release $tag 不存在（手动补传只针对已建好的 Release）"
             exit 1
           }
+          echo "目标 Release: $tag"
           gh release upload "$tag" "$z" --clobber
           echo "== Release 资产 =="
           gh release view "$tag" --json assets --jq '.assets[] | "  " + .name + "  " + (.size|tostring) + " B"'

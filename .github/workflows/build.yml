@@ -987,12 +987,36 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  # ------------------------------------------------- 3DS / Vita / Switch 构建
+  # 推 core-v* tag 时由本 workflow 统一调用三条构建线（可复用工作流）。
+  # 被调 workflow 产出的 artifact（ctr-core-pack / vita-core-pack /
+  # nx-switch-nro）留在本 run 里，交回下面的 release job 与桌面/移动包
+  # 一次上传；被调 workflow 的上传 job 在 workflow_call 下自动跳过，
+  # 不再有"各自轮询同一个 Release"的竞态与 60 分钟空等。
+  # caller job 必须 >= 被调 workflow 所有 job 的权限：两条被调 workflow 的
+  # 上传/发版 job 请求 contents: write，故这里显式给 write（顶层默认只读）。
+  # GitHub 在解析阶段静态校验这一条，即便那些 job 的 if 为 false 也照卡。
+  ctr-vita-core:
+    name: 3DS / Vita core files (reusable)
+    if: startsWith(github.ref, 'refs/tags/core-v')
+    uses: ./.github/workflows/3ds-vita.yml
+    secrets: inherit
+    permissions:
+      contents: write
+
+  switch-core:
+    name: Switch NRO (reusable)
+    if: startsWith(github.ref, 'refs/tags/core-v')
+    uses: ./.github/workflows/nx.yml
+    secrets: inherit
+    permissions:
+      contents: write
+
   # ---------------------------------------------------------------- 发版
   # 只在推 core-v* tag 时跑：把 zig（与本地发版矩阵同工具链、2.17 基线）
-  # 和 NDK 的产物打成 10 个平台包（6 全 64 位 + 4 个 32 位），创建
-  # GitHub Release 并上传。3DS/Vita/Switch 前端整包由 3ds-vita.yml /
-  # nx.yml 的 release 上传 job 在同一 tag 上追加（等本 job 建 Release 后
-  # 轮询上传，见各 workflow 的 frontend-release / core-release-upload job）。
+  # 和 NDK 的产物打成 10 个平台包（6 全 64 位 + 4 个 32 位），再把上面
+  # ctr-vita-core / switch-core 产出的 3DS CIA、Vita SELF、info、Switch NRO
+  # 一并归位，一次 gh release create 上传全部资产。
   #
   # 为什么不复用上面的 package job：那个 job 吃的是发行版 gcc 产物，用途是
   # 验证"打包链路没坏"；发版包必须是 zig 2.17 基线（+ 只有 zig 才出的
@@ -1003,7 +1027,7 @@ jobs:
   release:
     name: release
     if: startsWith(github.ref, 'refs/tags/core-v')
-    needs: [zig, android, lakka-musl]
+    needs: [zig, android, lakka-musl, ctr-vita-core, switch-core]
     runs-on: ubuntu-22.04
     permissions:
       contents: write
@@ -1025,7 +1049,7 @@ jobs:
       - name: 归位到 core/dist
         run: |
           set -euo pipefail
-          mkdir -p core/dist
+          mkdir -p core/dist core/dist/platform
           for d in art/*/; do
             name="$(basename "$d")"
             case "$name" in
@@ -1033,7 +1057,30 @@ jobs:
               *android*|*musl*) cp -r "$d" "core/dist/$name" ;;
             esac
           done
+          # 3DS / Vita / Switch 的成品资产（被调 workflow 的 artifact）。
+          # 单独放 platform/：三个都是 .zip，混进 release/ 会被下面的
+          # 「10 主包」计数误算，也会和桌面包的同名 .info 冲突。
+          # 3DS / Vita 与 Switch 同构：core 文件 + info 打成一个 zip，
+          # 玩家一次下载解压即可，不再单独发裸 info。
+          cmp art/ctr-core-pack/mca_libretro.info art/vita-core-pack/mca_libretro.info
+          # 用 python3 打 zip（runner 的 python3 稳定在；zip 命令不是每处都有）。
+          # 注意：块标量剥公共缩进留相对缩进，python 各行保持一致的相对层级。
+          python3 -c "
+          import os, zipfile
+          for src, out in [('art/ctr-core-pack', 'core/dist/platform/makecode_arcade_ctr.zip'),
+                           ('art/vita-core-pack', 'core/dist/platform/makecode_arcade_vita.zip')]:
+              with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as z:
+                  for name in ('mca_libretro.cia', 'mca_libretro.self'):
+                      p = os.path.join(src, name)
+                      if os.path.exists(p):
+                          z.write(p, name)
+                  z.write(os.path.join(src, 'mca_libretro.info'), 'mca_libretro.info')
+          "
+          cp art/nx-switch-nro/makecode_arcade_switch.zip core/dist/platform/
+          echo "== core/dist 目录 =="
           ls -d core/dist/*/ | sed 's/^/  /'
+          echo "== 平台资产 =="
+          ls -l core/dist/platform
 
       - name: 打发行包（10 平台：6 全 64 位 + 4 个 32 位）
         env:
@@ -1057,6 +1104,9 @@ jobs:
           set -euo pipefail
           tag="${GITHUB_REF#refs/tags/}"
           ver="${tag#core-v}"
+          # test tag（core-v0.3.9-test）里的 .info 版本仍是 0.3.9，
+          # 校验时剥掉 -test 后缀；正式 tag 无后缀不受影响。
+          ver="${ver%%-*}"
           # 主包 10 个；五个 ELF strip 平台（linux-x64/linux-arm64/linux-x86/
           # linux-armhf/lakka-arm64）各带一个 -debuginfo.zip。分开计数，
           # 数量不对就红。
@@ -1082,6 +1132,43 @@ jobs:
             echo "  $(basename "$z") -> $got"
           done
 
+          # 平台资产：3DS / Vita / Switch 三个 zip，缺一不可。逐字节校验由
+          # 各被调 workflow 的构建 job 做过；这里断言「zip 在、非空、且
+          # 同时含核心文件 + info」。
+          for z in makecode_arcade_ctr.zip makecode_arcade_vita.zip makecode_arcade_switch.zip; do
+            [ -s "core/dist/platform/$z" ] || { echo "::error::平台资产缺失或为空 $z"; exit 1; }
+          done
+          python3 -c "
+          import sys, zipfile
+          pairs = [('core/dist/platform/makecode_arcade_ctr.zip', ('mca_libretro.cia','mca_libretro.info')),
+                   ('core/dist/platform/makecode_arcade_vita.zip', ('mca_libretro.self','mca_libretro.info'))]
+          for z, need in pairs:
+              n = set(zipfile.ZipFile(z).namelist())
+              missing = [x for x in need if x not in n]
+              if missing:
+                  sys.exit(f'{z} 缺 {missing}，实际 {sorted(n)}')
+              print(f'  {z}: {sorted(n)}')
+          "
+          # 三份 info 全部同源（core.info.in 模板 + kCoreVersion）：ctr/vita
+          # zip 内的 mca_libretro.info 由 3ds-vita.yml 从模板生成，桌面
+          # 10 包与 Switch zip 的 makecode_arcade_libretro.info 由各自
+          # 打包步生成。这里统一断言 display_version 对齐 tag。
+          python3 -c "
+          import sys, zipfile, re
+          for z, info in [('core/dist/platform/makecode_arcade_ctr.zip', 'mca_libretro.info'),
+                          ('core/dist/platform/makecode_arcade_vita.zip', 'mca_libretro.info'),
+                          ('core/dist/platform/makecode_arcade_switch.zip', 'makecode_arcade_libretro.info')]:
+              d = zipfile.ZipFile(z).read(info).decode()
+              got = re.search(r'display_version = \"([^\"]+)\"', d)
+              assert got, f'{z} 的 {info} 缺 display_version'
+              assert 'display_name' in d and 'supported_extensions = \"pxt64\"' in d, f'{z} 的 {info} 关键字段缺失'
+              print(f'  {info} @ {z.split(chr(47))[-1]} -> {got.group(1)}')
+          "
+          # Switch zip 里那份的版本必须对齐 tag（其余两份在生成步已对过）
+          got=$(python3 -c "import sys,zipfile,re;d=zipfile.ZipFile(sys.argv[1]).read('makecode_arcade_libretro.info').decode();print(re.search(r'display_version = \"([^\"]+)\"',d).group(1))" core/dist/platform/makecode_arcade_switch.zip)
+          [ "$got" = "$ver" ] || { echo "::error::Switch .info 版本 $got 与 tag $ver 不符"; exit 1; }
+          echo "  平台资产 3 个 zip 齐全，info 全部同源、版本 -> $got"
+
       # 「装一遍再发」：数量与版本对了不代表平台级选项对了。0.3.8 首版就是
       # 数量/版本全过、但 lakka 包缺 DF_1_NODELETE（退出即 139 的修复没吃到），
       # 靠这份体检才发现。它有 FAIL 就 exit 1，把问题挡在发布之前。
@@ -1104,8 +1191,17 @@ jobs:
           if [ -f "$notes" ]; then
             cp "$notes" "$combined"
           else
-            # 没写专属说明就退回自动生成（commit 列表），至少不是空正文
-            gh release generate-notes "$tag" > "$combined"
+            # 没写专属说明（test tag 就没有）就退回本地生成 commit 列表，
+            # 至少不是空正文。不用 `gh release generate-notes`——runner 的
+            # gh 版本没有这个子命令（那是 `gh release create` 的 flag），
+            # test tag 踩过：unknown command "generate-notes"。
+            {
+              echo "## $tag（自动生成说明）"
+              echo
+              echo "> 未找到 $notes，以下为最近 20 条提交。正式发版请补写专属 notes。"
+              echo
+              git log --oneline -20
+            } > "$combined"
           fi
           # 每个正式发布都带上玩家指南链接（避免漏写；已含则跳过，重跑不重复）
           if [ -f "$footer" ] && ! grep -q "docs/Player-Guide.md" "$combined"; then
@@ -1113,12 +1209,15 @@ jobs:
             cat "$footer" >> "$combined"
           fi
           body=(--notes-file "$combined")
+          # 全部资产一次上传：10 主包 + 5 debuginfo + 3 个平台 zip
+          # （ctr/vita/switch，各含 core 文件 + info）。--clobber 让重跑幂等。
+          assets=(core/dist/release/*.zip core/dist/platform/*)
           if gh release view "$tag" >/dev/null 2>&1; then
             # 重跑（重推 tag / 手动 rerun）时更新而不是报错
-            gh release upload "$tag" core/dist/release/*.zip --clobber
+            gh release upload "$tag" "${assets[@]}" --clobber
             gh release edit "$tag" --title "$title" "${body[@]}"
           else
-            gh release create "$tag" core/dist/release/*.zip --title "$title" "${body[@]}"
+            gh release create "$tag" "${assets[@]}" --title "$title" "${body[@]}"
           fi
           gh release view "$tag" --json url,assets \
             --jq '.url, (.assets[] | "  " + .name + "  " + (.size|tostring) + " B")'

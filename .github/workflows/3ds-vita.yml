@@ -12,11 +12,25 @@
 #
 # 两个级别：core 静态库（core-ctr / core-vita）→ 链进 RetroArch 出核心
 # 文件（ra-ctr 出 mca_libretro.cia，ra-vita 出 mca_libretro.self）+ info。
-# 极简前端与核心 VPK 已不再构建/分发；RetroArch 版本 pin 见
-# workflow_dispatch 输入，与 nx.yml 一致。
+# 极简前端与核心 VPK 已不再构建/分发；RetroArch 版本 pin 见输入，与 nx.yml 一致。
+#
+# 发版触发：推 core-v* tag 时由 build.yml 通过 workflow_call 调用本 workflow，
+# 产物 artifact（ctr-core-pack / vita-core-pack）交回 build.yml 的 release
+# job 统一上传 Release。本 workflow 自己的 core-release-upload 只在
+# workflow_dispatch + upload_tag 手动排障时用——被调用时跳过，避免双重上传。
 name: 3DS/Vita static core
 
 on:
+  # build.yml 的 release job 在 core-v* tag 上调用本 workflow 构建，artifact
+  # 交回那边的 release job 统一上传。github.ref 在 workflow_call 下继承调用
+  # 方（即 tag），故 upload job 显式排除 workflow_call。
+  workflow_call:
+    inputs:
+      retroarch_ref:
+        description: "RetroArch tag/commit（留空用已验证的 tip 快照 d7cc9bc）"
+        required: false
+        type: string
+        default: "d7cc9bc"
   workflow_dispatch:
     inputs:
       retroarch_ref:
@@ -27,13 +41,6 @@ on:
         description: "把 core 文件和 info 上传到哪个 core-v* Release（如 core-v0.3.10；留空=不上传，只构建）"
         required: false
         default: ""
-  push:
-    tags:
-      # 与 build.yml 的 release job 同一个 tag：本 workflow 出 3DS/Vita core
-      # 文件（CIA / SELF）+ info 并追加到同一个 Release（core-release-upload
-      # job 轮询等 Release 建好再上传）。注意本 workflow 没有 paths 过滤，
-      # tag push 必触发。
-      - "core-v*"
 
 concurrency:
   group: 3dsvita-${{ github.ref }}
@@ -225,9 +232,9 @@ jobs:
           fi
           ls -l core/makecode_arcade_libretro_ctr.a
 
-      - name: 拉 RetroArch（pin ${{ github.event.inputs.retroarch_ref || 'd7cc9bc' }}）
+      - name: 拉 RetroArch（pin ${{ inputs.retroarch_ref || 'd7cc9bc' }}）
         env:
-          REF: ${{ github.event.inputs.retroarch_ref || 'd7cc9bc' }}
+          REF: ${{ inputs.retroarch_ref || 'd7cc9bc' }}
           GIT_TERMINAL_PROMPT: "0"
         run: |
           set -u
@@ -293,7 +300,12 @@ jobs:
               exit 1
             }
           cp retroarch_3ds.cia mca_libretro.cia
-          cp "$GITHUB_WORKSPACE/core/assets/mca_libretro.info" mca_libretro.info
+          # info 与桌面包同源：core.info.in 模板 + kCoreVersion 版本号，
+          # 文件名随核心文件名（RA 规则：info 与核心二进制同名）
+          VERSION=$(sed -n 's/.*kCoreVersion = "\([^"]*\)".*/\1/p' core/src/libretro_core.cpp | head -1)
+          [ -n "$VERSION" ] || { echo "::error::读不到 kCoreVersion"; exit 1; }
+          sed "s|@VERSION@|$VERSION|" tools/core.info.in > mca_libretro.info
+          grep -E 'display_(name|version)' mca_libretro.info
           ls -l mca_libretro.cia mca_libretro.info
 
       - name: 校验 core 真链进 ELF
@@ -369,9 +381,9 @@ jobs:
           fi
           ls -l core/makecode_arcade_libretro_vita.a
 
-      - name: 拉 RetroArch（pin ${{ github.event.inputs.retroarch_ref || 'd7cc9bc' }}）
+      - name: 拉 RetroArch（pin ${{ inputs.retroarch_ref || 'd7cc9bc' }}）
         env:
-          REF: ${{ github.event.inputs.retroarch_ref || 'd7cc9bc' }}
+          REF: ${{ inputs.retroarch_ref || 'd7cc9bc' }}
           GIT_TERMINAL_PROMPT: "0"
         run: |
           set -u
@@ -404,7 +416,11 @@ jobs:
           set -u
           cd /tmp/ra || exit 1
           cp retroarch_vita.self mca_libretro.self
-          cp "$GITHUB_WORKSPACE/core/assets/mca_libretro.info" mca_libretro.info
+          # info 与桌面包同源（同 ra-ctr，见那里的注释）
+          VERSION=$(sed -n 's/.*kCoreVersion = "\([^"]*\)".*/\1/p' core/src/libretro_core.cpp | head -1)
+          [ -n "$VERSION" ] || { echo "::error::读不到 kCoreVersion"; exit 1; }
+          sed "s|@VERSION@|$VERSION|" tools/core.info.in > mca_libretro.info
+          grep -E 'display_(name|version)' mca_libretro.info
           ls -l mca_libretro.self mca_libretro.info
 
       - name: 校验 core SELF + info
@@ -426,8 +442,12 @@ jobs:
             echo "mca_libretro.self: $(stat -c %s mca_libretro.self) B, fSELF 头正确"
             grep -q 'supported_extensions = "pxt64"' mca_libretro.info \
               || fail "info 里 supported_extensions 不是 pxt64"
-            grep -q 'display_name = "MakeCode Arcade"' mca_libretro.info \
+            grep -q 'display_name = "MakeCode Arcade (unofficial)"' mca_libretro.info \
               || fail "info 缺 display_name"
+            VER=$(sed -n 's/.*kCoreVersion = "\([^"]*\)".*/\1/p' "$GITHUB_WORKSPACE/core/src/libretro_core.cpp" | head -1)
+            [ -n "$VER" ] || fail "读不到 kCoreVersion"
+            grep -q "display_version = \"$VER\"" mca_libretro.info \
+              || fail "info display_version 与 kCoreVersion($VER) 不符"
             n=$(arm-vita-eabi-nm retroarch_vita.elf.unstripped.elf 2>/dev/null | grep -cE ' T retro_')
             echo "retro_* T 符号: $n 个"
             [ "$n" -ge 100 ] || fail "retro_* 符号过少（$n）"
@@ -453,19 +473,15 @@ jobs:
             /tmp/ra/mca_libretro.info
           if-no-files-found: error
 
-  # ============================================================ 发版上传
-  # 推 core-v* tag（或 dispatch 带 upload_tag 输入）时：把 3DS/Vita 的
-  # core 文件 + info 追加到核心发版的同一个 Release。build.yml 的 release
-  # job 负责建 Release（10 个核心 zip + 5 个 debuginfo）；两条流水线并行，
-  # Release 建好的时间不定，所以这里轮询等待（最长 60 分钟），出现后
-  # --clobber 上传（重跑幂等）。每个文件是什么、给谁用的，见
-  # .github/release-notes/PLAYER-GUIDE-FOOTER.md 的资产分组表（发版正文尾部自动带）。
+  # ============================================================ 手动补传
+  # 仅供手动排障：把已构建的 3DS/Vita core 文件 + info 补传到指定 Release。
+  # 正常发版由 build.yml 通过 workflow_call 调用、产物交回那边统一上传，
+  # 故 workflow_call 下跳过，避免与 build.yml 双重上传。
   core-release-upload:
-    name: upload 3DS/Vita core files + info to core release
+    name: upload 3DS/Vita core files + info (manual)
     needs: [ra-ctr, ra-vita]
     if: >-
-      ${{ startsWith(github.ref, 'refs/tags/core-v') ||
-          (github.event_name == 'workflow_dispatch' && inputs.upload_tag != '') }}
+      ${{ github.event_name == 'workflow_dispatch' && inputs.upload_tag != '' }}
     runs-on: ubuntu-24.04
     permissions:
       contents: write

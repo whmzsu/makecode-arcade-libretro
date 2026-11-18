@@ -255,10 +255,11 @@ ELF 共享库默认允许未定义符号（惰性绑定），所以**缺对象�
 
 - **3DS 核心形态**：new3ds 真机验收通过——按键、菜单、卡带装载全绿，
   画面性能明显优于早先的 CPU 缩放前端。老款 3DS 手头无设备，暂未验。
-- **3DS 安装坑**：核心 CIA 光装只得到独立图标；要让 RA 的 Load Core 列表 /
-  内容关联识别，须把同一 `.cia` 复制到 `sdmc:/retroarch/cores/`、`.info` 放到
-  `sdmc:/retroarch/cores/info/`，重启 RA。静态核心加不进另一个官方 RA 构建。
-- **Vita 核心形态**：`mca_libretro.self` + `.info` 并入已装 RA。此前真机在
+- **3DS 安装**：建议先装官方 3DS RA，把核心 `.cia` 复制到
+  `sdmc:/retroarch/cores/`、`.info` 放到 `sdmc:/retroarch/cores/info/`，重启 RA
+  即在 Load Core 列表出现 MakeCode Arcade；也可直接用 FBI 装 CIA 得到独立图标入口。
+- **Vita 核心形态**：先装官方 Vita RA，`mca_libretro.self` + `.info` 并入其
+  app 目录 / `info/`。此前真机在
   `Validation OK → start main loop` 后报 `C2-12828-1`；两份 psp2core dump
   取证定位为 `mcaTrace()` 缓存的 `FILE*` 在 RA 换 content 重置 stdio 后悬垂，
   `_svfprintf_r` 写野指针。2026-11-18 修复（Vita 分支直写 stderr、不 fopen

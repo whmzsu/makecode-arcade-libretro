@@ -107,32 +107,32 @@ Once the core is installed, it's the same as on PC: **Load Content → pick a `.
 
 ---
 
-## 4. 3DS / PS Vita only (core form)
+## 4. 3DS / PS Vita only (official RetroArch + core files)
 
-On the 3DS and Vita you **don't install RetroArch yourself**: the core is statically linked into the full RetroArch frontend and shipped as an install file. These two platforms **only ship the core form** (`mca_libretro.*` + `.info`); the minimal frontend and the core VPK are no longer provided.
+Same workflow as every other platform: **install official RetroArch first, then drop in our core file** — in RA pick MakeCode Arcade under Load Core, then Load Content → a `.pxt64`. These two consoles have **no `dlopen`**, so the core isn't a `.so` but a RetroArch executable with the core statically linked (a CIA on 3DS, a SELF on Vita); for you the steps are still the same — pick the core in official RA, open a game. The minimal frontend and core VPK are no longer provided.
+
+### Step 0 (both consoles): install official RetroArch first
+
+This is the prerequisite — our files are just a **core** and need RA to run:
+
+- **3DS**: download the official 3DS build (`.cia`) from the RetroArch site / buildbot, install it with FBI, and confirm you can reach the main menu.
+- **Vita**: download the official Vita build (`RETROVITA.vpk`) from the RetroArch site / buildbot, install it with VitaShell, and confirm you can reach the main menu.
 
 ### 3DS
 
 1. Put cartridges in **`sdmc:/mca/`** on the SD card (create it if missing).
-2. Install `mca_libretro.cia` with **FBI**. A **"MakeCode Arcade"** icon appears on the home menu (UniqueId `0xF1CA1`).
-3. Launch it, then in RetroArch **Load Content → pick a `.pxt64` from `sdmc:/mca/`**.
+2. Copy **`mca_libretro.cia`** into **`sdmc:/retroarch/cores/`** (official RA's directory).
+3. Put **`mca_libretro.info`** (works for both 3DS and Vita) into **`sdmc:/retroarch/cores/info/`**.
+4. Restart RetroArch → **Load Core → MakeCode Arcade** → **Load Content** → pick a `.pxt64` from `sdmc:/mca/`.
 
-**To also see MCA in the Load Core list**: installing the CIA alone only gives a standalone icon — RA's list scans the `cores/` directory. Do these once:
-
-- Copy the same `mca_libretro.cia` into **`sdmc:/retroarch/cores/`**;
-- Put **`mca_libretro.info`** (its content works for both 3DS and Vita) into **`sdmc:/retroarch/cores/info/`**;
-- Restart RetroArch. MakeCode Arcade now appears in Load Core and `.pxt64` files auto-associate.
-
-> A static core cannot be added to a *different* official RetroArch build — launch from our "MakeCode Arcade" icon. Verified and smooth on new3ds.
+> Alternatively just install `mca_libretro.cia` with FBI: a standalone "MakeCode Arcade" icon appears (UniqueId `0xF1CA1`) that opens RA with the core inside. Both routes work; the one above is recommended so everything lives in official RA. Verified and smooth on new3ds; no old-3DS hardware available to test.
 
 ### PS Vita
 
-There is one route: **merge the core into an installed RetroArch**.
-
 1. Put cartridges in **`ux0:/data/mca/`** (create it if missing).
-2. With VitaShell permissions enabled, copy `mca_libretro.self` into the installed RetroArch app directory (e.g. `ux0:/app/RETROVITA/`).
+2. With VitaShell permissions enabled, copy `mca_libretro.self` into the official RA app directory (e.g. `ux0:/app/RETROVITA/`).
 3. Put `mca_libretro.info` into that directory's `info/` subfolder.
-4. Launch RA — MakeCode Arcade appears in the core list → Load Content → pick a `.pxt64`.
+4. Launch RA → **Load Core → MakeCode Arcade** → Load Content → pick a `.pxt64`.
 
 > Earlier versions crashed with `C2-12828-1` after starting a game; this was traced to a stale cached file pointer in the core's `mcaTrace()` and fixed — please re-verify with the latest self. If it still crashes, send the `psp2core-*.psp2dmp` generated under `ux0:` together with `mca_trace.log` via a repo issue.
 
@@ -143,11 +143,11 @@ as the core packages — grab by name:
 
 | What you want | Download |
 |---|---|
-| **3DS** | `mca_libretro.cia` + (for list visibility) `mca_libretro.info` |
-| **Vita** (merge into installed RA) | `mca_libretro.self` + `mca_libretro.info` |
+| **3DS** | `makecode_arcade_ctr.zip` (contains `mca_libretro.cia` + `mca_libretro.info`) |
+| **Vita** | `makecode_arcade_vita.zip` (contains `mca_libretro.self` + `mca_libretro.info`) |
 | Switch | `makecode_arcade_switch.zip` |
 
-> `mca_libretro.info` works for both 3DS and Vita. The end of every release's notes has a full "which asset to pick" grouped table.
+> The 3DS/Vita core file and info are bundled into one zip — download and extract, and you have everything; the info is no longer a separate asset. The end of every release's notes has a full "which asset to pick" grouped table.
 
 > The 3DS core form has passed real-device acceptance on new3ds; no old-3DS hardware is available, and the Vita core form awaits re-verification. If you hit problems, open an issue with `mca_trace.log` or the Vita dump.
 
