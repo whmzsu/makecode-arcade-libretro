@@ -128,7 +128,7 @@ pointers.cpp、functions.json、pxtconfig.h）逐字节一致（仅我们的 3 �
    整个测试在 VM 起跑前跑完，画面全黑（0xff000000 = screen.cpp 的 no-display 分支）。
 3. VM 日志每条重复两遍（官方宿主同样现象，pxt_get_logs 行为，不影响功能）。
 
-### 对 pxt 上游与宿主侧的 14 个补丁（PATCH 1/2/3/5~15；PATCH 4 已被 10 取代）
+### 对 pxt 上游与宿主侧的 15 个补丁（PATCH 1/2/3/5~16；PATCH 4 已被 10 取代）
 
 > **校验**：`python tools/check_pxt_patches.py`（CI 的 `pxt-patches` job 每次 push 都跑）。
 > 补丁没有独立 patch 文件、构建时也不重放，全靠这棵树本身带着——脚本是唯一能
@@ -164,6 +164,17 @@ pointers.cpp、functions.json、pxtconfig.h）逐字节一致（仅我们的 3 �
 > 0.3.8 上"加载成功 + 永久黑屏"，围绕渲染层查了三轮才定位。**没有放宽 32000**：
 > 那是上游给小栈 MCU 设的保守上限，真机栈大小与 16 位跳转上限都未审计。
 > 契约测试新增两条断言守这条线。
+
+> **PATCH 16（v0.3.10，Vita 三份 psp2core dump 定案）** 给两个**未初始化的
+> pthread 对象**补上初值：`screen---ext/screen.cpp` 的 `screenMutex`、
+> `core---vm/scheduler.cpp` 的 `eventMutex` / `newEventBroadcast`。上游是裸声明，
+> 零值在 glibc/bionic/3DS-newlib 上恰等于 `PTHREAD_MUTEX_INITIALIZER`，所以一直没
+> 出事。Vita newlib 里这两个类型**本身就是指针**，初值是 `(pthread_mutex_t)-1`
+> （`sys/_pthreadtypes.h`）——零值 NULL 时 `pthread_mutex_lock` 走
+> 「`if (!*mutex) return EINVAL`」**静默不锁**，`pthread_mutex_unlock` 没有判空，
+> `ldr r1,[r3,#0xc]` 读地址 0xc 当场 SIGSEGV。三张不同卡带的 dump 里 VM 线程
+> PC 全落在 `pthread_mutex_unlock+0x9`（正是这条 ldr），调用方
+> `pxt_screen_publish()` —— 每局第一帧发布必崩，与游戏无关。
 
 > PATCH 11（2026-11-09 发现）只改一行：`core---vm/verify.cpp` 的 `ALLOC_ARRAY`
 > 宏给 `sz` 补上括号。上游写法 `sizeof(tp) * sz` 遇到唯一传表达式的调用点

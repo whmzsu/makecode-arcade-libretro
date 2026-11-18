@@ -69,7 +69,7 @@ makecode_arcade/
 │   ├── tests/              假前端 core_test / 契约自检 contract_test / VM 冒烟 vm_smoke
 │   └── assets/ctr/         CIA 打包素材（icon48.png、banner256.png、banner.wav）；info 统一由 tools/core.info.in 生成
 ├── runtime/
-│   ├── pxtapp/             pxt 官方 VM 内核+引擎原语（vendored，已打 14 个补丁，游戏无关）
+│   ├── pxtapp/             pxt 官方 VM 内核+引擎原语（vendored，已打 16 个补丁，游戏无关）
 │   └── VENDORING.md
 ├── tools/
 │   ├── build_core.sh       一键构建：DLL + 三个测试程序（core_test / contract_test / vm_smoke）
@@ -79,7 +79,7 @@ makecode_arcade/
 │   ├── build_musl.sh       Lakka 包（musl 全静态）专用构型
 │   ├── package_release.sh  打包发行 zip（core + .info + 说明 + strip/debuginfo）
 │   ├── verify_release.py   发版硬断言（平台/机器类型/16KB/NODELETE/版本号）
-│   ├── check_pxt_patches.py  表驱动校验 vendored pxt 树的 14 个补丁
+│   ├── check_pxt_patches.py  表驱动校验 vendored pxt 树的 15 条补丁
 │   ├── setup_vita_gl_stack.sh  Vita GL 依赖链一键搭建（taiHEN → SceShaccCgExt → vitashark → math-neon → vitaGL）
 │   ├── libretro_host.py    假前端宿主 + 描述符静态自检（--dry）
 │   ├── ci_regress.sh / coverage.sh / fuzz_pxt.sh / retroarch_smoke.sh  回归/覆盖率/fuzz/真前端冒烟
@@ -177,7 +177,7 @@ tools/build_core.sh   # DLL + core_test + contract_test + vm_smoke
 
 ```bash
 tools/ci_regress.sh core/makecode_arcade_libretro.dll   # 末帧 MD5 比对（2 卡带 3 用例）
-python tools/check_pxt_patches.py --strict              # vendored pxt 树的 14 个补丁是否还在
+python tools/check_pxt_patches.py --strict              # vendored pxt 树的 15 条补丁是否还在
 ```
 
 `ci_regress.sh` 的基线在 `tools/fixtures/golden-frames.txt`；改核心或改帧数后

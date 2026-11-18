@@ -275,8 +275,12 @@ DLLEXPORT void pxt_vm_set_online(int online) { pxtVmLive = online ? 1 : 0; }
 
 FiberContext *allFibers;
 FiberContext *currentFiber;
-static pthread_mutex_t eventMutex;
-static pthread_cond_t newEventBroadcast;
+// MCA PATCH 16：同 screen.cpp，这两句上游也是裸声明。Vita newlib 里
+// pthread_mutex_t / pthread_cond_t 都是指针、初值是 -1，零值 NULL 会让
+// lock 静默返回 EINVAL、unlock 直接读 0xc 崩掉（细节见 screen.cpp 里那段注释）。
+// 这里只是"还没轮到它崩"：queueEvent 一跑就是同一个死法。
+static pthread_mutex_t eventMutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t newEventBroadcast = PTHREAD_COND_INITIALIZER;
 
 static struct Event *eventHead, *eventTail;
 

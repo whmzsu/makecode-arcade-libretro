@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""check_pxt_patches.py — 校验 14 个 pxt/宿主侧补丁是否都在
+"""check_pxt_patches.py — 校验 15 个 pxt/宿主侧补丁是否都在
 
 ## 为什么需要这个脚本
 
 runtime/pxtapp 是 vendored 的 pxt 运行时（MIT，来源见 runtime/VENDORING.md）。
-我们为了让它在 libretro 前端里活下来改了 14 处：换游戏、重置、卸载、重启后
+我们为了让它在 libretro 前端里活下来改了 15 处：换游戏、重置、卸载、重启后
 音频、"同一输入的两次运行必须逐帧一致"、两处整数除零防护，以及加载失败可见性。
 
 这些改动**直接落在源码里**（没有独立 patch 文件，构建时也不再重放），所以
@@ -232,6 +232,27 @@ PATCHES = [
             ("../../core/src/platform.h", r"const char\* vm_last_error\(\)"),
         ],
         "forbid": [],
+    },
+    {
+        "no": 16,
+        "title": "Vita newlib 下未初始化的 pthread 对象（screenMutex / eventMutex）",
+        "impact": "上游是裸声明 `static pthread_mutex_t screenMutex;`，零值在 glibc/"
+                  "bionic/3DS-newlib 上恰等于 PTHREAD_MUTEX_INITIALIZER。Vita newlib "
+                  "里这两个类型本身就是指针、初值是 -1，零值 NULL 使 lock 静默返回 "
+                  "EINVAL、unlock 读地址 0xc 崩溃（C2-12828-1，每局第一帧必挂）",
+        "checks": [
+            ("screen---ext/screen.cpp",
+             r"static pthread_mutex_t screenMutex\s*=\s*PTHREAD_MUTEX_INITIALIZER;"),
+            ("core---vm/scheduler.cpp",
+             r"static pthread_mutex_t eventMutex\s*=\s*PTHREAD_MUTEX_INITIALIZER;"),
+            ("core---vm/scheduler.cpp",
+             r"static pthread_cond_t newEventBroadcast\s*=\s*PTHREAD_COND_INITIALIZER;"),
+        ],
+        "forbid": [
+            ("screen---ext/screen.cpp", r"static pthread_mutex_t screenMutex;"),
+            ("core---vm/scheduler.cpp", r"static pthread_mutex_t eventMutex;"),
+            ("core---vm/scheduler.cpp", r"static pthread_cond_t newEventBroadcast;"),
+        ],
     },
 ]
 

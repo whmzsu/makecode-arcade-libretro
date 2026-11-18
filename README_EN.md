@@ -71,7 +71,7 @@ makecode_arcade/
 │   ├── tests/              Fake-frontend core_test / contract self-check contract_test / VM smoke vm_smoke
 │   └── assets/ctr/         CIA packaging assets (icon48.png, banner256.png, banner.wav); info is generated from tools/core.info.in
 ├── runtime/
-│   ├── pxtapp/             Official pxt VM kernel + engine primitives (vendored, 14 patches applied, game-agnostic)
+│   ├── pxtapp/             Official pxt VM kernel + engine primitives (vendored, 16 patches applied, game-agnostic)
 │   └── VENDORING.md
 ├── tools/
 │   ├── build_core.sh       One-shot build: DLL + the three test programs

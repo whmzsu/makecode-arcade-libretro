@@ -66,7 +66,20 @@ void setPalette(Buffer buf) {
     display->newPalette = true;
 }
 
-static pthread_mutex_t screenMutex;
+// MCA PATCH 16：必须显式给初值。
+//
+// 上游这句是裸声明（不带初值），靠"零值恰好等于
+// PTHREAD_MUTEX_INITIALIZER"在 glibc/bionic/3DS-newlib 上碰巧能跑。PS Vita 的
+// newlib 不是这样：`pthread_mutex_t` 本身就是个指针，`PTHREAD_MUTEX_INITIALIZER`
+// 是 `(pthread_mutex_t)-1`（见 sys/_pthreadtypes.h）。于是零值 = NULL：
+//   - pthread_mutex_lock(NULL) 走到 "if (!*mutex) return EINVAL" 直接返回 22，
+//     **什么都没锁**（静默失效，不是崩溃，所以一直没被发现）；
+//   - pthread_mutex_unlock(NULL) 没有这个判空，`ldr r3,[r0]` 取到 0 之后
+//     `ldr r1,[r3,#0xc]` 读地址 0xc —— 立刻 SIGSEGV。
+// 2026-11-18 三份 psp2core dump（三张不同卡带）PC 全部落在
+// pthread_mutex_unlock+0x9 = 这条 ldr，调用方是 pxt_screen_publish()，
+// 即每局的第一帧发布就崩，与游戏无关。
+static pthread_mutex_t screenMutex = PTHREAD_MUTEX_INITIALIZER;
 static int numGetPixels;
 
 // NX 诊断：把"取帧尺寸对不上"这类只在真机上看得见的事写进运行期日志。
