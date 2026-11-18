@@ -266,11 +266,11 @@ ELF 共享库默认允许未定义符号（惰性绑定），所以**缺对象�
   不缓存，见 `runtime/pxtapp/core---vm/scheduler.cpp`）并重编 self
   （md5 `3c751257…`），**待真机复验**。
 - **GPU 硬缩放实验**：曾试 citro3d 顶屏 GPU 缩放，四轮修复（2 幂纹理、
-  tiled 上传、VBlank、permutation）后真机仍黑屏，**已放弃**，源码回退；
-  实验源码封存在 `out/3ds-vita/_gpu-experiment-abandoned/`。
+  tiled 上传、VBlank、permutation）后真机仍黑屏，**已放弃**，源码回退
+  （实验源码只在本地工作目录封存，不随仓库分发）。
 
 **重编 Vita self 的坑**：改 `mcaTrace()` 后须重编 core `.a` → 换进 RA 树
 `libretro_vita.a` → `make -f Makefile.vita clean` → 重链 self。注意
 `va_list ap` 在 `#if`+`return` 下同作用域会重声明编译失败，必须用 `#else`
-包住原路径。测试包、md5、安装步骤见 `out/3ds-vita/README.md` 与
-`out/3ds-vita/真机测试包/测试清单-先读我.md`。
+包住原路径。测试包、md5、安装步骤见 `docs/3DS-VITA-TEST.md`
+（测试包本身是本地产物，不随仓库分发）。

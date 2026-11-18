@@ -495,7 +495,7 @@ L/R 肩键切卡带（3DS Y 退出；卡带目录 `sdmc:/mca` / `ux0:/data/mca`�
 
 tool69 真工具链复验：两包零警告重建；64 位默认构建 golden 三例
 （`0556e78f`/`e82844f7`/`0eb7884c`）逐位一致。安装/验收步骤见
-`out/3ds-vita/README.md`（probe 卡带逐键变色 + golden 基线）。
+`docs/3DS-VITA-TEST.md`（probe 卡带逐键变色 + golden 基线）。
 
 **剩余（真机）**：3DS 画面旋转宏如不对改 `blit_frame()` 一处；Vita
 `SetFrameBuf` 若个别固件不亮需换 GXM/vita2d（届时 CI 加 libvita2d job）。

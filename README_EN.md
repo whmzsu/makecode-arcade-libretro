@@ -303,7 +303,7 @@ and the core VPK line have been retired from builds and distribution.
 
 `.info` (`mca_libretro.info`) is shared between 3DS and Vita
 (`supported_extensions = pxt64`). Test packages, install steps, and
-acceptance checklists live in `out/3ds-vita/README.md`.
+acceptance checklists live in `docs/3DS-VITA-TEST.md`.
 
 Core static-library build:
 
@@ -322,7 +322,7 @@ into the RA sources to produce the core CIA/SELF) are handled by the
 standalone `.github/workflows/3ds-vita.yml` (jobs: core-ctr / core-vita /
 ra-ctr / ra-vita; the RA version is pinned to a verified tip snapshot by
 default; on `core-v*` tags the core files + info land in the core release
-automatically). Local builds prefer tool69 — see `out/3ds-vita/README.md`.
+automatically). Local builds prefer tool69 — see `docs/3DS-VITA-TEST.md`.
 
 ### Nintendo Switch (RetroArch NX)
 
@@ -441,7 +441,7 @@ to a verified tip snapshot by default). Outside of tag pushes it runs only
 via manual dispatch with artifacts as workflow artifacts; **on `core-v*`
 tags it runs automatically** and its `frontend-release` job appends the
 packages to the core release. Install packages and acceptance checklists are
-in `out/3ds-vita/README.md`.
+in `docs/3DS-VITA-TEST.md`.
 
 The toolchains are **deliberately split in two** — don't merge them:
 

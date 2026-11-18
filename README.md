@@ -284,7 +284,7 @@ Lakka 的 `/storage/cores/`（SSH 默认 root/lakka），刷新核心列表即�
   不 fopen 不缓存）并重编 self，待真机复验。
 
 `.info`（`mca_libretro.info`）3DS/Vita 通用，`supported_extensions = pxt64`。
-测试包、安装步骤与真机验收清单见 `out/3ds-vita/README.md`。
+测试包、安装步骤与真机验收清单见 `docs/3DS-VITA-TEST.md`。
 
 core 静态库构建：
 
@@ -302,7 +302,7 @@ RetroArch 完整前端的两级构建（core 静态库 → 链进 RA 源码出�
 由独立的 `.github/workflows/3ds-vita.yml` 负责（job：core-ctr / core-vita /
 ra-ctr / ra-vita；RA 版本默认 pin 已验证的 tip 快照；推 `core-v*` tag 时
 core 文件 + info 自动进核心发版 Release）。本地优先走 tool69，步骤见
-`out/3ds-vita/README.md`。
+`docs/3DS-VITA-TEST.md`。
 
 ### Nintendo Switch（RetroArch NX）
 
@@ -404,7 +404,7 @@ RetroArch 源码 + 装 portlibs，十几分钟，绑进主流水线会拖慢每�
 ra-ctr / ra-vita；RA 版本默认 pin 已验证的 tip 快照）。平时只手动
 dispatch、产物挂 workflow artifact；**推 `core-v*` tag 时自动跑**，并由
 `frontend-release` job 把整包追加到核心发版的同一个 Release。安装包与
-验收清单见 `out/3ds-vita/README.md`。
+验收清单见 `docs/3DS-VITA-TEST.md`。
 
 工具链**刻意分两套**，别合并：
 
