@@ -53,13 +53,23 @@ SELF，无动态加载）。
    目录（如 `ux0:/app/RETROVITA/`）。
 4. 把 `mca_libretro.info` 放到同目录的 `info/` 下。
 5. 启动 RA → Load Core → MakeCode Arcade → Load Content 浏览到卡带位置选 `.pxt64`。
+6. **把显示比例设为 4:3**（Vita 必须做）：Settings → Video → Scaling →
+   Aspect Ratio 选 `4:3`；再进游戏，Quick Menu → Overrides →
+   Save Core Overrides，让这条只对本核心生效。
 
+> **为什么 Vita 要手动设比例**：这版 RA 的 `Core provided` 不采纳核心报的
+> 4:3，会横向拉满 960×544，人物变形。同一颗核心在 3DS 与桌面 RA 1.18 上
+> 都正常（桌面实测 `Geometry: 160x120, Aspect: 1.333` → 按 480×360 出图），
+> 所以这是前端该版对 `Core provided` 的实现差异，核心侧修不了：
+> `aspect_ratio` 报 `0.0f` 与报 `4.0f/3.0f` 在 RA 里走同一段换算，
+> `SET_GEOMETRY` 也只在值发生变化时才重算 viewport。
+>
 > 该 self 自带我们构建的 RA 前端（tip `d7cc9bc`），与官方 stable 主包
 > 版本号可能不同——静态模型下不影响运行。
 >
-> 若加载卡带后立刻报 `C2-12828-1`，那是 2026-11-18 修复前的行为；
-> 请用 md5 `3c751257…` 的版本复验，并把结果（含 psp2core dump，
-> 如有）反馈回来。
+> 若加载卡带后立刻报 `C2-12828-1`，那是 PATCH 16 之前的行为（每局第一帧
+> 在 `pthread_mutex_unlock` 里读地址 `0xc`）。请用当前测试包复验，并把
+> 结果（含 psp2core dump，如有）反馈回来。
 
 ## 验收要点
 
@@ -119,4 +129,6 @@ cp retroarch_vita.self mca_libretro.self
 - **只认 `.pxt64`**：官方编译器只产 pxt64，PNG 不处理也不提示；玩家侧
   用 `tools/png2pxt64.py` 自己转。
 - 只做基本功能；不做存档/加载、快进快退、核心选项、金手指、Netplay。
+- **Vita 要手动把比例设成 4:3**（见「Vita 安装」第 6 步）：该版 RA 的
+  `Core provided` 会拉满全屏；3DS 与桌面 RA 不需要这一步。
 - 老款 3DS 无设备未验；GPU 硬缩放线已放弃（真机黑屏）。

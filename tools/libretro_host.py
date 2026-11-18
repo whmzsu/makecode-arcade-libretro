@@ -359,7 +359,7 @@ def parse_args(argv):
     pos = []
     cfg = {"bmp": None, "press": None, "press_at": 4, "release": None, "dry": False,
            "seq": None, "switch": None, "dlclose": False, "data_dir": None,
-           "turbo": False, "hold_from": None,
+           "turbo": False, "hold_from": None, "reinit": 0,
            "random_input": None, "random_interval": 18,
            "hash_every": 0}       # >0：每 N 帧输出一次画面哈希
     for a in argv:
@@ -396,6 +396,11 @@ def parse_args(argv):
             cfg["switch"] = a.split("=", 1)[1]     # 换游戏：第二张卡带路径
         elif a == "--dlclose":
             cfg["dlclose"] = True                  # 模拟前端关闭内容后卸载核心库
+        elif a.startswith("--reinit="):
+            # --reinit=N：跑完后 unload+deinit，再 init+load 同一张卡带，重复 N 轮
+            # （前端「关闭内容 → 重新打开」的真实路径；核心链 -z nodelete，
+            #  dlclose 不卸载库，所以静态状态会跨轮残留）
+            cfg["reinit"] = int(a.split("=", 1)[1])
         elif a == "--dry":
             cfg["dry"] = True
         elif a.startswith("--hold="):
@@ -648,6 +653,45 @@ def main():
         h = hashlib.md5(stats["last_frame"][0]).hexdigest()
         say(f"FINAL-FRAME-HASH {h}  ({stats['last_frame'][1]}x{stats['last_frame'][2]}, "
             f"独立帧 {stats['distinct']})")
+
+    # ---- 11b. 重开内容：unload -> deinit -> init -> load（同一张卡带）----
+    # 前端「关闭内容 → 重新打开」走的正是这条路，而核心链了 -z nodelete，
+    # dlclose 不真正卸载库：retro_init 会被再调一次，所有 C++ 静态状态
+    # （GC 堆、单例、缓存）都跨轮残留。桌面堆是 mmap 固定地址、天然零页，
+    # 真机是注入的 malloc 堆，差异只有这条路径能暴露 —— 所以宿主必须走一遍。
+    if cfg["reinit"]:
+        import hashlib
+        for k in range(1, cfg["reinit"] + 1):
+            say(f"== 11b.{k} 重开内容：unload_game -> deinit -> init -> load_game")
+            lib.retro_unload_game()
+            lib.retro_deinit()
+            # 前端重新初始化时会重新注册回调，这里照做
+            lib.retro_set_environment(env)
+            lib.retro_set_video_refresh(video)
+            lib.retro_set_audio_sample(audio)
+            lib.retro_set_audio_sample_batch(audio_batch)
+            lib.retro_set_input_poll(poll)
+            lib.retro_set_input_state(state)
+            lib.retro_init()
+            lib.retro_set_controller_port_device(0, 1)
+            bufR = ctypes.create_string_buffer(raw, len(raw))
+            _keepalive.append(bufR)
+            giR = retro_game_info(path=content_path.encode(),
+                                  data=ctypes.cast(bufR, ctypes.c_void_p),
+                                  size=len(raw), meta=None)
+            okR = lib.retro_load_game(ctypes.byref(giR))
+            say(f"   [host] 第 {k} 轮 load_game -> {'OK' if okR else 'FAIL'}")
+            if not okR:
+                return 8
+            v0 = stats["video_frames"]
+            run_frames(frames, f"reopen{k}")
+            if stats["video_frames"] - v0 <= 0:
+                say(f"   [FAIL] 第 {k} 轮没有画面")
+                return 9
+            if stats["last_frame"]:
+                hR = hashlib.md5(stats["last_frame"][0]).hexdigest()
+                say(f"REOPEN-FRAME-HASH {hR}  (第 {k} 轮, "
+                    f"{stats['last_frame'][1]}x{stats['last_frame'][2]})")
 
     # ---- 12. 换游戏：unload -> load 下一张卡带（前端「加载内容」走的正是这条路）----
     # --switch=a,b,c 可以连着换多张（真机上玩家会反复切游戏，每次都是一次
