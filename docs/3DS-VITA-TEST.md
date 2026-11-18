@@ -59,8 +59,10 @@ SELF，无动态加载）。
 
 > **为什么 Vita 要手动设比例**：这版 RA 的 `Core provided` 不采纳核心报的
 > 4:3，会横向拉满 960×544，人物变形。同一颗核心在 3DS 与桌面 RA 1.18 上
-> 都正常（桌面实测 `Geometry: 160x120, Aspect: 1.333` → 按 480×360 出图），
-> 所以这是前端该版对 `Core provided` 的实现差异，核心侧修不了：
+> 都正常（桌面实测 `Geometry: 160x120, Aspect: 1.333` → 按 480×360 出图）。
+> **真机交叉验证：这台 Vita 上换成其他核心、同样选 `Core provided`，比例一样
+> 拉满全屏** —— 与本核心无关，是前端该版对 `Core provided` 的实现缺陷。
+> 所以核心侧修不了、也不该改：
 > `aspect_ratio` 报 `0.0f` 与报 `4.0f/3.0f` 在 RA 里走同一段换算，
 > `SET_GEOMETRY` 也只在值发生变化时才重算 viewport。
 >
@@ -130,5 +132,6 @@ cp retroarch_vita.self mca_libretro.self
   用 `tools/png2pxt64.py` 自己转。
 - 只做基本功能；不做存档/加载、快进快退、核心选项、金手指、Netplay。
 - **Vita 要手动把比例设成 4:3**（见「Vita 安装」第 6 步）：该版 RA 的
-  `Core provided` 会拉满全屏；3DS 与桌面 RA 不需要这一步。
+  `Core provided` 会拉满全屏（真机上其他核心同样如此，前端通病）；
+  3DS 与桌面 RA 不需要这一步。
 - 老款 3DS 无设备未验；GPU 硬缩放线已放弃（真机黑屏）。
