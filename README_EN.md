@@ -520,8 +520,11 @@ Manual trigger: repo Actions page → build → Run workflow.
 ```bash
 tools/build_core.sh
 
-# 1) Cartridge → bytecode (offline; needs the node toolchain, see "Requirements")
-python tools/png2pxt64.py png_examples/arcade-ping.png out/ping.pxt64
+# 1) Cartridge → bytecode (offline; the converter moved to the
+#    makecode-arcade-cartconv repo — clone it and run
+#    `node cartconv.js png_examples/arcade-ping.png`, or use its portable
+#    package; see "Requirements")
+node cartconv.js png_examples/arcade-ping.png
 
 # 2) Fake frontend runs the full libretro path on a .pxt64 (60 fps cadence, BMP output)
 #    Saves and mca_trace.log land in out/core_test_data/ by default (--data-dir=DIR to change);

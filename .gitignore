@@ -57,3 +57,7 @@ debug.log
 pxt64_collections/
 *.pxt64
 !tools/fixtures/*.pxt64
+
+# ---- Python 缓存 ----
+__pycache__/
+*.pyc

@@ -468,8 +468,10 @@ dispatch、产物挂 workflow artifact；**推 `core-v*` tag 时自动跑**，�
 ```bash
 tools/build_core.sh
 
-# 1) 卡带 → 字节码（离线；需要 node 工具链，见「环境要求」）
-python tools/png2pxt64.py png_examples/arcade-ping.png out/ping.pxt64
+# 1) 卡带 → 字节码（离线；转换器已拆到 makecode-arcade-cartconv 仓库——
+#    clone 后在仓库里跑 `node cartconv.js png_examples/arcade-ping.png`，
+#    或直接用其便携包拖拽转换，见「环境要求」）
+node cartconv.js png_examples/arcade-ping.png
 
 # 2) 假前端走完整 libretro 路径跑 .pxt64（60fps 节拍，出 BMP）
 #    存档与 mca_trace.log 默认落在 out/core_test_data/（--data-dir=DIR 可改），

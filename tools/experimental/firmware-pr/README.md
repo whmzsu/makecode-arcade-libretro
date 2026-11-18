@@ -27,6 +27,8 @@
 | `build_retroarch.sh` / `ArkOSUpdate.sh` / `dArkOS*_Update.sh` | ArkOS/dArkOS 侧的 RA 构建 + 固件增量更新脚本改造 |
 | `verify_patches.sh` | 校验补丁可干净 apply |
 | `arc-addcore` | 往 ArkOS es_systems.cfg 加 core 块的小工具 |
+| `gen_mca_icons.py` | 生成 ES 主题图标（system.png 1000×287 / background_icon.png 960×540，纯 stdlib PNG 写出），产物在 data/mca_icons/ |
+| `gen_gamelist.py` | 为 MakeCode Arcade 系统生成 EmulationStation gamelist.xml |
 
 ## data/ —— 脚本实际引用的数据
 
