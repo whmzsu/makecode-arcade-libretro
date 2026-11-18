@@ -276,6 +276,24 @@ PATCHES = [
             ("screen---ext/screen.cpp", r"auto pal = disp->currPalette;"),
         ],
     },
+    {
+        "no": 18,
+        "title": "3DS/Vita 的 GC 堆注入必须幂等（retro_init 会被重复调用）",
+        "impact": "前端「关闭内容 → 重新打开」不是进程重启：核心链接了 -z nodelete，"
+                  "dlclose 不卸载库，retro_init 会再跑一次。若每次都 malloc 新的 2MB，"
+                  "mca_gc_base 就换到另一个地址、旧块永久泄漏 —— 同一次前端会话里"
+                  "第二次加载后画面/调色板错乱，重启前端又正常。桌面走 "
+                  "mmap(MAP_FIXED) 固定 GC_BASE，所以从来暴露不了。",
+        "checks": [
+            ("../../core/src/platform_gc_heap_vita.cpp",
+             r"static void \*cached = nullptr;"),
+            ("../../core/src/platform_gc_heap_vita.cpp",
+             r"mca_vm_set_gc_heap\(cached, cached_size\);"),
+            ("../../core/src/platform_gc_heap_ctr.cpp",
+             r"mca_vm_set_gc_heap\(cached, cached_size\);"),
+        ],
+        "forbid": [],
+    },
 ]
 
 # 已退役：编号留着，防止旧文档/旧日志里的 PATCH 4 对不上号

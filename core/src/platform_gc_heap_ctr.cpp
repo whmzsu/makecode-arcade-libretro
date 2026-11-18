@@ -27,13 +27,34 @@ extern "C" void mca_vm_set_gc_heap(void *base, unsigned size);
 #define MCA_GC_HEAP_SIZE (2u * 1024u * 1024u)
 #endif
 
+// MCA 诊断：注入次数与基址（屏幕 OSD 展示，见 libretro_core.cpp）。
+// 与 vita 版的同名符号各自在自己的平台宏里定义，同一个构建里只会有一个非空。
+extern "C" int mcaGcHeapInitCount = 0;
+extern "C" void *mcaGcHeapBase = nullptr;
+
 void mcaCtrInitGcHeap() {
     const unsigned heap_size = MCA_GC_HEAP_SIZE;
+    // MCA PATCH 18：必须幂等（理由同 platform_gc_heap_vita.cpp）。
+    // 3DS 上核心是 CIA 里静态链接的，前端"关闭内容 → 重新打开"同样会再次
+    // 调 retro_init；重复 malloc 会把 mca_gc_base 换到新地址并泄漏旧块。
+    static void *cached = nullptr;
+    static unsigned cached_size = 0;
+    mcaGcHeapInitCount++;
+    if (cached) {
+        mcaGcHeapBase = cached;
+        mca_vm_set_gc_heap(cached, cached_size);
+        fprintf(stderr, "[MCA][ctr] GC heap reused @ %p (%u bytes, re-init)\n", cached,
+                cached_size);
+        return;
+    }
     void *heap = malloc(heap_size);
     if (!heap) {
         fprintf(stderr, "[MCA][ctr] GC heap alloc failed (%u bytes)\n", heap_size);
         return;
     }
+    cached = heap;
+    cached_size = heap_size;
+    mcaGcHeapBase = heap;
     mca_vm_set_gc_heap(heap, heap_size);
     fprintf(stderr, "[MCA][ctr] GC heap injected @ %p (%u bytes)\n", heap, heap_size);
 }

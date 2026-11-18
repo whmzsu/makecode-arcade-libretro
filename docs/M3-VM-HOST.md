@@ -128,7 +128,7 @@ pointers.cpp、functions.json、pxtconfig.h）逐字节一致（仅我们的 3 �
    整个测试在 VM 起跑前跑完，画面全黑（0xff000000 = screen.cpp 的 no-display 分支）。
 3. VM 日志每条重复两遍（官方宿主同样现象，pxt_get_logs 行为，不影响功能）。
 
-### 对 pxt 上游与宿主侧的 16 个补丁（PATCH 1/2/3/5~17；PATCH 4 已被 10 取代）
+### 对 pxt 上游与宿主侧的 17 个补丁（PATCH 1/2/3/5~18；PATCH 4 已被 10 取代）
 
 > **校验**：`python tools/check_pxt_patches.py`（CI 的 `pxt-patches` job 每次 push 都跑）。
 > 补丁没有独立 patch 文件、构建时也不重放，全靠这棵树本身带着——脚本是唯一能
@@ -187,6 +187,16 @@ pointers.cpp、functions.json、pxtconfig.h）逐字节一致（仅我们的 3 �
 > 写入也在同一把锁内完成，前端只读快照。`screenMutex` 的声明因此前移到文件头
 > （`setPalette` 定义在 `WDisplay` 之前）。桌面三张 golden 末帧在同构型 A/B 下
 > 逐位不变。
+
+> **PATCH 18（v0.3.10，Vita 二次加载偏色）** 3DS/Vita 的 GC 堆注入改为**幂等**。
+> 前端"关闭内容 → 重新打开"不是进程重启：核心链接了 `-z nodelete`，`dlclose`
+> 不会真正卸载库，`retro_init` 会被**再次调用**。`mcaVitaInitGcHeap()` /
+> `mcaCtrInitGcHeap()` 原来每次都 `malloc` 一块新的 2MB 并覆盖
+> `mca_gc_base`，旧块永久泄漏；堆基址一变，上一局残留的静态指针就不再指向
+> 有效区间。桌面与 Android 走 PXT32 的 `mmap(MAP_FIXED)` 分支，地址恒为
+> `GC_BASE=0x20000000`，所以这个问题在桌面上完全看不见 —— 现象是"同一次前端
+> 会话里第二次加载后画面颜色错乱，重启前端又正常"。改成 static 缓存后重复
+> 调用只重新注入同一地址。
 
 > PATCH 11（2026-11-09 发现）只改一行：`core---vm/verify.cpp` 的 `ALLOC_ARRAY`
 > 宏给 `sz` 补上括号。上游写法 `sizeof(tp) * sz` 遇到唯一传表达式的调用点
