@@ -286,7 +286,8 @@ and the core VPK line have been retired from builds and distribution.
 - **3DS core file**: `mca_libretro.cia` (UniqueId `0xF1CA1`). Install official
   3DS RA, copy the same `.cia` into `sdmc:/retroarch/cores/` and the `.info`
   into `sdmc:/retroarch/cores/info/`, then restart RA — MakeCode Arcade appears
-  in Load Core; Load Content → pick a `.pxt64` from `sdmc:/mca/`. **Accepted on
+  in Load Core; Load Content → pick a `.pxt64` (cartridges go anywhere —
+  `sdmc:/mca/` is just an example path). **Accepted on
   real new3ds**: buttons, menu, and cartridge loading all pass, smooth. You can
   also just install the CIA with FBI for a standalone icon (RA bundled inside);
   both routes work, but unifying on official RA is recommended.

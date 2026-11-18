@@ -45,7 +45,8 @@
 
 所有形态都只认 `.pxt64` 游戏文件（见上面的玩家指南，官方 IDE 直接导出，
 或用 [cartconv](https://github.com/whmzsu/makecode-arcade-cartconv) 批量转换）。
-3DS 卡带放 `sdmc:/mca/`，Vita 放 `ux0:/data/mca/`，Switch 放 `sdmc:/roms/makecode/`。
+卡带放哪都行（RA 文件浏览器能浏览到即可）；
+`sdmc:/mca/`、`ux0:/data/mca/`、`sdmc:/roms/makecode/` 只是示例路径，不是必须。
 
 > 32 位说明：核心的 32 位包（x86/armhf/armv7）走与 64 位同一条 PXT64 镜像
 > 路径（GC 标记旁路表方案），63 张卡带本地逐位一致；3DS 核心形态已在

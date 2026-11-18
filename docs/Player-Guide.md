@@ -120,16 +120,16 @@ This is the prerequisite — our files are just a **core** and need RA to run:
 
 ### 3DS
 
-1. Put cartridges in **`sdmc:/mca/`** on the SD card (create it if missing).
+1. Put your `.pxt64` cartridges **anywhere you can find them** on the SD card — e.g. create `sdmc:/mca/` and put them there. **This is just an example path, not required**: any location works as long as RA's file browser can reach it.
 2. Copy **`mca_libretro.cia`** into **`sdmc:/retroarch/cores/`** (official RA's directory).
 3. Put **`mca_libretro.info`** (works for both 3DS and Vita) into **`sdmc:/retroarch/cores/info/`**.
-4. Restart RetroArch → **Load Core → MakeCode Arcade** → **Load Content** → pick a `.pxt64` from `sdmc:/mca/`.
+4. Restart RetroArch → **Load Core → MakeCode Arcade** → **Load Content** → browse to wherever you put the cartridges and pick a `.pxt64`.
 
 > Alternatively just install `mca_libretro.cia` with FBI: a standalone "MakeCode Arcade" icon appears (UniqueId `0xF1CA1`) that opens RA with the core inside. Both routes work; the one above is recommended so everything lives in official RA. Verified and smooth on new3ds; no old-3DS hardware available to test.
 
 ### PS Vita
 
-1. Put cartridges in **`ux0:/data/mca/`** (create it if missing).
+1. Put your cartridges in **any writable location** — e.g. create `ux0:/data/mca/` and put them there. **This is just an example path, not required**: any location works as long as RA's file browser can reach it.
 2. With VitaShell permissions enabled, copy `mca_libretro.self` into the official RA app directory (e.g. `ux0:/app/RETROVITA/`).
 3. Put `mca_libretro.info` into that directory's `info/` subfolder.
 4. Launch RA → **Load Core → MakeCode Arcade** → Load Content → pick a `.pxt64`.
@@ -222,7 +222,7 @@ On Windows, download the portable package and unzip; drag a `.png` onto `cartcon
 |---|---|
 | **All black, nothing at all** | Probably a **core/system architecture mismatch** (e.g. the x64 package installed on a 32-bit system). Re-pick the package per the table in Section 1. |
 | **My game doesn't show in the file browser** | Your file is `.png`, not `.pxt64`. Export/convert to `.pxt64` per Section 5. |
-| **Black screen on 3DS / Vita** | First check the cartridge directory (3DS: `sdmc:/mca/`, Vita: `ux0:/data/mca/`) and that the files are `.pxt64`. For hangs, check `sdmc:/mca/mca_trace.log` (3DS) or `ux0:/data/mca/mca_trace.log` (Vita). |
+| **Black screen on 3DS / Vita** | First check the file really is `.pxt64` (cartridges can live **anywhere** — RA just needs to browse to that location). For hangs, look for `mca_trace.log` in RA's save directory (see its actual path under Settings → Directories → Savefiles). |
 | **`VM error 1014` after loading** | A single data section in this cartridge exceeds 32000 bytes; the core **explicitly rejects** it instead of black-screening. This isn't a core bug — the cartridge is just too big. Get a VM-compatible export, or have the author split the large arrays in the game source. (Such cartridges used to silently black-screen; now at least it tells you why.) |
 | **Red-on-white `VM PANIC xxxx` banner at the top** | The game crashed on its own (usually a game-code bug, e.g. using undefined as an array). Press SELECT to restart — usually recovers; the core won't take RetroArch down with it. |
 | **Pressing Start also pops up the RetroArch menu** | Hotkey conflict — see the "Controls" tip above; rebind in Hotkeys settings. |
@@ -234,6 +234,6 @@ On Windows, download the portable package and unzip; drag a `.png` onto `cartcon
 
 Download the zip for your platform → unzip → put the core and `.info` into RetroArch's matching directories → prepare a `.pxt64` cartridge → Load Content and play. Remember three things: **64-bit, `.pxt64`, remap keys in the Quick Menu's Controls**.
 
-3DS / Vita players have it even easier: install the all-in-one package → drop cartridges into the cartridge directory → tap the home-menu icon and play.
+3DS / Vita players: install official RetroArch → unzip the core zip and place the core files → cartridges can live anywhere → pick the core and a cartridge in RA and play.
 
 Enjoy!

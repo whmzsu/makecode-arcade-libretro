@@ -272,7 +272,7 @@ Lakka 的 `/storage/cores/`（SSH 默认 root/lakka），刷新核心列表即�
 - **3DS 核心文件**：`mca_libretro.cia`（UniqueId `0xF1CA1`）。先装官方 3DS RA，
   把同一 `.cia` 复制到 `sdmc:/retroarch/cores/`、`.info` 放到
   `sdmc:/retroarch/cores/info/`，重启 RA 即在 Load Core 列表出现 MakeCode Arcade，
-  再 Load Content 选 `sdmc:/mca/` 下的 `.pxt64`。**new3ds 真机验收通过**：按键、
+  再 Load Content 选 `.pxt64`（卡带放哪都行，`sdmc:/mca/` 只是示例路径）。**new3ds 真机验收通过**：按键、
   菜单、卡带装载全绿、流畅。也可直接用 FBI 装该 CIA 得到独立图标入口（内含 RA），
   两种方式都能玩，推荐统一在官方 RA 里切核心。
 - **Vita 核心文件**：`mca_libretro.self` + `mca_libretro.info`。先装官方 Vita RA
@@ -326,7 +326,7 @@ cd /path/to/RetroArch && make -f Makefile.libnx   # -> retroarch_switch.nro
 安装：`makecode_arcade_libretro_libnx.nro` 放 SD 卡 **`sdmc:/switch/`**
 （它本身就是一个 homebrew 程序，hbmenu 只扫这个目录；**不是** `retroarch/cores/`
 ——那是官方 RetroArch 自己的核心目录）。`.info` 可选，同样放 `switch/` 即可；
-卡带放 `sdmc:/roms/makecode/`。以 title takeover 启动（按住 R 点任意游戏进
+卡带放哪都行（`sdmc:/roms/makecode/` 只是示例路径）。以 title takeover 启动（按住 R 点任意游戏进
 hbmenu）拿完整内存。
 
 > **已知问题（2026-11 真机实测，固件 21/22 + 大气层 1.11~1.12）**：RetroArch
