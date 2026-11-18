@@ -402,8 +402,8 @@ cd ../makecode_arcade_cartconv/vm-build && npm install
 | `macos-universal` | Xcode clang，arm64+x86_64 | `.dylib`（实验，`continue-on-error`） |
 | `lakka-musl` | dockcross `linux-arm64-musl` + GNU ld `-shared -static` | `.so`（**全静态，零 NEEDED**，给 Lakka/LibreELEC 这类 musl 系统） |
 | `behavior-miniretro` | 真 aarch64 runner（`ubuntu-24.04-arm`）+ 第三方前端 miniretro | 900 帧冒烟（行为层，不是编译层） |
-| `pxt-patches` | 纯 python，不编译 | 校验 vendored pxt 树里 14 个必要补丁还在（几秒） |
-| `golden-hash` | gcc + `tools/libretro_host.py` | 2 张卡带 3 个用例的末帧 MD5 比对 —— 唯一能抓住"契约全绿但画面画错了"的断言 |
+| `pxt-patches` | 纯 python，不编译 | 校验 vendored pxt 树里 19 个必要补丁还在（几秒） |
+| `golden-hash` | gcc + `tools/libretro_host.py` | 2 张卡带 3 个用例的末帧 MD5 比对 —— 唯一能抓住"契约全绿但画面画错了"的断言；另跑 `--reinit=2` 二次加载，断言三轮末帧一致 **且像素格式每轮重新协商**（`-z nodelete` 下跨会话粘住类 bug 的哨兵，PATCH 20） |
 | `crash-regression` | gcc + 3 张回归夹具 | 盯 PATCH 13/14（两处整数除零）与 PATCH 15（镜像校验失败时 `load_game` 不再谎报成功） |
 | `retroarch-smoke` | ubuntu-24.04 + 发行版 RetroArch + Xvfb | 真前端冒烟：dlopen、`.info` 解析、像素格式协商、SAVE_DIRECTORY、截图（2 张夹具卡带各 120 帧） |
 | `3DS / Vita core files (reusable)` | devkitARM / vitasdk 容器 | 编 core 静态库 + 链 RA 完整前端出 CIA/SELF（调 `3ds-vita.yml`；tag 时进发版） |

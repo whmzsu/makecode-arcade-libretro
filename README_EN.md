@@ -434,12 +434,12 @@ bottom of the Actions run page).
 | `macos-universal` | Xcode clang, arm64+x86_64 | `.dylib` (experimental, `continue-on-error`) |
 | `lakka-musl` | dockcross `linux-arm64-musl` + GNU ld `-shared -static` | `.so` (**fully static, zero `NEEDED`**, for musl systems like Lakka/LibreELEC) |
 | `behavior-miniretro` | real aarch64 runner (`ubuntu-24.04-arm`) + third-party frontend miniretro | 900-frame smoke run (behaviour layer, not compile layer) |
-| `golden-hash` | gcc + `tools/libretro_host.py` | Last-frame MD5 over 2 cartridges × 3 cases — the only assertion that catches "contract all green but the picture is drawn wrong" |
+| `golden-hash` | gcc + `tools/libretro_host.py` | Last-frame MD5 over 2 cartridges × 3 cases — the only assertion that catches "contract all green but the picture is drawn wrong"; also runs `--reinit=2` (unload → re-init → reload) and asserts the three rounds match **and the pixel format is renegotiated every round** (sentinel for `-z nodelete` state-stickiness, PATCH 20) |
 | `crash-regression` | gcc + 3 regression fixtures | Watches PATCH 13/14 (two integer division-by-zero fixes) and PATCH 15 (`load_game` no longer lies on image validation failure) |
 | `retroarch-smoke` | ubuntu-24.04 + distro RetroArch + Xvfb | Real-frontend smoke: dlopen, `.info` parsing, pixel-format negotiation, SAVE_DIRECTORY, screenshots (2 fixture cartridges × 120 frames) |
 | `3DS / Vita core files (reusable)` | devkitARM / vitasdk containers | Core static libs + RA full-frontend CIA/SELF (calls `3ds-vita.yml`; lands in the release on tags) |
 | `Switch NRO (reusable)` | devkitA64 container | Core static lib + RA NRO (calls `nx.yml`; lands in the release on tags) |
-| `pxt-patches` | pure Python, no compiling | Verifies the 17 required patches in the vendored pxt tree are still present (seconds) |
+| `pxt-patches` | pure Python, no compiling | Verifies the 19 required patches in the vendored pxt tree are still present (seconds) |
 | `package` | Collects distro-toolchain artifacts → `tools/package_release.sh` | 5 zips |
 | `release` (only on `core-v*` tags) | Collects `zig-*` + `android-*` + `lakka-musl` artifacts → `package_release.sh` → `gh release create` | **10 zips** (6 all-64-bit + 4×32-bit; including `windows-arm64`/`windows-x86`, which only zig can produce, and `lakka-arm64`, which only the musl toolchain can produce) |
 

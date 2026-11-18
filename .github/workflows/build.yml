@@ -763,6 +763,52 @@ jobs:
       - name: 末帧哈希比对
         run: tools/ci_regress.sh core/makecode_arcade_libretro.so --bmp-dir out/ci_bmp
 
+      # 「关闭内容 → 重新打开」路径。上面那步每张卡带只加载一次，测不到任何
+      # "第二次才错"的问题：核心用 -z nodelete 链接（防退出即 139），静态状态
+      # 跨会话存活。0.3.10 的真机偏色（PATCH 20）就是这类——像素格式协商结果
+      # 粘住，重开内容后前端回落 0RGB1555、核心仍按 RGB565 写。
+      # --reinit=2 = unload → deinit → 再 init → load 同一张卡带，共三轮。
+      - name: 二次加载（--reinit，PATCH 20 回归）
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          python3 tools/libretro_host.py core/makecode_arcade_libretro.so \
+            tools/fixtures/ping.pxt64 300 --turbo --reinit=2 \
+            --data-dir=out/reinit | tee out/reinit.log
+
+          got=$(grep -oE '(FINAL|REOPEN)-FRAME-HASH [0-9a-f]{32}' out/reinit.log \
+                | awk '{print $2}' || true)
+          [ -n "$got" ] || { echo "::error::没拿到任何末帧哈希"; exit 1; }
+          n=$(printf '%s\n' "$got" | grep -c . || true)
+          uniq=$(printf '%s\n' "$got" | sort -u | wc -l)
+          first=$(printf '%s\n' "$got" | head -1)
+          # 单次加载基线：从这里读，别再抄一份常量，否则两处基线会各自漂移
+          want=$(awk -F'|' '$1 ~ /ping\.pxt64/ {print $4}' \
+                 tools/fixtures/golden-frames.txt | tr -d '\r')
+          [ "$n" -eq 3 ] || { echo "::error::期望 3 轮哈希，实际 $n 轮"; exit 1; }
+          [ "$uniq" -eq 1 ] || {
+            echo "::error::三轮末帧不一致（第二次加载起偏了）：$(printf '%s' "$got" | tr '\n' ' ')"
+            exit 1
+          }
+          [ "$first" = "$want" ] || {
+            echo "::error::二次加载哈希 $first 与单次加载基线 $want 不符"
+            exit 1
+          }
+
+          # 比哈希更直接的信号：协商是否每轮都重做。一次内容加载走两轮
+          # init + set_environment，正常是 3 轮 × 2 = 6 次；若协商结果被
+          # 粘住，第二、三轮不会发，总数会掉到 1~4。
+          # 实测（0.3.9 核心 + 本宿主）：三轮哈希**照样全等于基线**，只有
+          # 协商次数掉到 1 —— 因为假前端重载时不一定会把像素格式请求重置回
+          # 0RGB1555，真 RetroArch 会。所以这条计数才是 PATCH 20 的真正哨兵，
+          # 哈希断言只能兜住"连单次加载都画错了"。
+          nfmt=$(grep -c 'SET_PIXEL_FORMAT = 2' out/reinit.log || true)
+          [ "$nfmt" -ge 6 ] || {
+            echo "::error::像素格式只协商了 $nfmt 次（应为 6：3 轮 × 2）——PATCH 20 可能失效"
+            exit 1
+          }
+          echo "三轮一致 $first；SET_PIXEL_FORMAT 共 $nfmt 次（每轮都重协商）"
+
       # 失败时把三个用例的末帧都留下来：光看哈希只能知道"变了"，看 BMP 才知道
       # 变成什么样（黑屏 / 花屏 / 少一层 / 颜色错位，判断方向完全不同）
       - uses: actions/upload-artifact@v4
