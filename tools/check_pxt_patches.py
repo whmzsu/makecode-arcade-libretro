@@ -254,6 +254,28 @@ PATCHES = [
             ("core---vm/scheduler.cpp", r"static pthread_cond_t newEventBroadcast;"),
         ],
     },
+    {
+        "no": 17,
+        "title": "调色板与画面同帧配对（setPalette 的写与渲染线程的读）",
+        "impact": "setPalette() 在 VM 线程裸写 16 项调色板，前端线程同时在展开同一张表。"
+                  "桌面/掌机大多跑成串行没暴露，Vita 双核是真并行：可能拿到"
+                  "「上半新、下半旧」的一组颜色。画面是索引色、颜色全由这张表解释，"
+                  "于是表现为若干颜色莫名错位（绿显示成橙），且随调度时对时错。",
+        "checks": [
+            # 写完要解锁，且 16 项的循环在锁内
+            ("screen---ext/screen.cpp",
+             r"pthread_mutex_lock\(&screenMutex\);\s*\n\s*for \(int i = 0; i < 16; \+\+i\) \{"),
+            # 发布时画面与调色板一起定格
+            ("screen---ext/screen.cpp",
+             r"memcpy\(disp->pubPalette, disp->currPalette, sizeof\(disp->pubPalette\)\)"),
+            # 前端只读快照
+            ("screen---ext/screen.cpp", r"auto pal = disp->pubPalette;"),
+        ],
+        "forbid": [
+            # 直接读工作副本 = 又会读到撕裂的调色板
+            ("screen---ext/screen.cpp", r"auto pal = disp->currPalette;"),
+        ],
+    },
 ]
 
 # 已退役：编号留着，防止旧文档/旧日志里的 PATCH 4 对不上号

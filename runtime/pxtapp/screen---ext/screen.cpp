@@ -8,9 +8,30 @@ DLLEXPORT uint64_t pxt_vm_frame_request();
 
 namespace pxt {
 extern volatile uint64_t mcaPubSeq; // 定义在 scheduler.cpp：已发布的帧序号
+
+// MCA PATCH 16：必须显式给初值。
+//
+// 上游这句是裸声明（不带初值），靠"零值恰好等于
+// PTHREAD_MUTEX_INITIALIZER"在 glibc/bionic/3DS-newlib 上碰巧能跑。PS Vita 的
+// newlib 不是这样：`pthread_mutex_t` 本身就是个指针，`PTHREAD_MUTEX_INITIALIZER`
+// 是 `(pthread_mutex_t)-1`（见 sys/_pthreadtypes.h）。于是零值 = NULL：
+//   - pthread_mutex_lock(NULL) 走到 "if (!*mutex) return EINVAL" 直接返回 22，
+//     **什么都没锁**（静默失效，不是崩溃，所以一直没被发现）；
+//   - pthread_mutex_unlock(NULL) 没有这个判空，`ldr r3,[r0]` 取到 0 之后
+//     `ldr r1,[r3,#0xc]` 读地址 0xc —— 立刻 SIGSEGV。
+// 2026-11-18 三份 psp2core dump（三张不同卡带）PC 全部落在
+// pthread_mutex_unlock+0x9 = 这条 ldr，调用方是 pxt_screen_publish()，
+// 即每局的第一帧发布就崩，与游戏无关。
+//
+// 声明位置在文件头（PATCH 17 前移）：setPalette() 现在也要拿同一把锁，
+// 而它定义在 WDisplay 类之前。
+static pthread_mutex_t screenMutex = PTHREAD_MUTEX_INITIALIZER;
+static int numGetPixels;
+
 class WDisplay {
   public:
-    uint32_t currPalette[16];
+    uint32_t currPalette[16]; // VM 线程正在写的调色板
+    uint32_t pubPalette[16];  // 与 pubBuf 同一帧的调色板快照（PATCH 17）
     bool newPalette;
     uint8_t *screenBuf; // VM 正在写的工作缓冲
     uint8_t *pubBuf;    // 已发布给前端的快照（双缓冲，见 pxt_screen_publish）
@@ -39,6 +60,7 @@ WDisplay::WDisplay() {
     memset(screenBuf, 0, n);
     memset(pubBuf, 0, n);
     memset(currPalette, 0, sizeof(currPalette));
+    memset(pubPalette, 0, sizeof(pubPalette));
     newPalette = false;
 }
 
@@ -57,6 +79,14 @@ void setPalette(Buffer buf) {
     auto display = getWDisplay();
     if (48 != buf->length)
         target_panic(PANIC_SCREEN_ERROR);
+    // MCA PATCH 17：整组 16 项必须在锁内换完。
+    //
+    // 调用方是 VM 线程，读方（pxt_screen_publish 的快照、前端的取帧）在别的
+    // 线程上，Vita 是双核真并行。上游裸写这 16 个 uint32 时，发布端可能正好
+    // memcpy 到一半 —— 拿到"上半是新调色板、下半还是旧的"的一帧。画面本身是
+    // 索引色，颜色全部由这张表解释，于是表现为若干颜色莫名错位（绿显示成橙
+    // 这类），且随调度变化：同一次启动里有时对有时错。
+    pthread_mutex_lock(&screenMutex);
     for (int i = 0; i < 16; ++i) {
         uint8_t r = buf->data[i * 3];
         uint8_t g = buf->data[i * 3 + 1];
@@ -64,23 +94,8 @@ void setPalette(Buffer buf) {
         display->currPalette[i] = (0xff << 24) | (r << 16) | (g << 8) | (b << 0);
     }
     display->newPalette = true;
+    pthread_mutex_unlock(&screenMutex);
 }
-
-// MCA PATCH 16：必须显式给初值。
-//
-// 上游这句是裸声明（不带初值），靠"零值恰好等于
-// PTHREAD_MUTEX_INITIALIZER"在 glibc/bionic/3DS-newlib 上碰巧能跑。PS Vita 的
-// newlib 不是这样：`pthread_mutex_t` 本身就是个指针，`PTHREAD_MUTEX_INITIALIZER`
-// 是 `(pthread_mutex_t)-1`（见 sys/_pthreadtypes.h）。于是零值 = NULL：
-//   - pthread_mutex_lock(NULL) 走到 "if (!*mutex) return EINVAL" 直接返回 22，
-//     **什么都没锁**（静默失效，不是崩溃，所以一直没被发现）；
-//   - pthread_mutex_unlock(NULL) 没有这个判空，`ldr r3,[r0]` 取到 0 之后
-//     `ldr r1,[r3,#0xc]` 读地址 0xc —— 立刻 SIGSEGV。
-// 2026-11-18 三份 psp2core dump（三张不同卡带）PC 全部落在
-// pthread_mutex_unlock+0x9 = 这条 ldr，调用方是 pxt_screen_publish()，
-// 即每局的第一帧发布就崩，与游戏无关。
-static pthread_mutex_t screenMutex = PTHREAD_MUTEX_INITIALIZER;
-static int numGetPixels;
 
 // NX 诊断：把"取帧尺寸对不上"这类只在真机上看得见的事写进运行期日志。
 // 黑屏的一个直接可能：WDisplay 的 CFG_DISPLAY_HEIGHT 默认 128，而核心按 120
@@ -177,7 +192,7 @@ DLLEXPORT void pxt_screen_get_pixels(int width, int height, uint32_t *screen) {
             *p++ = 0xff0000ff;
     } else {
         auto sp = disp->pubBuf; // 只读已发布的快照（双缓冲，见 publish）
-        auto pal = disp->currPalette;
+        auto pal = disp->pubPalette; // 与 pubBuf 同帧的调色板快照（PATCH 17）
         for (int x = 0; x < width; ++x) {
             uint32_t *p = screen + x;
             for (int y = 0; y < (height >> 1); ++y) {
@@ -244,7 +259,10 @@ DLLEXPORT void pxt_screen_publish(unsigned long long seq) {
     }
     // 双缓冲：把工作缓冲拷进发布缓冲，前端只读 pubBuf。
     // 这样"前端取帧"与"VM 继续画下一帧"不共享任何字节。
+    // PATCH 17：调色板同样要快照 —— 画面是索引色，只有和调色板同一时刻定格，
+    // 前端展开出来的颜色才和 VM 画这一帧时想表达的一致。
     memcpy(disp->pubBuf, disp->screenBuf, (size_t)disp->width * disp->height / 2);
+    memcpy(disp->pubPalette, disp->currPalette, sizeof(disp->pubPalette));
     mcaPubSeq = (uint64_t)seq; // 序号与缓冲在同一把锁内就绪，前端看到序号即可放心读
     pthread_mutex_unlock(&screenMutex);
     // 锁外唤醒前端线程：它拿到锁后会重新确认序号，不存在"读到半帧"的窗口

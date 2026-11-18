@@ -81,7 +81,7 @@ makecode_arcade/
 │   ├── build_musl.sh       Lakka package (fully static musl) build
 │   ├── package_release.sh  Package release zips (core + .info + notes + strip/debuginfo)
 │   ├── verify_release.py   Hard release assertions (arch / e_machine / 16KB / NODELETE / version)
-│   ├── check_pxt_patches.py  Table-driven check of the 14 vendored pxt patches
+│   ├── check_pxt_patches.py  Table-driven check of the 16 vendored pxt patches
 │   ├── setup_vita_gl_stack.sh  One-shot Vita GL dependency chain (taiHEN → SceShaccCgExt → vitashark → math-neon → vitaGL)
 │   ├── libretro_host.py    Fake frontend host + descriptor static self-check (--dry)
 │   ├── ci_regress.sh / coverage.sh / fuzz_pxt.sh / retroarch_smoke.sh  Regression / coverage / fuzz / real-frontend smoke
@@ -439,7 +439,7 @@ bottom of the Actions run page).
 | `retroarch-smoke` | ubuntu-24.04 + distro RetroArch + Xvfb | Real-frontend smoke: dlopen, `.info` parsing, pixel-format negotiation, SAVE_DIRECTORY, screenshots (2 fixture cartridges × 120 frames) |
 | `3DS / Vita core files (reusable)` | devkitARM / vitasdk containers | Core static libs + RA full-frontend CIA/SELF (calls `3ds-vita.yml`; lands in the release on tags) |
 | `Switch NRO (reusable)` | devkitA64 container | Core static lib + RA NRO (calls `nx.yml`; lands in the release on tags) |
-| `pxt-patches` | pure Python, no compiling | Verifies the 14 required patches in the vendored pxt tree are still present (seconds) |
+| `pxt-patches` | pure Python, no compiling | Verifies the 16 required patches in the vendored pxt tree are still present (seconds) |
 | `package` | Collects distro-toolchain artifacts → `tools/package_release.sh` | 5 zips |
 | `release` (only on `core-v*` tags) | Collects `zig-*` + `android-*` + `lakka-musl` artifacts → `package_release.sh` → `gh release create` | **10 zips** (6 all-64-bit + 4×32-bit; including `windows-arm64`/`windows-x86`, which only zig can produce, and `lakka-arm64`, which only the musl toolchain can produce) |
 

@@ -128,7 +128,7 @@ pointers.cpp、functions.json、pxtconfig.h）逐字节一致（仅我们的 3 �
    整个测试在 VM 起跑前跑完，画面全黑（0xff000000 = screen.cpp 的 no-display 分支）。
 3. VM 日志每条重复两遍（官方宿主同样现象，pxt_get_logs 行为，不影响功能）。
 
-### 对 pxt 上游与宿主侧的 15 个补丁（PATCH 1/2/3/5~16；PATCH 4 已被 10 取代）
+### 对 pxt 上游与宿主侧的 16 个补丁（PATCH 1/2/3/5~17；PATCH 4 已被 10 取代）
 
 > **校验**：`python tools/check_pxt_patches.py`（CI 的 `pxt-patches` job 每次 push 都跑）。
 > 补丁没有独立 patch 文件、构建时也不重放，全靠这棵树本身带着——脚本是唯一能
@@ -175,6 +175,18 @@ pointers.cpp、functions.json、pxtconfig.h）逐字节一致（仅我们的 3 �
 > `ldr r1,[r3,#0xc]` 读地址 0xc 当场 SIGSEGV。三张不同卡带的 dump 里 VM 线程
 > PC 全落在 `pthread_mutex_unlock+0x9`（正是这条 ldr），调用方
 > `pxt_screen_publish()` —— 每局第一帧发布必崩，与游戏无关。
+
+> **PATCH 17（v0.3.10，Vita 精灵偏色收尾）** 让调色板与画面**同帧配对**。
+> 上游 `setPalette()` 裸写 16 项 `currPalette`，而前端线程在
+> `pxt_screen_get_pixels()` 里展开同一张表 —— 画面是 4bpp 索引色，每个像素的
+> 颜色完全由这张表解释。桌面与掌机上两者大多被调度成串行，所以从未暴露；
+> Vita 是双核真并行，发布时可能拷到「上半新、下半旧」的一组颜色，表现为若干
+> 颜色莫名错位（绿显示成橙）且时对时错。
+> 改法沿用已有的双缓冲思路：`WDisplay` 增 `pubPalette[16]`，
+> `pxt_screen_publish()` 在锁内把它与 `pubBuf` 一起定格，`setPalette()` 的 16 项
+> 写入也在同一把锁内完成，前端只读快照。`screenMutex` 的声明因此前移到文件头
+> （`setPalette` 定义在 `WDisplay` 之前）。桌面三张 golden 末帧在同构型 A/B 下
+> 逐位不变。
 
 > PATCH 11（2026-11-09 发现）只改一行：`core---vm/verify.cpp` 的 `ALLOC_ARRAY`
 > 宏给 `sz` 补上括号。上游写法 `sizeof(tp) * sz` 遇到唯一传表达式的调用点

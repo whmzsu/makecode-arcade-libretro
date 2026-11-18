@@ -79,7 +79,7 @@ makecode_arcade/
 │   ├── build_musl.sh       Lakka 包（musl 全静态）专用构型
 │   ├── package_release.sh  打包发行 zip（core + .info + 说明 + strip/debuginfo）
 │   ├── verify_release.py   发版硬断言（平台/机器类型/16KB/NODELETE/版本号）
-│   ├── check_pxt_patches.py  表驱动校验 vendored pxt 树的 15 条补丁
+│   ├── check_pxt_patches.py  表驱动校验 vendored pxt 树的 16 条补丁
 │   ├── setup_vita_gl_stack.sh  Vita GL 依赖链一键搭建（taiHEN → SceShaccCgExt → vitashark → math-neon → vitaGL）
 │   ├── libretro_host.py    假前端宿主 + 描述符静态自检（--dry）
 │   ├── ci_regress.sh / coverage.sh / fuzz_pxt.sh / retroarch_smoke.sh  回归/覆盖率/fuzz/真前端冒烟
@@ -177,7 +177,7 @@ tools/build_core.sh   # DLL + core_test + contract_test + vm_smoke
 
 ```bash
 tools/ci_regress.sh core/makecode_arcade_libretro.dll   # 末帧 MD5 比对（2 卡带 3 用例）
-python tools/check_pxt_patches.py --strict              # vendored pxt 树的 15 条补丁是否还在
+python tools/check_pxt_patches.py --strict              # vendored pxt 树的 16 条补丁是否还在
 ```
 
 `ci_regress.sh` 的基线在 `tools/fixtures/golden-frames.txt`；改核心或改帧数后
