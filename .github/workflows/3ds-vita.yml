@@ -302,9 +302,9 @@ jobs:
           cp retroarch_3ds.cia mca_libretro.cia
           # info 与桌面包同源：core.info.in 模板 + kCoreVersion 版本号，
           # 文件名随核心文件名（RA 规则：info 与核心二进制同名）
-          VERSION=$(sed -n 's/.*kCoreVersion = "\([^"]*\)".*/\1/p' core/src/libretro_core.cpp | head -1)
+          VERSION=$(sed -n 's/.*kCoreVersion = "\([^"]*\)".*/\1/p' "$GITHUB_WORKSPACE/core/src/libretro_core.cpp" | head -1)
           [ -n "$VERSION" ] || { echo "::error::读不到 kCoreVersion"; exit 1; }
-          sed "s|@VERSION@|$VERSION|" tools/core.info.in > mca_libretro.info
+          sed "s|@VERSION@|$VERSION|" "$GITHUB_WORKSPACE/tools/core.info.in" > mca_libretro.info
           grep -E 'display_(name|version)' mca_libretro.info
           ls -l mca_libretro.cia mca_libretro.info
 
@@ -417,9 +417,9 @@ jobs:
           cd /tmp/ra || exit 1
           cp retroarch_vita.self mca_libretro.self
           # info 与桌面包同源（同 ra-ctr，见那里的注释）
-          VERSION=$(sed -n 's/.*kCoreVersion = "\([^"]*\)".*/\1/p' core/src/libretro_core.cpp | head -1)
+          VERSION=$(sed -n 's/.*kCoreVersion = "\([^"]*\)".*/\1/p' "$GITHUB_WORKSPACE/core/src/libretro_core.cpp" | head -1)
           [ -n "$VERSION" ] || { echo "::error::读不到 kCoreVersion"; exit 1; }
-          sed "s|@VERSION@|$VERSION|" tools/core.info.in > mca_libretro.info
+          sed "s|@VERSION@|$VERSION|" "$GITHUB_WORKSPACE/tools/core.info.in" > mca_libretro.info
           grep -E 'display_(name|version)' mca_libretro.info
           ls -l mca_libretro.self mca_libretro.info
 
