@@ -63,9 +63,8 @@ makecode_arcade/
 │   │   ├── vm_host.cpp         pxt VM host wrapper (image load / button edges / frame+audio pulls)
 │   │   └── platform.h          pxt VM host ABI (mirrors the official sdlmain.cpp)
 │   ├── tests/              Fake-frontend core_test / contract self-check contract_test / VM smoke vm_smoke
-├── frontends/              3DS / Vita minimal frontends (core statically linked, no RetroArch)
-│   ├── ctr/                3DS: main.c + Makefile + app.rsf (3dsx / cia)
-│   └── vita/               Vita: main.c + Makefile + font8x8.h (vpk)
+├── core/assets/            3DS/Vita core packaging assets (shared mca_libretro.info)
+│   └── ctr/                CIA icon/banner (icon48.png, banner256.png, banner.wav)
 ├── runtime/
 │   ├── pxtapp/             Official pxt VM kernel + engine primitives (vendored, 14 patches applied, game-agnostic)
 │   └── VENDORING.md
@@ -100,7 +99,7 @@ for cross-referencing.
 | M3 | Hook up the pxt VM bytecode interpreter, run the first game | ✅ **All three games pass**: vm_smoke (official ABI, direct calls) + the libretro fake-frontend path (RGB565 / button edges / audio) |
 | M4 | Input / audio synthesis / complete 60 fps frame model | ✅ Every host interface wired: button descriptors / per-button rebinding, audio synthesis with peak regression, frame-driven virtual clock (one frontend poll = one frame; fast-forward = the frontend polling faster), panic banner, save-directory hookup (trace/data go to `GET_SAVE_DIRECTORY`), panic self-healing — see `test_lifecycle`. **v0.3.0 scope cut: no savestates / rewind (`retro_serialize*` are stubs, the frontend auto-disables them); the core only does what the official emulator does** |
 | M5 | Offline conversion tool (.png → bytecode) + game compatibility test set | ✅ Split into the standalone repo [makecode-arcade-cartconv](https://github.com/whmzsu/makecode-arcade-cartconv) (portable cartconv package + png2pxt64.py reference implementation); verified on three cartridges |
-| M6 | Cross-compiling (handheld/desktop/mobile) + performance validation | ✅ **All 9 mainstream targets build and ship as zips** (Windows x64/arm64/x86, Linux x64/arm64/x86/armhf, Android arm64/armv7); ✅ 32-bit and 64-bit share the same PXT64 image path (GC tag side-table, see `docs/PXT32-A-SCHEME.md`; golden 3-case + 63-cartridge bit-identical); ✅ **RK3566 + ArkOS real-device acceptance passed** (full regression v0.2.1→v0.3.0, up to 166–361 fps); ✅ **RK3326 + ArkOS entry-level device accepted** (v0.3.0, heaviest game at 66 fps); ✅ **Android arm64 accepted** (v0.2.7); ✅ **3DS / Vita minimal frontends + full RetroArch frontends + core packages produced** (CI-reproducible, real-device acceptance in progress) |
+| M6 | Cross-compiling (handheld/desktop/mobile) + performance validation | ✅ **All 9 mainstream targets build and ship as zips** (Windows x64/arm64/x86, Linux x64/arm64/x86/armhf, Android arm64/armv7); ✅ 32-bit and 64-bit share the same PXT64 image path (GC tag side-table, see `docs/PXT32-A-SCHEME.md`; golden 3-case + 63-cartridge bit-identical); ✅ **RK3566 + ArkOS real-device acceptance passed** (full regression v0.2.1→v0.3.0, up to 166–361 fps); ✅ **RK3326 + ArkOS entry-level device accepted** (v0.3.0, heaviest game at 66 fps); ✅ **Android arm64 accepted** (v0.2.7); ✅ **3DS core form accepted on new3ds real hardware**; 3DS/Vita core files (CIA/SELF + `.info`) are reproducible, minimal frontend and VPK lines retired |
 
 ## Requirements and quick start
 
@@ -217,7 +216,7 @@ tools/package_release.sh  # Package into zips ready to drop into RetroArch
 | Android ARM64 / ARMv7 (32-bit) | `makecode_arcade_android-arm64.zip` / `-armv7.zip` |
 | Lakka / LibreELEC ARM64 (musl) | `makecode_arcade_lakka-arm64.zip` |
 | Nintendo Switch (NX) | `makecode_arcade_switch.zip` (NRO + `.info`) |
-| 3DS / PS Vita all-in-one | `mca_ctr.3dsx`/`.cia`, `mca_libretro.cia`, `mca_vita.vpk`, `mca_libretro.vpk`/`.self`/`.info` (see the 3DS/Vita section below) |
+| 3DS / PS Vita core files | `mca_libretro.cia` (3DS), `mca_libretro.self` + `mca_libretro.info` (Vita, merged into installed RA) (see the 3DS/Vita section below) |
 
 > **32-bit vs 64-bit** (as of 2026-11-17, important). Cartridges contain a
 > **PXT64** bytecode image — the only form the official pxt compiler emits.
@@ -241,9 +240,12 @@ tools/package_release.sh  # Package into zips ready to drop into RetroArch
 > regression** safety nets (zig `x86-windows-gnu` / `x86-linux-gnu.2.17` /
 > `arm-linux-gnueabihf.2.17` + NDK `armeabi-v7a`) and as part of the
 > **release matrix** — a `core-v*` tag now produces **10 main packages**
-> (6 all-64-bit + 4×32-bit). Note that 3DS/Vita **real-device acceptance is
-> not finished yet**; if you hit problems on a 32-bit device, please open an
-> issue.
+> (6 all-64-bit + 4×32-bit). The 3DS core form has passed real-device
+> acceptance on new3ds; the Vita core form (self+info merged into installed
+> RA) previously crashed with `C2-12828-1`, traced on 2026-11-18 to a
+> dangling `FILE*` in the core's `mcaTrace()` and fixed — pending real-device
+> re-verification. No old-3DS hardware available yet. If you hit problems,
+> open an issue with the error code / `mca_trace.log` / dump.
 
 ### Lakka / LibreELEC (musl)
 
@@ -269,46 +271,56 @@ into `/storage/cores/` on Lakka (SSH defaults to root/lakka) and refresh the
 core list. A 900-frame miniretro smoke run covers it in CI
 (`behavior-miniretro (musl 全静态)`).
 
-### 3DS / PS Vita (frontends/)
+### 3DS / PS Vita (core file + info)
 
 The 3DS and Vita have **no `dlopen` and tight memory**, so the core here is
-not a `.so` dropped into `cores/` but two static forms (co-installable,
-non-interfering):
+not a `.so` dropped into `cores/` but is statically linked into the full
+RetroArch frontend and shipped as a single install file. **Only the core form
+is distributed on these two platforms** (`mca_libretro.*` + `.info`): the
+minimal frontend and the core VPK line have been retired from builds and
+distribution.
 
-- **Minimal frontend** (`frontends/ctr`, `frontends/vita`): the core static
-  library plus a minimal libretro frontend — no menu assets, fastest boot.
-  Controls: A/B (CROSS/CIRCLE on Vita) = game keys, D-pad = direction,
-  START = in-game menu, SELECT = reset, L/R switch cartridges;
-  **START+SELECT together** opens the pause-state cartridge list menu
-  (up/down to pick, A/CROSS to load, B/CIRCLE to return — VM state is kept
-  intact, so you resume where you left off).
-- **Core package** (RetroArch form): `mca_libretro.cia` (3DS) /
-  `mca_libretro.vpk` + `mca_libretro.self` (Vita) — **the full RetroArch
-  frontend statically linked with the core**, isomorphic to libretro's
-  official "one CIA / vpk per core" distribution. Identities are offset from
-  the minimal packages (3DS UniqueId `0xF1CA1` vs `0xF1CA0`; Vita TITLE_ID
-  `MCAC00001`); on a device that already has RetroArch, you can alternatively
-  just drop the `.self` into the RA directory.
+- **3DS core file**: `mca_libretro.cia` (UniqueId `0xF1CA1`) — install with
+  FBI; a "MakeCode Arcade" icon appears on the home menu, with RA's full
+  settings. Cartridges go in `sdmc:/mca/`. **Accepted on real new3ds**:
+  buttons, menu, and cartridge loading all pass, with video performance
+  clearly better than the earlier CPU-scaled frontend. Installing the CIA
+  alone only gives a standalone icon; to make it show up in RA's Load Core
+  list / content associations, also copy the same `.cia` into
+  `sdmc:/retroarch/cores/` and put `.info` into `sdmc:/retroarch/cores/info/`,
+  then restart RA. A static core cannot be added to a different official RA.
+- **Vita core file**: `mca_libretro.self` + `mca_libretro.info`, merged into
+  an installed RetroArch (enable permissions in VitaShell; put the self in
+  RA's app dir and the info in its `info/` dir). The official Vita RA uses a
+  static model (each core is a full RA+core SELF, switching cores execs a new
+  process — no dynamic loading). It previously crashed with `C2-12828-1`
+  right after `Validation OK → start main loop`: the cached `FILE*` in
+  `mcaTrace()` went dangling when RA reset stdio on content switch. Fixed on
+  2026-11-18 (Vita branch writes straight to stderr, no fopen/cache) and the
+  SELF rebuilt — pending real-device re-verification.
 
-Building (with the real toolchains installed):
+`.info` (`mca_libretro.info`) is shared between 3DS and Vita
+(`supported_extensions = pxt64`). Test packages, install steps, and
+acceptance checklists live in `out/3ds-vita/README.md`.
+
+Core static-library build:
 
 ```bash
 # 3DS (devkitPro)
 export DEVKITPRO=/opt/devkitpro
-make -C core platform=ctr && make -C frontends/ctr
+make -C core platform=ctr
 
-# Vita (vitasdk; one-shot GL dependency chain: tools/setup_vita_gl_stack.sh)
+# Vita (vitasdk)
 export VITASDK=/path/to/vitasdk
-make -C core platform=vita && make -C frontends/vita
+make -C core platform=vita
 ```
 
 The two-level RetroArch full-frontend builds (core static library → linked
-into the RA sources to produce 3dsx/cia/vpk and the core CIA/VPK/SELF) are
-handled by the standalone `.github/workflows/3ds-vita.yml`
-(4 jobs: core-ctr / core-vita / ra-ctr / ra-vita; the RA version is pinned
-to a verified tip snapshot by default; on `core-v*` tags the packages land
-in the core release automatically). Test packages, install steps, and
-acceptance checklists live in `out/3ds-vita/README.md`.
+into the RA sources to produce the core CIA/SELF) are handled by the
+standalone `.github/workflows/3ds-vita.yml` (jobs: core-ctr / core-vita /
+ra-ctr / ra-vita; the RA version is pinned to a verified tip snapshot by
+default; on `core-v*` tags the core files + info land in the core release
+automatically). Local builds prefer tool69 — see `out/3ds-vita/README.md`.
 
 ### Nintendo Switch (RetroArch NX)
 

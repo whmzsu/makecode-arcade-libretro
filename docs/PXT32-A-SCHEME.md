@@ -6,6 +6,11 @@
 > 兜底；3DS/Vita 真机验收仍在进行。`probe/pxt32*` 分支已删除，
 > 本文按当时分支状态留档。
 >
+> **2026-11-18 补注**：第 11 节记录的极简前端（`frontends/ctr`、
+> `frontends/vita`）与核心 VPK 已不再构建/分发，源码目录已删除；核心 CIA
+> 打包素材迁至 `core/assets/ctr/`，通用 `.info` 迁至
+> `core/assets/mca_libretro.info`。第 11 节表格与命令保留作历史记录。
+>
 > 2026-11-16。承接 `probe/pxt32`（P0/P1）——P1 实测证实 32 位硬阻断是 GC 的
 > vtable 高位标记位。本分支尝试 **A 方案：把 FREE/ARRAY/PERMA 标记搬到旁路表**，
 > 验证"自己能不能实现 32 位核心"。结论：**技术上跑通了**，但代价是长期 fork，

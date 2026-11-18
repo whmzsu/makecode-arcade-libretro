@@ -214,6 +214,26 @@ static void mcaTraceOpen() {
 static pthread_mutex_t mcaTraceMutex = PTHREAD_MUTEX_INITIALIZER;
 
 void mcaTrace(const char *fmt, ...) {
+#if defined(_PXT_VITA)
+    // Vita 专属：绝不缓存 FILE*。
+    //
+    // 真机取证（2026-11-17 两份 psp2core dump，C2-12828-1）：卡带 Validation OK
+    // → "start main loop" 之后立刻崩，PC/LR 落在 newlib 的 _svfprintf_r/vfprintf。
+    // 下一条语句正是 mcaTrace("[vm] main loop entered")——它把 fopen 得到的
+    // FILE* 存在进程级静态变量里反复 vfprintf。Vita RetroArch 在 Load Content /
+    // 换核时会重置 stdio 流，缓存的 FILE* 变成悬垂指针，下一次写就是跳转野地址。
+    // 3DS 走 sceAppMgrLoadExec 整进程重启、stdio 不原地重置，所以同源码不崩。
+    //
+    // Vita 上 trace 直接写 stderr（VitaShell/RA 的 TTY 可见，取证已证实），
+    // 不 fopen、不缓存、不设 mcaTraceTried，从根上消除悬垂 FILE*。
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(stderr, fmt, ap);
+    fputc('\n', stderr);
+    fflush(stderr);
+    va_end(ap);
+    return;
+#else
     va_list ap;
     // 开文件必须在锁内：mcaTraceTried 不是原子的，VM 线程和前端线程同时第一次
     // 写 trace 时两边都会 fopen(...,"w")，后开的把先写的内容截掉（实测桌面
@@ -234,6 +254,7 @@ void mcaTrace(const char *fmt, ...) {
         va_end(ap);
     }
     pthread_mutex_unlock(&mcaTraceMutex);
+#endif
 }
 
 DLLEXPORT void pxt_vm_trace(const char *msg) { mcaTrace("[host] %s", msg); }

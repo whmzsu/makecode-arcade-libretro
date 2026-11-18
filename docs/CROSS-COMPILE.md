@@ -17,9 +17,10 @@ tools/package_release.sh  # 打包成可直接放进 RetroArch 的 zip
 > GC 的 vtable 高位标记位——A 方案（GC 标记搬旁路表）进 main 后，**PXT64
 > 布局在 32 位平台上已可用**（3DS/Vita 线同一路径）。发版矩阵 2026-11-17
 > 起收入 4 个 32 位目标（Win x86 / Linux x86/armhf / Android armv7），
-> 与 64 位走同一条 PXT64 镜像路径。注意 3DS / Vita 的**真机验收尚未完成**，
-> 32 位玩家遇到问题请提 issue。根因与决策过程见 `docs/PXT32-A-SCHEME.md`
-> 与 README「32 位与 64 位」。
+> 与 64 位走同一条 PXT64 镜像路径。3DS 核心形态已在 new3ds 真机验收通过；
+> Vita 核心形态此前 `C2-12828-1` 崩溃已定位并修复、待复验（见文末）；
+> 老款 3DS 暂无设备未验。根因与决策过程见 `docs/PXT32-A-SCHEME.md` 与
+> README「32 位与 64 位」，真机结论见文末「3DS / Vita 真机验收」小节。
 
 | 目标三元组 | 平台 | 格式 | libc 基线 | 产物 | 备注 |
 |---|---|---|---|---|---|
@@ -244,3 +245,31 @@ ELF 共享库默认允许未定义符号（惰性绑定），所以**缺对象�
 5. 时间/线程：只用 pthread 与 `std::chrono`，别用 Win32 专有 API；
 6. Android 走 NDK clang，**不要**在代码里加 `__ANDROID__` 特判除非确实必要——目前
    一个都不需要。
+
+## 3DS / Vita 真机验收与核心形态构建（2026-11-18）
+
+这两个平台**只出核心形态**：core 静态库（32 位）链进 RetroArch 完整前端，
+出厂为 `mca_libretro.cia`（3DS）或 `mca_libretro.self` + `.info`（Vita）。
+极简前端与核心 VPK 线已放下、不再构建分发。均在 tool69 本地编译
+（devkitARM / vitasdk，RA 树 pin `d7cc9bc`）。结论：
+
+- **3DS 核心形态**：new3ds 真机验收通过——按键、菜单、卡带装载全绿，
+  画面性能明显优于早先的 CPU 缩放前端。老款 3DS 手头无设备，暂未验。
+- **3DS 安装坑**：核心 CIA 光装只得到独立图标；要让 RA 的 Load Core 列表 /
+  内容关联识别，须把同一 `.cia` 复制到 `sdmc:/retroarch/cores/`、`.info` 放到
+  `sdmc:/retroarch/cores/info/`，重启 RA。静态核心加不进另一个官方 RA 构建。
+- **Vita 核心形态**：`mca_libretro.self` + `.info` 并入已装 RA。此前真机在
+  `Validation OK → start main loop` 后报 `C2-12828-1`；两份 psp2core dump
+  取证定位为 `mcaTrace()` 缓存的 `FILE*` 在 RA 换 content 重置 stdio 后悬垂，
+  `_svfprintf_r` 写野指针。2026-11-18 修复（Vita 分支直写 stderr、不 fopen
+  不缓存，见 `runtime/pxtapp/core---vm/scheduler.cpp`）并重编 self
+  （md5 `3c751257…`），**待真机复验**。
+- **GPU 硬缩放实验**：曾试 citro3d 顶屏 GPU 缩放，四轮修复（2 幂纹理、
+  tiled 上传、VBlank、permutation）后真机仍黑屏，**已放弃**，源码回退；
+  实验源码封存在 `out/3ds-vita/_gpu-experiment-abandoned/`。
+
+**重编 Vita self 的坑**：改 `mcaTrace()` 后须重编 core `.a` → 换进 RA 树
+`libretro_vita.a` → `make -f Makefile.vita clean` → 重链 self。注意
+`va_list ap` 在 `#if`+`return` 下同作用域会重声明编译失败，必须用 `#else`
+包住原路径。测试包、md5、安装步骤见 `out/3ds-vita/README.md` 与
+`out/3ds-vita/真机测试包/测试清单-先读我.md`。

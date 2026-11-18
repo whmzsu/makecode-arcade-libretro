@@ -107,53 +107,49 @@ Once the core is installed, it's the same as on PC: **Load Content → pick a `.
 
 ---
 
-## 4. 3DS / PS Vita only (all-in-one packages, no RetroArch install needed)
+## 4. 3DS / PS Vita only (core form)
 
-On the 3DS and Vita you **don't install RetroArch yourself**. These two machines get dedicated "all-in-one" packages: the core and a small frontend are already bundled into a single installable file — once installed, an icon appears on the home menu, tap it and play. Boot time is far shorter than full RetroArch.
+On the 3DS and Vita you **don't install RetroArch yourself**: the core is statically linked into the full RetroArch frontend and shipped as an install file. These two platforms **only ship the core form** (`mca_libretro.*` + `.info`); the minimal frontend and the core VPK are no longer provided.
 
 ### 3DS
 
-1. Copy your cartridges (`.pxt64` files) to **`sdmc:/mca/`** on the SD card (create it if missing).
-2. Copy `mca_ctr.cia` anywhere on the SD card and install it with **FBI** (homebrew-launcher users can use `mca_ctr.3dsx` instead and launch from the Homebrew Launcher).
-3. An **"MCA Core Test"** icon appears on the home menu. Launch it directly.
+1. Put cartridges in **`sdmc:/mca/`** on the SD card (create it if missing).
+2. Install `mca_libretro.cia` with **FBI**. A **"MakeCode Arcade"** icon appears on the home menu (UniqueId `0xF1CA1`).
+3. Launch it, then in RetroArch **Load Content → pick a `.pxt64` from `sdmc:/mca/`**.
 
-Controls: **A/B = game keys, D-pad = direction, START = in-game menu, SELECT = restart the current game, L/R = switch cartridges, Y = back to the Homebrew Launcher**.
+**To also see MCA in the Load Core list**: installing the CIA alone only gives a standalone icon — RA's list scans the `cores/` directory. Do these once:
 
-**START + SELECT together = cartridge list** (a pause-state menu): up/down to pick, A to load, B to return — switching games keeps the VM state intact, so you resume where you left off.
+- Copy the same `mca_libretro.cia` into **`sdmc:/retroarch/cores/`**;
+- Put **`mca_libretro.info`** (its content works for both 3DS and Vita) into **`sdmc:/retroarch/cores/info/`**;
+- Restart RetroArch. MakeCode Arcade now appears in Load Core and `.pxt64` files auto-associate.
 
-> Want full RetroArch (settings menus, video options, etc.)? Install `mca_libretro.cia` instead (an "MakeCode Arcade" icon appears on the home menu; it **coexists** with the minimal package above without interference). That package is a complete RetroArch — use it like desktop RA: Load Content and pick a `.pxt64`.
+> A static core cannot be added to a *different* official RetroArch build — launch from our "MakeCode Arcade" icon. Verified and smooth on new3ds.
 
 ### PS Vita
 
-1. Use VitaShell to copy `.pxt64` cartridges to **`ux0:/data/mca/`** (create it if missing).
-2. Use VitaShell to install `mca_vita.vpk`; an MCA icon appears on the home menu. Launch it.
+There is one route: **merge the core into an installed RetroArch**.
 
-Controls: **CROSS = A, CIRCLE = B, D-pad = direction, START = in-game menu, SELECT = restart the current game, L/R = switch cartridges** (the picture is auto-scaled 4x and centered). **START + SELECT together** opens the same cartridge list.
+1. Put cartridges in **`ux0:/data/mca/`** (create it if missing).
+2. With VitaShell permissions enabled, copy `mca_libretro.self` into the installed RetroArch app directory (e.g. `ux0:/app/RETROVITA/`).
+3. Put `mca_libretro.info` into that directory's `info/` subfolder.
+4. Launch RA — MakeCode Arcade appears in the core list → Load Content → pick a `.pxt64`.
 
-> If you already have RetroArch installed, you can alternatively install `mca_libretro.vpk` (standalone icon, coexists with RetroArch and shares its config), or drop `mca_libretro.self` + `mca_libretro.info` into your installed RetroArch's directory.
+> Earlier versions crashed with `C2-12828-1` after starting a game; this was traced to a stale cached file pointer in the core's `mcaTrace()` and fixed — please re-verify with the latest self. If it still crashes, send the `psp2core-*.psp2dmp` generated under `ux0:` together with `mca_trace.log` via a repo issue.
 
-### Where to download these packages
+### Where to download these files
 
 Same [Releases page](https://github.com/whmzsu/makecode-arcade-libretro/releases)
 as the core packages — grab by name:
 
 | What you want | Download |
 |---|---|
-| 3DS minimal (recommended) | `mca_ctr.cia` (install with FBI) or `mca_ctr.3dsx` (Homebrew Launcher) |
-| 3DS full RetroArch | `mca_libretro.cia` |
-| Vita minimal (recommended) | `mca_vita.vpk` |
-| Vita full RetroArch (standalone app) | `mca_libretro.vpk` |
-| Vita, into an existing RetroArch | `mca_libretro.self` + `mca_libretro.info` |
+| **3DS** | `mca_libretro.cia` + (for list visibility) `mca_libretro.info` |
+| **Vita** (merge into installed RA) | `mca_libretro.self` + `mca_libretro.info` |
 | Switch | `makecode_arcade_switch.zip` |
 
-> Files named `mca_ctr` / `mca_vita` are the **minimal frontend** (no menus,
-> fastest boot); files named `mca_libretro` are the **full RetroArch form**.
-> Either is fine, and they can coexist. The end of every release's notes has
-> a full "which asset to pick" grouped table.
+> `mca_libretro.info` works for both 3DS and Vita. The end of every release's notes has a full "which asset to pick" grouped table.
 
-> Note: **real-device acceptance for 3DS/Vita is not finished yet.** If you
-> hit a black screen or wrong button mapping, please open an issue (attach
-> `mca_trace.log`).
+> The 3DS core form has passed real-device acceptance on new3ds; no old-3DS hardware is available, and the Vita core form awaits re-verification. If you hit problems, open an issue with `mca_trace.log` or the Vita dump.
 
 ---
 

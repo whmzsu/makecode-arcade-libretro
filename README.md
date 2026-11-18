@@ -61,9 +61,8 @@ makecode_arcade/
 │   │   ├── vm_host.cpp         pxt VM 宿主封装（镜像装载/按键沿/拉帧拉音频）
 │   │   └── platform.h          pxt VM 宿主 ABI（对齐官方 sdlmain.cpp）
 │   ├── tests/              假前端 core_test / 契约自检 contract_test / VM 冒烟 vm_smoke
-├── frontends/              3DS / Vita 极简前端（core 静态链接，不走 RetroArch）
-│   ├── ctr/                3DS：main.c + Makefile + app.rsf（3dsx / cia）
-│   └── vita/               Vita：main.c + Makefile + font8x8.h（vpk）
+├── core/assets/            3DS/Vita 核心打包素材（通用 mca_libretro.info）
+│   └── ctr/                CIA 图标/banner（icon48.png、banner256.png、banner.wav）
 ├── runtime/
 │   ├── pxtapp/             pxt 官方 VM 内核+引擎原语（vendored，已打 14 个补丁，游戏无关）
 │   └── VENDORING.md
@@ -95,7 +94,7 @@ makecode_arcade/
 | M3 | pxt VM 字节码解释器接入，跑通第一个游戏 | ✅ **三款游戏全通**：vm_smoke（官方 ABI 直调）+ libretro 假前端路径（RGB565/按键沿/音频） |
 | M4 | 输入 / 音频合成 / 60fps 帧模型完整化 | ✅ 宿主接口全部打通：按键描述符/分键重绑、音频合成与峰值回归、帧驱动虚拟时钟（前端一圈一帧，快进=前端多取帧）、panic 横幅、存档目录对接（trace/数据走 `GET_SAVE_DIRECTORY`）、panic 自愈见 `test_lifecycle`。**v0.3.0 范围收敛：不做即时存档 / rewind（`retro_serialize*` 为 stub，前端自动禁用），核心只做官方模拟器同等的基本功能** |
 | M5 | 离线转换工具（PNG→bytecode）+ 游戏兼容性测试集 | ✅ 已拆分到独立仓库 [makecode-arcade-cartconv](https://github.com/whmzsu/makecode-arcade-cartconv)（cartconv 便携包 + png2pxt64.py 参照实现），三卡带实测通过 |
-| M6 | 交叉编译（掌机/桌面/移动）+ 性能验证 | ✅ **9 个主流目标全通并出 zip**（Windows x64/arm64/x86、Linux x64/arm64/x86/armhf、Android arm64/armv7）；✅ 32 位与 64 位走同一条 PXT64 镜像路径（A 方案 GC 旁路表，见 `docs/PXT32-A-SCHEME.md`；golden 三例 + 63 卡逐位一致）；✅ **RK3566 + ArkOS 真机验收通过**（v0.2.1→v0.3.0 全功能回归，满速 166~361fps）；✅ **RK3326 + ArkOS 下限机型验收通过**（v0.3.0，最重游戏 66fps）；✅ **Android arm64 验收通过**（v0.2.7）；✅ **3DS / Vita 极简前端 + RA 完整前端 + 核心包已产出**（CI 可复现，真机验收进行中） |
+| M6 | 交叉编译（掌机/桌面/移动）+ 性能验证 | ✅ **9 个主流目标全通并出 zip**（Windows x64/arm64/x86、Linux x64/arm64/x86/armhf、Android arm64/armv7）；✅ 32 位与 64 位走同一条 PXT64 镜像路径（A 方案 GC 旁路表，见 `docs/PXT32-A-SCHEME.md`；golden 三例 + 63 卡逐位一致）；✅ **RK3566 + ArkOS 真机验收通过**（v0.2.1→v0.3.0 全功能回归，满速 166~361fps）；✅ **RK3326 + ArkOS 下限机型验收通过**（v0.3.0，最重游戏 66fps）；✅ **Android arm64 验收通过**（v0.2.7）；✅ **3DS 核心形态 new3ds 真机验收通过**；3DS/Vita 核心文件（CIA/SELF + `.info`）均可复现产出，极简前端与 VPK 线已放下 |
 
 ## 环境要求与快速开始
 
@@ -216,7 +215,7 @@ tools/package_release.sh  # 打包成可直接放进 RetroArch 的 zip
 | Android ARM64 / ARMv7（32 位） | `makecode_arcade_android-arm64.zip` / `-armv7.zip` |
 | Lakka / LibreELEC ARM64（musl） | `makecode_arcade_lakka-arm64.zip` |
 | Nintendo Switch（NX） | `makecode_arcade_switch.zip`（NRO + `.info`） |
-| 3DS / PS Vita 整包 | `mca_ctr.3dsx`/`.cia`、`mca_libretro.cia`、`mca_vita.vpk`、`mca_libretro.vpk`/`.self`/`.info`（见下文 3DS/Vita 小节） |
+| 3DS / PS Vita 核心文件 | `mca_libretro.cia`（3DS）、`mca_libretro.self` + `mca_libretro.info`（Vita，并入已装 RA）（见下文 3DS/Vita 小节） |
 
 > **32 位与 64 位**（2026-11-17 起，重要）。卡带里装的是 **PXT64** 字节码镜像——
 > 官方 pxt 编译器唯一能产出的形态。32 位平台的硬阻断**不在镜像格式，而在
@@ -234,8 +233,10 @@ tools/package_release.sh  # 打包成可直接放进 RetroArch 的 zip
 > 当前状态（2026-11-17）：CI 的 32 位 job 既做**构建回归**兜底（zig
 > `x86-windows-gnu` / `x86-linux-gnu.2.17` / `arm-linux-gnueabihf.2.17` +
 > NDK `armeabi-v7a`），也进**发版矩阵**——推 `core-v*` tag 出 **10 个主包**
-> （6 全 64 位 + 4 个 32 位）。注意 3DS / Vita 的**真机验收尚未完成**，
-> 32 位玩家遇到问题请提 issue。
+> （6 全 64 位 + 4 个 32 位）。3DS 核心形态已在 new3ds 真机验收通过；
+> Vita 核心形态（self+info 并入已装 RA）此前报 `C2-12828-1`，2026-11-18
+> 已定位并修复核心 `mcaTrace()` 的悬垂 `FILE*`，待真机复验；老款 3DS
+> 无设备未验。玩家遇到问题请提 issue 并附错误码 / `mca_trace.log` / dump。
 
 ### Lakka / LibreELEC（musl）
 
@@ -258,39 +259,48 @@ docker run --rm -v "$PWD":/work -w /work \
 Lakka 的 `/storage/cores/`（SSH 默认 root/lakka），刷新核心列表即可。行为回归
 由 CI 的 `behavior-miniretro (musl 全静态)` job 用 miniretro 跑 900 帧覆盖。
 
-### 3DS / PS Vita（frontends/）
+### 3DS / PS Vita（core 文件 + info）
 
 3DS 与 Vita **没有 `dlopen`、内存也紧**，核心在这里不是丢进 `cores/` 的
-`.so`，而是两种静态形态（可共存安装，互不干扰）：
+`.so`，而是把 core 静态链进 RetroArch 完整前端、出厂为单个安装文件。
+**这两个平台只分发核心形态**（`mca_libretro.*` + `.info`）：极简前端与
+核心 VPK 线已放下，不再构建/分发。
 
-- **极简前端**（`frontends/ctr`、`frontends/vita`）：core 静态库 + 一个最小
-  libretro 前端，无菜单资产、启动最快。操作：A/B（Vita CROSS/CIRCLE）=
-  游戏键、十字=方向、START=游戏内菜单、SELECT=重置、L/R 换卡带；
-  **START+SELECT 同按**呼出暂停态卡带列表菜单（上下选、A/CROSS 装载、
-  B/CIRCLE 返回，VM 状态原地保留，选完接着玩）。
-- **核心包**（RetroArch 形态）：`mca_libretro.cia`（3DS）/ `mca_libretro.vpk`、
-  `mca_libretro.self`（Vita）——**RetroArch 完整前端 + core 静态链接**，与
-  libretro 官方"每核心一个 CIA / vpk"的分发形态同构；身份与极简包错开
-  （3DS UniqueId `0xF1CA1` vs 极简 `0xF1CA0`，Vita TITLE_ID `MCAC00001`），
-  已装 RetroArch 的机器也可以只把 `.self` 并进 RA 目录。
+- **3DS 核心文件**：`mca_libretro.cia`（UniqueId `0xF1CA1`），FBI 安装后
+  主菜单出现「MakeCode Arcade」图标，走 RA 完整设置；卡带放 `sdmc:/mca/`。
+  **new3ds 真机验收通过**：按键、菜单、卡带装载全绿，画面性能明显优于
+  早先的 CPU 缩放前端。光装 CIA 只得到独立图标；要让 RA 的 Load Core 列表
+  /内容关联识别，还须把同一个 `.cia` 复制到 `sdmc:/retroarch/cores/`、
+  把 `.info` 放到 `sdmc:/retroarch/cores/info/`，重启 RA。静态核心加不进
+  另一个官方 RA。
+- **Vita 核心文件**：`mca_libretro.self` + `mca_libretro.info`，并入已装
+  RetroArch（VitaShell 开权限，self 放 RA app 目录、info 放其 `info/` 下）。
+  官方 Vita RA 是静态模型（每核心一个完整 RA+core 的 SELF，换核即 exec
+  重启，无动态加载）。此前 `Validation OK → start main loop` 后崩
+  `C2-12828-1`，根因是 `mcaTrace()` 缓存的 `FILE*` 在 RA 换 content 重置
+  stdio 后悬垂；2026-11-18 已修（Vita 分支直写 stderr、不 fopen 不缓存）
+  并重编 self，待真机复验。
 
-构建（本机装好真工具链时）：
+`.info`（`mca_libretro.info`）3DS/Vita 通用，`supported_extensions = pxt64`。
+测试包、安装步骤与真机验收清单见 `out/3ds-vita/README.md`。
+
+core 静态库构建：
 
 ```bash
 # 3DS（devkitPro）
 export DEVKITPRO=/opt/devkitpro
-make -C core platform=ctr && make -C frontends/ctr
+make -C core platform=ctr
 
-# Vita（vitasdk；GL 依赖链一键搭：tools/setup_vita_gl_stack.sh）
+# Vita（vitasdk）
 export VITASDK=/path/to/vitasdk
-make -C core platform=vita && make -C frontends/vita
+make -C core platform=vita
 ```
 
-RetroArch 完整前端的两级构建（core 静态库 → 链进 RA 源码出 3dsx/cia/vpk 与
-核心 CIA/VPK/SELF）由独立的 `.github/workflows/3ds-vita.yml` 负责
-（4 个 job：core-ctr / core-vita / ra-ctr / ra-vita；RA 版本默认 pin 已验证
-的 tip 快照；推 `core-v*` tag 时整包自动进核心发版 Release）。测试包、安装
-步骤与真机验收清单见 `out/3ds-vita/README.md`。
+RetroArch 完整前端的两级构建（core 静态库 → 链进 RA 源码出核心 CIA/SELF）
+由独立的 `.github/workflows/3ds-vita.yml` 负责（job：core-ctr / core-vita /
+ra-ctr / ra-vita；RA 版本默认 pin 已验证的 tip 快照；推 `core-v*` tag 时
+core 文件 + info 自动进核心发版 Release）。本地优先走 tool69，步骤见
+`out/3ds-vita/README.md`。
 
 ### Nintendo Switch（RetroArch NX）
 

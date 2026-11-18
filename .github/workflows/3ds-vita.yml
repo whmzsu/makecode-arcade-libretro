@@ -1,8 +1,8 @@
-# 3DS / Vita 静态库实编（probe/pxt32-3ds-vita 分支探索线）
+# 3DS / Vita 静态 core 构建（发版形态：core 文件 + info）
 #
 # 与 NX 同理：3DS/Vita 没有 dlopen，core 只能编成静态库
 #（libretro_ctr.a / libretro_vita.a），由 RetroArch 的 Makefile.ctr /
-# Makefile.vita 连同前端一起链进 .3dsx/.cia / .vpk。
+# Makefile.vita 连同前端一起链进 .cia / .self。
 #
 # 为什么放 CI 而不是本地 tool69：apt.devkitpro.org 在本机/工具机网络均被
 # Cloudflare 403（2026-11-16 实测，换 UA 无效），devkitPro 工具链装不上；
@@ -10,10 +10,10 @@
 # devkitpro/vitasdk）里工具链是预置的。静态库正确性（SDK 头、ABI、
 # pthread 头、platform hook 编入）只有真工具链能验证。
 #
-# 只做手动触发（workflow_dispatch）：本分支不进常规 CI，按需实编。
-# 两级构建都在：第一级（core 静态库 + 最小前端），第二级（core 静态库链进
-# RetroArch 完整前端，ra-ctr / ra-vita 两个 job，RetroArch 版本 pin 见
-# workflow_dispatch 输入，与 nx.yml 一致）。
+# 两个级别：core 静态库（core-ctr / core-vita）→ 链进 RetroArch 出核心
+# 文件（ra-ctr 出 mca_libretro.cia，ra-vita 出 mca_libretro.self）+ info。
+# 极简前端与核心 VPK 已不再构建/分发；RetroArch 版本 pin 见
+# workflow_dispatch 输入，与 nx.yml 一致。
 name: 3DS/Vita static core
 
 on:
@@ -24,14 +24,15 @@ on:
         required: false
         default: "d7cc9bc"
       upload_tag:
-        description: "把前端整包上传到哪个 core-v* Release（如 core-v0.3.10；留空=不上传，只构建）"
+        description: "把 core 文件和 info 上传到哪个 core-v* Release（如 core-v0.3.10；留空=不上传，只构建）"
         required: false
         default: ""
   push:
     tags:
-      # 与 build.yml 的 release job 同一个 tag：本 workflow 出 3DS/Vita 前端
-      # 整包并追加到同一个 Release（frontend-release job 轮询等 Release 建好
-      # 再上传）。注意本 workflow 没有 paths 过滤，tag push 必触发。
+      # 与 build.yml 的 release job 同一个 tag：本 workflow 出 3DS/Vita core
+      # 文件（CIA / SELF）+ info 并追加到同一个 Release（core-release-upload
+      # job 轮询等 Release 建好再上传）。注意本 workflow 没有 paths 过滤，
+      # tag push 必触发。
       - "core-v*"
 
 concurrency:
@@ -111,49 +112,11 @@ jobs:
           fi
           tail -10 "$out"
 
-      - name: 编译前端（最小 libretro 前端，.3dsx + .cia）
-        run: |
-          set -u
-          export DEVKITPRO="${DEVKITPRO:-/opt/devkitpro}"
-          export PATH="$DEVKITPRO/devkitARM/bin:$DEVKITPRO/tools/bin:$PATH"
-          # makerom/bannertool 不在 devkitPro pacman 源（dkp-pacman 报
-          # target not found，2026-11-17 实测），按社区惯例从 GitHub release 取
-          mkdir -p /tmp/ciatools && cd /tmp/ciatools
-          curl -fsSL -o makerom.zip \
-            https://github.com/3DSGuy/Project_CTR/releases/download/makerom-v0.18.4/makerom-v0.18.4-ubuntu_x86_64.zip
-          unzip -o makerom.zip -d makerom
-          install -m 755 makerom/makerom "$DEVKITPRO/tools/bin/makerom"
-          # bannertool 原仓库 Steveice10/bannertool 已 404（2026-11-17 实测），
-          # diasurgical fork 保留同名 release 资产（zip 内 linux-x86_64/bannertool）
-          curl -fsSL -o bannertool.zip \
-            https://github.com/diasurgical/bannertool/releases/download/1.2.0/bannertool.zip
-          unzip -o bannertool.zip -d bannertool
-          install -m 755 bannertool/linux-x86_64/bannertool "$DEVKITPRO/tools/bin/bannertool"
-          makerom -h 2>&1 | head -2 || true
-          cd "$GITHUB_WORKSPACE"
-          log=/tmp/ctr-fe.log
-          if ! make -C frontends/ctr all cia > "$log" 2>&1; then
-            echo "::error::前端构建失败"
-            tail -30 "$log" | cut -c1-300 | sed 's/^/::error::  /'
-            exit 1
-          fi
-          tail -5 "$log"
-          ls -l frontends/ctr/mca_ctr.3dsx frontends/ctr/mca_ctr.cia
-
       - name: 上传 .a
         uses: actions/upload-artifact@v4
         with:
           name: ctr-core-static
           path: core/makecode_arcade_libretro_ctr.a
-          if-no-files-found: error
-
-      - name: 上传 3DS 测试包（3dsx + cia）
-        uses: actions/upload-artifact@v4
-        with:
-          name: ctr-testpack
-          path: |
-            frontends/ctr/mca_ctr.3dsx
-            frontends/ctr/mca_ctr.cia
           if-no-files-found: error
 
   # ------------------------------------------------------------ Vita
@@ -226,54 +189,6 @@ jobs:
           fi
           tail -10 "$out"
 
-      - name: 编译前端（最小 libretro 前端，.vpk）
-        run: |
-          set -u
-          export VITASDK="${VITASDK:-/opt/vitasdk}"
-          export PATH="$VITASDK/bin:$PATH"
-          log=/tmp/vita-fe.log
-          if ! make -C frontends/vita > "$log" 2>&1; then
-            echo "::error::前端构建失败"
-            grep -nE 'error:|undefined reference|cannot find|No such file|No rule' "$log" \
-              | head -20 | cut -c1-300 | sed 's/^/::error::  /'
-            echo "::error::日志尾部："
-            awk 'length($0) < 300' "$log" | tail -20 | cut -c1-300 | sed 's/^/::error::  /'
-            exit 1
-          fi
-          tail -5 "$log"
-          ls -l frontends/vita/mca_vita.vpk
-
-      - name: 校验测试包 vpk（eboot fSELF / icon0 / TITLE_ID）
-        # 注意：vitasdk 容器无 bash，GitHub 回退 dash——不能 pipefail、
-        # printf 不能用 \xHH（用八进制），都是 ra-vita 线踩过的坑
-        run: |
-          set -eu
-          # vitasdk 容器不保证带 unzip（血泪：以前没装，校验全报"缺 param.sfo"，
-          # 其实是 unzip: not found）——ra-vita 核心包那条线早有这个兜底，
-          # 测试包线漏抄，连红三轮。别用 python3，容器里也不一定有。
-          command -v unzip >/dev/null || { apt-get update -qq && apt-get install -y -qq unzip; }
-          vpk=frontends/vita/mca_vita.vpk
-          fail() { echo "::error::$1"; exit 1; }
-          unzip -l "$vpk" | grep -q 'sce_sys/param.sfo' || fail "vpk 缺 param.sfo"
-          unzip -l "$vpk" | grep -q 'sce_sys/icon0.png'  || fail "vpk 缺 icon0"
-          # eboot 必须是 fSELF（SCE\0 头）。血泪：-b 直接塞 .velf（\x7FELF）
-          # 的包 VitaShell 装不上。
-          unzip -p "$vpk" eboot.bin > /tmp/eboot.bin
-          printf 'SCE\000' > /tmp/sce-magic
-          head -c 4 /tmp/eboot.bin > /tmp/eboot-head
-          cmp -s /tmp/sce-magic /tmp/eboot-head \
-            || { od -An -tx1 -N8 /tmp/eboot.bin; fail "eboot.bin 头不是 fSELF（SCE\\0）"; }
-          echo "eboot.bin: $(stat -c %s /tmp/eboot.bin) B, fSELF 头正确"
-          unzip -p "$vpk" sce_sys/param.sfo | grep -aq MCAV00001 \
-            || fail "param.sfo TITLE_ID 不是 MCAV00001"
-      # 上面任一项失败前先打印完整清单便于诊断（set -e 下 fail 会退出，
-      # 所以清单打印放在独立的容错步）
-      - name: vpk 清单（诊断用）
-        if: failure()
-        run: |
-          command -v unzip >/dev/null || { apt-get update -qq && apt-get install -y -qq unzip; }
-          unzip -l frontends/vita/mca_vita.vpk
-
       - name: 上传 .a
         uses: actions/upload-artifact@v4
         with:
@@ -281,21 +196,14 @@ jobs:
           path: core/makecode_arcade_libretro_vita.a
           if-no-files-found: error
 
-      - name: 上传 Vita 测试包（vpk）
-        uses: actions/upload-artifact@v4
-        with:
-          name: vita-testpack
-          path: frontends/vita/mca_vita.vpk
-          if-no-files-found: error
-
-  # ============================================================ RA 完整前端（3DS）
-  # 第二级构建：core 静态库链进 RetroArch（Makefile.ctr），出带完整
-  # XMB 菜单前端的 .3dsx/.cia——与官方"每核心一个分发物"同构。
-  # 链接只要 libctru，零新增依赖（CIA 打包用 RA 仓库自带的
+  # ============================================================ 3DS core CIA
+  # 第二级构建：core 静态库链进 RetroArch（Makefile.ctr），再按官方
+  # "每核心一个 CIA"的形态打包成 mca_libretro.cia。链接只要 libctru，
+  # 零新增依赖（CIA 打包用 RA 仓库自带的
   # pkg/ctr/tools/makerom-linux/bannertool-linux）。RetroArch 默认 pin
   # tip 快照 d7cc9bc（tool69 实测组合），原因见 workflow_dispatch 输入说明。
   ra-ctr:
-    name: RetroArch 3DS full (3dsx/cia)
+    name: 3DS core CIA + info
     runs-on: ubuntu-24.04
     container:
       image: devkitpro/devkitarm:latest
@@ -367,8 +275,8 @@ jobs:
           # PRODUCT_CODE/UNIQUE_ID/ICON/BANNER 都是 make 变量。
           # 先删按 RA 默认值生成的 .bnr/.icn/.smdh/.cia——make 按 mtime
           # 跳过，不删则身份改动不生效（同 build_target.sh 的 mtime 坑）。
-          # UniqueId 0xF1CA1 / CTR-P-MCA2：与极简前端 CIA（0xF1CA0 /
-          # CTR-P-MCA1）可共存安装，互不覆盖。
+          # UniqueId 0xF1CA1 / CTR-P-MCA2：沿用已真机验收的身份（早期还有
+          # 0xF1CA0 的极简包，现已不再分发，保留编号避免老用户装到半套）。
           rm -f retroarch_3ds.bnr retroarch_3ds.icn retroarch_3ds.smdh retroarch_3ds.cia
           make -f Makefile.ctr retroarch_3ds.cia \
             APP_TITLE="MakeCode Arcade" \
@@ -376,16 +284,17 @@ jobs:
             APP_AUTHOR="MCA (unofficial)" \
             APP_PRODUCT_CODE="CTR-P-MCA2" \
             APP_UNIQUE_ID=0xF1CA1 \
-            APP_ICON="$GITHUB_WORKSPACE/frontends/ctr/icon48.png" \
-            APP_BANNER="$GITHUB_WORKSPACE/frontends/ctr/banner256.png" \
-            APP_AUDIO="$GITHUB_WORKSPACE/frontends/ctr/banner.wav" \
+            APP_ICON="$GITHUB_WORKSPACE/core/assets/ctr/icon48.png" \
+            APP_BANNER="$GITHUB_WORKSPACE/core/assets/ctr/banner256.png" \
+            APP_AUDIO="$GITHUB_WORKSPACE/core/assets/ctr/banner.wav" \
             >> /tmp/ra-ctr.log 2>&1 || {
               echo "::error::核心 CIA 打包失败"
               tail -15 /tmp/ra-ctr.log | cut -c1-300 | sed 's/^/::error::  /'
               exit 1
             }
           cp retroarch_3ds.cia mca_libretro.cia
-          ls -l mca_libretro.cia
+          cp "$GITHUB_WORKSPACE/core/assets/mca_libretro.info" mca_libretro.info
+          ls -l mca_libretro.cia mca_libretro.info
 
       - name: 校验 core 真链进 ELF
         run: |
@@ -413,24 +322,23 @@ jobs:
           fi
           tail -5 "$out"
 
-      - name: 上传 RA 3DS 包（3dsx + cia + 核心 cia）
+      - name: 上传 3DS core 文件 + info
         uses: actions/upload-artifact@v4
         with:
-          name: ctr-ra-pack
+          name: ctr-core-pack
           path: |
-            /tmp/ra/retroarch_3ds.3dsx
-            /tmp/ra/retroarch_3ds.cia
             /tmp/ra/mca_libretro.cia
+            /tmp/ra/mca_libretro.info
           if-no-files-found: error
 
-  # ============================================================ RA 完整前端（Vita）
-  # 第二级构建 + 核心包：Makefile.vita 默认走 vitaGL 路径，需要 5 个
+  # ============================================================ Vita core SELF
+  # 第二级构建：Makefile.vita 默认走 vitaGL 路径，需要 5 个
   # 额外依赖库（taiHEN -> SceShaccCgExt -> vitashark -> math-neon ->
   # vitaGL），由 tools/setup_vita_gl_stack.sh 固化（tool69 同配方）。
-  # 产物：官方 core-vpk 分发同构的 mca_libretro.vpk + 裸 mca_libretro.self
-  #（可并入用户已装的 RetroArch）+ mca_libretro.info。
+  # 产物：mca_libretro.self（并入用户已装的 RetroArch）+ mca_libretro.info。
+  # 核心 VPK 与极简前端均已不再构建/分发。
   ra-vita:
-    name: RetroArch Vita full + core pack (vpk/self)
+    name: Vita core SELF + info
     runs-on: ubuntu-24.04
     container:
       image: vitasdk/vitasdk:latest
@@ -491,23 +399,15 @@ jobs:
           fi
           ls -l /tmp/ra/retroarch_vita.self
 
-      - name: 打核心包（mca_libretro.vpk + self + info）
+      - name: 出核心 SELF + info
         run: |
           set -u
-          export VITASDK="${VITASDK:-/opt/vitasdk}"
-          export PATH="$VITASDK/bin:$PATH"
           cd /tmp/ra || exit 1
-          # TITLE_ID 与已装官方 RetroArch（RETROVITA）独立，并存不冲突
-          vita-mksfoex -s TITLE_ID=MCAC00001 "MakeCode Arcade" -d ATTRIBUTE2=12 param_mca.sfo
-          # vita-pack-vpk 的 -a 是 --add src=dst（不是图标参数，tool69 实测）
-          vita-pack-vpk -s param_mca.sfo -b retroarch_vita.self \
-            -a "$GITHUB_WORKSPACE/frontends/vita/icon0.png=sce_sys/icon0.png" \
-            mca_libretro.vpk
           cp retroarch_vita.self mca_libretro.self
-          cp "$GITHUB_WORKSPACE/frontends/vita/mca_libretro.info" mca_libretro.info
-          ls -l mca_libretro.vpk mca_libretro.self mca_libretro.info
+          cp "$GITHUB_WORKSPACE/core/assets/mca_libretro.info" mca_libretro.info
+          ls -l mca_libretro.self mca_libretro.info
 
-      - name: 校验核心包
+      - name: 校验 core SELF + info
         run: |
           set +e
           out=$(mktemp)
@@ -517,34 +417,24 @@ jobs:
             export PATH="$VITASDK/bin:$PATH"
             cd /tmp/ra || exit 1
             fail() { echo "FAIL: $*"; exit 1; }
-            # 解 zip 用 unzip（vitasdk 容器不一定带，缺就 apt 装；
-            # 不用 python3——vitasdk 容器里未必有）
-            command -v unzip >/dev/null || { apt-get update -qq && apt-get install -y -qq unzip; }
-            unzip -l mca_libretro.vpk
-            unzip -l mca_libretro.vpk | grep -q 'sce_sys/param.sfo' || fail "vpk 缺 param.sfo"
-            unzip -l mca_libretro.vpk | grep -q 'sce_sys/icon0.png'  || fail "vpk 缺 icon0"
-            # eboot 必须是 fSELF（SCE\x00 头，官方分发形态；vita-pack-vpk
-            # 从 .self 直收，这一步断言防的是误把裸 velf 打进包）
-            unzip -p mca_libretro.vpk eboot.bin > /tmp/eboot.bin
-            # 只比前 4 字节（cmp 全文必然 EOF 不等，第二轮实测）；
-            # \000 用八进制（dash 的 printf 不认 \xHH）
-            head -c 4 /tmp/eboot.bin > /tmp/eboot-head
+            # 核心 SELF 必须带 fSELF 头（SCE\0）：RA 靠 exec 加载，裸 ELF 起不来。
+            # dash 的 printf 不认 \xHH，用八进制 \000。
+            head -c 4 mca_libretro.self > /tmp/self-head
             printf 'SCE\000' > /tmp/sce-magic
-            cmp -s /tmp/sce-magic /tmp/eboot-head \
-              || { od -An -tx1 -N8 /tmp/eboot.bin; fail "eboot.bin 头不是 SCE 自识别 fSELF"; }
-            echo "eboot.bin: $(stat -c %s /tmp/eboot.bin) B, fSELF 头正确"
-            unzip -p mca_libretro.vpk sce_sys/param.sfo | grep -aq MCAC00001 \
-              || fail "param.sfo 缺 TITLE_ID=MCAC00001"
-            unzip -p mca_libretro.vpk sce_sys/param.sfo | grep -aq 'MakeCode Arcade' \
-              || fail "param.sfo 缺标题"
-            echo "param.sfo 校验通过"
+            cmp -s /tmp/sce-magic /tmp/self-head \
+              || { od -An -tx1 -N8 mca_libretro.self; fail "SELF 头不是 fSELF（SCE\\0）"; }
+            echo "mca_libretro.self: $(stat -c %s mca_libretro.self) B, fSELF 头正确"
+            grep -q 'supported_extensions = "pxt64"' mca_libretro.info \
+              || fail "info 里 supported_extensions 不是 pxt64"
+            grep -q 'display_name = "MakeCode Arcade"' mca_libretro.info \
+              || fail "info 缺 display_name"
             n=$(arm-vita-eabi-nm retroarch_vita.elf.unstripped.elf 2>/dev/null | grep -cE ' T retro_')
             echo "retro_* T 符号: $n 个"
             [ "$n" -ge 100 ] || fail "retro_* 符号过少（$n）"
             for s in retro_load_game mcaVitaInitGcHeap; do
               arm-vita-eabi-nm retroarch_vita.elf.unstripped.elf | grep -qE " T $s\$" || fail "缺 $s"
             done
-            echo "核心包校验通过"
+            echo "核心文件校验通过"
           ) > "$out" 2>&1
           rc=$?
           if [ "$rc" -ne 0 ]; then
@@ -554,26 +444,25 @@ jobs:
           fi
           tail -6 "$out"
 
-      - name: 上传 RA Vita 核心包（vpk + self + info）
+      - name: 上传 Vita core 文件 + info
         uses: actions/upload-artifact@v4
         with:
-          name: vita-ra-pack
+          name: vita-core-pack
           path: |
-            /tmp/ra/mca_libretro.vpk
             /tmp/ra/mca_libretro.self
             /tmp/ra/mca_libretro.info
           if-no-files-found: error
 
   # ============================================================ 发版上传
-  # 推 core-v* tag（或 dispatch 带 upload_tag 输入）时：把 3DS/Vita 前端
-  # 整包追加到核心发版的同一个 Release。build.yml 的 release job 负责
-  # 建 Release（10 个核心 zip）；两条流水线并行，Release 建好的时间不定，
-  # 所以这里轮询等待（最长 60 分钟），出现后 --clobber 上传（重跑幂等）。
-  # 每个文件是什么、给谁用的，见 .github/release-notes/PLAYER-GUIDE-FOOTER.md
-  # 的资产分组表（发版正文尾部自动带）。
-  frontend-release:
-    name: upload 3DS/Vita packages to core release
-    needs: [core-ctr, core-vita, ra-ctr, ra-vita]
+  # 推 core-v* tag（或 dispatch 带 upload_tag 输入）时：把 3DS/Vita 的
+  # core 文件 + info 追加到核心发版的同一个 Release。build.yml 的 release
+  # job 负责建 Release（10 个核心 zip + 5 个 debuginfo）；两条流水线并行，
+  # Release 建好的时间不定，所以这里轮询等待（最长 60 分钟），出现后
+  # --clobber 上传（重跑幂等）。每个文件是什么、给谁用的，见
+  # .github/release-notes/PLAYER-GUIDE-FOOTER.md 的资产分组表（发版正文尾部自动带）。
+  core-release-upload:
+    name: upload 3DS/Vita core files + info to core release
+    needs: [ra-ctr, ra-vita]
     if: >-
       ${{ startsWith(github.ref, 'refs/tags/core-v') ||
           (github.event_name == 'workflow_dispatch' && inputs.upload_tag != '') }}
@@ -589,15 +478,12 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p pkg
-          # 3DS：极简（3dsx + cia）+ 核心 CIA。RA 3DS 完整前端本体
-          #（retroarch_3ds.3dsx/.cia）不进 Release——想用完整 RA 的玩家装
-          # 核心 CIA 即可（其内含 RA 前端本体）。
-          cp art/ctr-testpack/mca_ctr.3dsx art/ctr-testpack/mca_ctr.cia pkg/
-          cp art/ctr-ra-pack/mca_libretro.cia pkg/
-          # Vita：极简 vpk + 核心 vpk / 裸 self / info
-          cp art/vita-testpack/mca_vita.vpk pkg/
-          cp art/vita-ra-pack/mca_libretro.vpk art/vita-ra-pack/mca_libretro.self pkg/
-          cp art/vita-ra-pack/mca_libretro.info pkg/
+          # 3DS：核心 CIA（内含 RA 前端本体，装进 sdmc:/retroarch/cores/）
+          cp art/ctr-core-pack/mca_libretro.cia pkg/
+          # Vita：裸 SELF（并进已装 RetroArch 的目录）
+          cp art/vita-core-pack/mca_libretro.self pkg/
+          # info 内容跨平台通用，只上传一份（文件名与两个 core 都同名）
+          cp art/ctr-core-pack/mca_libretro.info pkg/
           ls -l pkg/
 
       - name: 轮询等待 Release 并上传
