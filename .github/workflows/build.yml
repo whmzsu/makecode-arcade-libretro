@@ -44,6 +44,8 @@
 #     + golden 三例 + --reinit，macOS 产物唯一一次真实系统加载验证
 #   pxt-patches：14 个必要补丁是否还在（不编译，几秒）
 #   crash-regression：3 张回归夹具盯 PATCH 13/14（两处整数除零）与 15（加载失败可见）
+#   buildbot-sim：模拟官方收录 make 路径剩余 3 个交叉目标（win-i686 /
+#     linux-i686 / linux-aarch64），收录前提前断言不会红灯
 #   package：把上面各 job 的产物打成发行包，再解包 dlopen 跑 60 帧
 
 name: build
@@ -748,6 +750,85 @@ jobs:
           if-no-files-found: error
           retention-days: 10
 
+  # ------------------------------------------- buildbot 收录矩阵模拟
+  # 官方 buildbot 的 11 个 job 里，makefile-compat 已覆盖 unix/win64/android，
+  # 这里补剩下三条**从没在 Makefile 路径编过**的交叉目标：win-i686 /
+  # linux-i686 / linux-aarch64。它们和发版的 zig 路径是两套工具链，官方收录
+  # 走的是这条 make + gcc 路径，zig 全绿不代表这里不红（winpthreads 那个 bug
+  # 就是 makefile-compat 抓到的）。
+  #
+  # 对应关系（官方模板真身核对过）：
+  #   win-i686     windows-i686.yml   platform=win32  + i686-w64-mingw32-gcc
+  #   linux-i686   linux-i686.yml     platform=unix   + i686-linux-gnu-gcc（官方是
+  #                i386 xenial-gcc9 原生，这里用 ubuntu-24.04 交叉 gcc13 语义等价）
+  #   linux-aarch64 linux-aarch64.yml  platform=unix   + 原生 aarch64 gcc（官方 tags:
+  #                aarch64；这里用免费 ubuntu-24.04-arm runner 原生 gcc，精确对应）
+  #
+  # 每条独立 runner，避免 BUILD_TAG=unix 不区分架构导致的对象目录串味假绿
+  # （tool69 实测：同一目录连续编 aarch64 再编 i686，make 跳过重编、产物仍是
+  #  aarch64 却 rc=0）。所以除了 test -f 还必须 file 断言架构。
+  buildbot-sim:
+    name: buildbot-sim-${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: win-i686
+            runs-on: ubuntu-24.04
+            platform: win32
+            cc: i686-w64-mingw32-gcc
+            cxx: i686-w64-mingw32-g++
+            ext: dll
+            apt: gcc-mingw-w64-i686 g++-mingw-w64-i686
+            arch: 'PE32.*Intel 80386'
+          - target: linux-i686
+            runs-on: ubuntu-24.04
+            platform: unix
+            cc: i686-linux-gnu-gcc
+            cxx: i686-linux-gnu-g++
+            ext: so
+            apt: gcc-i686-linux-gnu g++-i686-linux-gnu
+            arch: 'ELF 32-bit.*Intel 80386'
+          - target: linux-aarch64
+            runs-on: ubuntu-24.04-arm
+            platform: unix
+            cc: gcc
+            cxx: g++
+            ext: so
+            apt: ''
+            arch: 'ELF 64-bit.*aarch64'
+    runs-on: ${{ matrix.runs-on }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装交叉工具链
+        if: matrix.apt != ''
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends ${{ matrix.apt }}
+
+      - name: buildbot Makefile 路径编译（platform=${{ matrix.platform }}）
+        run: |
+          set -u
+          mkdir -p out
+          rc=0
+          make -C core -f Makefile platform=${{ matrix.platform }} \
+               CC="${{ matrix.cc }}" CXX="${{ matrix.cxx }}" \
+               -j"$(nproc)" > out/buildbot-sim.log 2>&1 || rc=$?
+          if [ "${rc}" -ne 0 ]; then
+            echo "::error title=buildbot-sim ${{ matrix.target }} 编译失败 rc=${rc}::"
+            grep -n -iE 'error:|undefined reference' out/buildbot-sim.log | head -12 \
+              | while IFS= read -r l; do echo "::error::${l:0:250}"; done
+            tail -15 out/buildbot-sim.log \
+              | while IFS= read -r l; do echo "::error::tail| ${l:0:250}"; done
+            exit 1
+          fi
+          # 防假绿：既要有产物，file 架构也必须对（对象目录串味会让旧产物冒充）
+          bin="core/makecode_arcade_libretro.${{ matrix.ext }}"
+          test -f "${bin}" || { echo "::error::产物 ${bin} 不存在"; exit 1; }
+          info=$(file -b "${bin}")
+          echo "产物: ${info}"
+          printf '%s' "${info}" | grep -qE '${{ matrix.arch }}' \
+            || { echo "::error::产物架构不符，期望 ${{ matrix.arch }}，实际 ${info}"; exit 1; }
+
   # --------------------------------------- vendored pxt 树的补丁完整性
   # runtime/pxtapp 是 vendored 的 pxt 运行时，必要补丁直接落在源码里
   # （没有独立 patch 文件，构建时也不重放）。升级 pxt 时"重新生成这棵树"是
@@ -946,26 +1027,30 @@ jobs:
         run: xvfb-run -a tools/retroarch_smoke.sh --frames 120
 
   # ------------------------------------------------------------------ macOS
-  # 实验：Makefile 支持 osx，但本机没有 macOS 工具链，作者未在真机验证过
-  # 加载/音频；先只做"编得过"的观察，红了不算回归失败（continue-on-error）
+  # buildbot 收录的 osx-x64/osx-arm64 模板走的就是 `make platform=osx` +
+  # 真 clang 这条路径（官方 osx-x64 还带 MACOSX_DEPLOYMENT_TARGET=10.9、
+  # osx-arm64 带 arm64-apple-macos10.15）。本 job 用真 clang 编 universal
+  # 二进制覆盖两条架构，验证"官方 make 路径编得过"——这是 buildbot 收录的
+  # 必要条件。此前是 continue-on-error 实验，现已稳定绿多轮，转硬断言。
+  #
+  # 为什么不照抄 10.9/10.15 部署目标：GitHub macos-15 runner 的 Xcode 已
+  # 移除 10.9/10.15 老 SDK，强加 -mmacosx-version-min=10.9 会因找不到老
+  # SDK 头而必然假红，与核心代码无关。部署目标兼容性留给官方自有 macosx
+  # runner（它有老 SDK）验证；这里只断言 make 路径 + 两架构 + 无 Linux-only
+  # 未解析符号（otool -L）。官方模板自己会报架构不对，我们这里同款 lipo 断言。
   #
   # 镜像是 macos-15（Apple Silicon arm64；本 job 编 universal，runner 架构
-  # 不影响产物），不是 macos-14 —— 后者已于 2026-11-02 被
-  # GitHub 整体退役，用它会得到 "The configuration 'macos-14-arm64-us-default'
-  # is not supported"，job 一秒结束、runner_name 为空、steps 为 0，看起来像
-  # 神秘失败，实际是机器借不到。
-  # 注意 continue-on-error 的副作用：这种"借不到机器"的失败不会让 run 变红，
-  # 会静默存在（本次就是退役 4 天后才被发现）。这个 job 红了要主动去看。
-  # macos-15 同样有退役周期（GitHub 只保留最近两个大版本），届时按
-  # https://github.com/actions/runner-images 的选举表迁移到 macos-latest。
+  # 不影响产物），不是 macos-14 —— 后者已于 2026-11-02 被 GitHub 整体退役，
+  # 用它会得到 "The configuration 'macos-14-arm64-us-default' is not supported"，
+  # job 一秒结束、runner_name 为空、steps 为 0，看着像神秘失败，实际是机器
+  # 借不到。macos-15 同样有退役周期，届时按 actions/runner-images 迁移。
   macos:
-    name: macos-universal (实验)
+    name: macos-universal (buildbot make 路径)
     runs-on: macos-15
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
-      - name: 编译（arm64 + x86_64 通用二进制）
+      - name: 编译（arm64 + x86_64 通用二进制，真 clang = buildbot 同路径）
         env:
           CC: clang
           CXX: clang++
@@ -974,17 +1059,25 @@ jobs:
           LDFLAGS: -arch arm64 -arch x86_64
         run: make -f core/Makefile platform=osx -j"$(sysctl -n hw.ncpu)"
 
-      - name: 检查
+      - name: 检查（架构双全 + 依赖可解析）
         run: |
+          set -euo pipefail
           dylib=core/makecode_arcade_libretro.dylib
-          lipo -info "$dylib"
+          test -f "$dylib" || { echo "::error::dylib 未生成"; exit 1; }
+          info=$(lipo -info "$dylib")
+          echo "$info"
+          # 官方 osx-x64/osx-arm64 模板各自的 lipo 断言合到这里：两条架构都要在
+          printf '%s' "$info" | grep -q arm64 \
+            || { echo "::error::universal 缺 arm64 slice"; exit 1; }
+          printf '%s' "$info" | grep -q x86_64 \
+            || { echo "::error::universal 缺 x86_64 slice"; exit 1; }
           otool -L "$dylib" | tail -n +2
 
       - uses: actions/upload-artifact@v4
         with:
           name: osx-universal
           path: core/makecode_arcade_libretro.dylib
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 14
 
   # ------------------------------------------- macOS 真机加载 + 像素验证
