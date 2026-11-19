@@ -24,10 +24,10 @@
 
 | 文件 | 说明 |
 |---|---|
-| `3DS/1-安装/mca_libretro.cia` | **3DS 核心文件**：RA 完整前端 + mca core 静态链接，5 446 592 B（md5 `2960618d…`，UniqueId `0xF1CA1`），FBI 安装 |
-| `3DS/1-安装/mca_libretro.info` | 核心元数据，给 RA 的 Load Core 列表 / `.pxt64` 关联用（3DS/Vita 通用） |
-| `Vita/1-安装/mca_libretro.self` | **Vita 核心文件**：fSELF，4 683 268 B（md5 `3c751257…`），并入官方 RA 的 app 目录 |
-| `Vita/1-安装/mca_libretro.info` | 同上，放 RA 的 `info/` 目录 |
+| `3DS/1-安装/makecode_arcade_libretro.cia` | **3DS 核心文件**：RA 完整前端 + mca core 静态链接，5 446 592 B（md5 `2960618d…`，UniqueId `0xF1CA1`），FBI 安装 |
+| `3DS/1-安装/makecode_arcade_libretro.info` | 核心元数据，给 RA 的 Load Core 列表 / `.pxt64` 关联用（3DS/Vita 通用） |
+| `Vita/1-安装/makecode_arcade_libretro.self` | **Vita 核心文件**：fSELF，4 683 268 B（md5 `3c751257…`），并入官方 RA 的 app 目录 |
+| `Vita/1-安装/makecode_arcade_libretro.info` | 同上，放 RA 的 `info/` 目录 |
 | `*/2-卡带/*.pxt64` | 4 张测试卡带（两平台各一份）：probe / ping / jumpy / Mouse_Adventure |
 
 ## 3DS 安装（先装官方 RetroArch）
@@ -35,11 +35,11 @@
 1. 先装官方 3DS RetroArch（官网 / buildbot 的 `.cia`，FBI 安装），确认能进主界面。
 2. 把 4 张 `.pxt64` 卡带拷到 SD 卡**任意你找得到的位置**（比如新建
    `sdmc:/mca/` 放进去——示例路径，不是必须）。
-3. 把 `mca_libretro.cia` 复制到 **`sdmc:/retroarch/cores/`**，把
-   `mca_libretro.info` 放到 **`sdmc:/retroarch/cores/info/`**，重启 RA。
+3. 把 `makecode_arcade_libretro.cia` 复制到 **`sdmc:/retroarch/cores/`**，把
+   `makecode_arcade_libretro.info` 放到 **`sdmc:/retroarch/cores/info/`**，重启 RA。
 4. **Load Core → MakeCode Arcade → Load Content → 浏览到卡带位置选 `.pxt64`** 开玩。
 
-> 也可直接用 FBI 装 `mca_libretro.cia` 得到独立「MakeCode Arcade」图标
+> 也可直接用 FBI 装 `makecode_arcade_libretro.cia` 得到独立「MakeCode Arcade」图标
 > （UniqueId `0xF1CA1`，内含 RA），点开即玩——两种方式都行，推荐统一在官方
 > RA 里切核心。new3ds 已实测通过。
 
@@ -50,9 +50,9 @@ SELF，无动态加载）。
 
 1. 先装官方 Vita RetroArch（`RETROVITA.vpk`，VitaShell 安装），确认能进主界面。
 2. 把 4 张 `.pxt64` 卡带放到**任意可写位置**（示例：新建 `ux0:/data/mca/`）。
-3. VitaShell 开权限后，把 `mca_libretro.self` 复制到官方 RA 的 app
+3. VitaShell 开权限后，把 `makecode_arcade_libretro.self` 复制到官方 RA 的 app
    目录（如 `ux0:/app/RETROVITA/`）。
-4. 把 `mca_libretro.info` 放到同目录的 `info/` 下。
+4. 把 `makecode_arcade_libretro.info` 放到同目录的 `info/` 下。
 5. 启动 RA → Load Core → MakeCode Arcade → Load Content 浏览到卡带位置选 `.pxt64`。
 6. **把显示比例设为 4:3**（Vita 必须做）：Settings → Video → Scaling →
    Aspect Ratio 选 `4:3`；再进游戏，Quick Menu → Overrides →
@@ -112,7 +112,7 @@ make -f Makefile.ctr retroarch_3ds.cia HAVE_RETRONFS=0 HAVE_CHEEVOS_RVZ=0 \
   APP_TITLE="MakeCode Arcade" APP_PRODUCT_CODE="CTR-P-MCA2" \
   APP_UNIQUE_ID=0xF1CA1 APP_ICON=core/assets/ctr/icon48.png \
   APP_BANNER=core/assets/ctr/banner256.png APP_AUDIO=core/assets/ctr/banner.wav
-cp retroarch_3ds.cia mca_libretro.cia
+cp retroarch_3ds.cia makecode_arcade_libretro.cia
 
 # Vita core（VPK 线已放下，只出 self + info）
 export VITASDK=/opt/mca-data/tools/relay/extract/vita/vitasdk
@@ -122,7 +122,7 @@ make -C /opt/mca-data/scratch/vita-build/core platform=vita -j3
 cd /opt/mca-data/tools/relay/retroarch
 make -f Makefile.vita clean
 make -f Makefile.vita retroarch_vita.self -j3
-cp retroarch_vita.self mca_libretro.self
+cp retroarch_vita.self makecode_arcade_libretro.self
 ```
 
 3DS CIA 定制身份前先删 `.bnr/.icn/.smdh/.cia`（make 按 mtime 跳过）。

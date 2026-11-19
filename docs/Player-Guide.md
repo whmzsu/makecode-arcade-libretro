@@ -121,20 +121,26 @@ This is the prerequisite — our files are just a **core** and need RA to run:
 ### 3DS
 
 1. Put your `.pxt64` cartridges **anywhere you can find them** on the SD card — e.g. create `sdmc:/mca/` and put them there. **This is just an example path, not required**: any location works as long as RA's file browser can reach it.
-2. Copy **`mca_libretro.cia`** into **`sdmc:/retroarch/cores/`** (official RA's directory).
-3. Put **`mca_libretro.info`** (works for both 3DS and Vita) into **`sdmc:/retroarch/cores/info/`**.
+2. Copy **`makecode_arcade_libretro.cia`** into **`sdmc:/retroarch/cores/`** (official RA's directory).
+3. Put **`makecode_arcade_libretro.info`** (works for both 3DS and Vita) into **`sdmc:/retroarch/cores/info/`**.
 4. Restart RetroArch → **Load Core → MakeCode Arcade** → **Load Content** → browse to wherever you put the cartridges and pick a `.pxt64`.
 
-> Alternatively just install `mca_libretro.cia` with FBI: a standalone "MakeCode Arcade" icon appears (UniqueId `0xF1CA1`) that opens RA with the core inside. Both routes work; the one above is recommended so everything lives in official RA. Verified and smooth on new3ds; no old-3DS hardware available to test.
+> Alternatively just install `makecode_arcade_libretro.cia` with FBI: a standalone "MakeCode Arcade" icon appears (UniqueId `0xF1CA1`) that opens RA with the core inside. Both routes work; the one above is recommended so everything lives in official RA. Verified and smooth on new3ds; no old-3DS hardware available to test.
 
 ### PS Vita
 
 1. Put your cartridges in **any writable location** — e.g. create `ux0:/data/mca/` and put them there. **This is just an example path, not required**: any location works as long as RA's file browser can reach it.
-2. With VitaShell permissions enabled, copy `mca_libretro.self` into the official RA app directory (e.g. `ux0:/app/RETROVITA/`).
-3. Put `mca_libretro.info` into that directory's `info/` subfolder.
+2. With VitaShell permissions enabled, copy `makecode_arcade_libretro.self` into the official RA app directory (e.g. `ux0:/app/RETROVITA/`).
+3. Put `makecode_arcade_libretro.info` into that directory's `info/` subfolder.
 4. Launch RA → **Load Core → MakeCode Arcade** → Load Content → pick a `.pxt64`.
 
 > Earlier versions crashed with `C2-12828-1` after starting a game; this was traced to a stale cached file pointer in the core's `mcaTrace()` and fixed — please re-verify with the latest self. If it still crashes, send the `psp2core-*.psp2dmp` generated under `ux0:` together with `mca_trace.log` via a repo issue.
+>
+> **Picture stretched to full screen and setting 4:3 has no effect?** It is almost always a stale **core override**
+> superseding your global settings. Per-core overrides have higher priority than the global config, and on some Vita
+> builds the Overrides menu is greyed out while content is loaded. Delete the whole directory
+> `ux0:/data/retroarch/config/MakeCode Arcade/` with VitaShell and restart RA — the aspect returns to 4:3. This is a
+> frontend settings issue, unrelated to this core.
 
 ### Where to download these files
 
@@ -143,8 +149,8 @@ as the core packages — grab by name:
 
 | What you want | Download |
 |---|---|
-| **3DS** | `makecode_arcade_ctr.zip` (contains `mca_libretro.cia` + `mca_libretro.info`) |
-| **Vita** | `makecode_arcade_vita.zip` (contains `mca_libretro.self` + `mca_libretro.info`) |
+| **3DS** | `makecode_arcade_ctr.zip` (contains `makecode_arcade_libretro.cia` + `makecode_arcade_libretro.info`) |
+| **Vita** | `makecode_arcade_vita.zip` (contains `makecode_arcade_libretro.self` + `makecode_arcade_libretro.info`) |
 | Switch | `makecode_arcade_switch.zip` |
 
 > The 3DS/Vita core file and info are bundled into one zip — download and extract, and you have everything; the info is no longer a separate asset. The end of every release's notes has a full "which asset to pick" grouped table.

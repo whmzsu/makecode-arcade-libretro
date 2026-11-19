@@ -249,7 +249,7 @@ ELF 共享库默认允许未定义符号（惰性绑定），所以**缺对象�
 ## 3DS / Vita 真机验收与核心形态构建（2026-11-18）
 
 这两个平台**只出核心形态**：core 静态库（32 位）链进 RetroArch 完整前端，
-出厂为 `mca_libretro.cia`（3DS）或 `mca_libretro.self` + `.info`（Vita）。
+出厂为 `makecode_arcade_libretro.cia`（3DS）或 `makecode_arcade_libretro.self` + `.info`（Vita）。
 极简前端与核心 VPK 线已放下、不再构建分发。均在 tool69 本地编译
 （devkitARM / vitasdk，RA 树 pin `d7cc9bc`）。结论：
 
@@ -258,7 +258,7 @@ ELF 共享库默认允许未定义符号（惰性绑定），所以**缺对象�
 - **3DS 安装**：建议先装官方 3DS RA，把核心 `.cia` 复制到
   `sdmc:/retroarch/cores/`、`.info` 放到 `sdmc:/retroarch/cores/info/`，重启 RA
   即在 Load Core 列表出现 MakeCode Arcade；也可直接用 FBI 装 CIA 得到独立图标入口。
-- **Vita 核心形态**：先装官方 Vita RA，`mca_libretro.self` + `.info` 并入其
+- **Vita 核心形态**：先装官方 Vita RA，`makecode_arcade_libretro.self` + `.info` 并入其
   app 目录 / `info/`。此前真机在
   `Validation OK → start main loop` 后报 `C2-12828-1`；两份 psp2core dump
   取证定位为 `mcaTrace()` 缓存的 `FILE*` 在 RA 换 content 重置 stdio 后悬垂，

@@ -19,6 +19,18 @@ PCs and low-end ARM handhelds (RK3326 / RK3566 and similar).
 |---|---|
 | ![jumping onto bricks](docs/media/photo-jump.jpg) | ![collecting a coin](docs/media/photo-coin.jpg) |
 
+**Nintendo 3DS** (on real new3DS hardware):
+
+| Gameplay | RA Quick Menu |
+|---|---|
+| ![3DS gameplay](docs/media/photo-3ds.jpg) | ![3DS quick menu](docs/media/photo-3ds-menu.jpg) |
+
+**PS Vita** (correct 4:3 aspect; the two shots differ only in how the phone was held — the game itself renders in normal landscape):
+
+| Landscape shot | Portrait shot |
+|---|---|
+| ![PS Vita landscape](docs/media/photo-vita.jpg) | ![PS Vita portrait](docs/media/photo-vita-portrait.jpg) |
+
 ## Release platforms
 
 Every `core-v*` tag ships a full asset set: **12 core packages + 5 debuginfo
@@ -326,7 +338,7 @@ to **install official RetroArch first, then drop in the core file** — same as
 every other platform: pick the core in RA, open a game. The minimal frontend
 and the core VPK line have been retired from builds and distribution.
 
-- **3DS core file**: `mca_libretro.cia` (UniqueId `0xF1CA1`). Install official
+- **3DS core file**: `makecode_arcade_libretro.cia` (UniqueId `0xF1CA1`). Install official
   3DS RA, copy the same `.cia` into `sdmc:/retroarch/cores/` and the `.info`
   into `sdmc:/retroarch/cores/info/`, then restart RA — MakeCode Arcade appears
   in Load Core; Load Content → pick a `.pxt64` (cartridges go anywhere —
@@ -334,7 +346,7 @@ and the core VPK line have been retired from builds and distribution.
   real new3ds**: buttons, menu, and cartridge loading all pass, smooth. You can
   also just install the CIA with FBI for a standalone icon (RA bundled inside);
   both routes work, but unifying on official RA is recommended.
-- **Vita core file**: `mca_libretro.self` + `mca_libretro.info`. Install official
+- **Vita core file**: `makecode_arcade_libretro.self` + `makecode_arcade_libretro.info`. Install official
   Vita RA (`RETROVITA`) first; with VitaShell permissions enabled, put the self
   in its app dir and the info in `info/` — MakeCode Arcade appears in Load Core.
   The official Vita RA uses a static model (each core is a full RA+core SELF,
@@ -344,7 +356,7 @@ and the core VPK line have been retired from builds and distribution.
   switch. Fixed in PATCH 16 (v0.3.9) and re-verified on a real device
   (v0.3.10: color and stability both hold across repeated content open/close).
 
-`.info` (`mca_libretro.info`) is shared between 3DS and Vita
+`.info` (`makecode_arcade_libretro.info`) is shared between 3DS and Vita
 (`supported_extensions = pxt64`). Test packages, install steps, and
 acceptance checklists live in `docs/3DS-VITA-TEST.md`.
 

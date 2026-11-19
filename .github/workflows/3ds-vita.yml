@@ -11,7 +11,7 @@
 # pthread 头、platform hook 编入）只有真工具链能验证。
 #
 # 两个级别：core 静态库（core-ctr / core-vita）→ 链进 RetroArch 出核心
-# 文件（ra-ctr 出 mca_libretro.cia，ra-vita 出 mca_libretro.self）+ info。
+# 文件（ra-ctr 出 makecode_arcade_libretro.cia，ra-vita 出 makecode_arcade_libretro.self）+ info。
 # 极简前端与核心 VPK 已不再构建/分发；RetroArch 版本 pin 见输入，与 nx.yml 一致。
 #
 # 发版触发：推 core-v* tag 时由 build.yml 通过 workflow_call 调用本 workflow，
@@ -205,7 +205,7 @@ jobs:
 
   # ============================================================ 3DS core CIA
   # 第二级构建：core 静态库链进 RetroArch（Makefile.ctr），再按官方
-  # "每核心一个 CIA"的形态打包成 mca_libretro.cia。链接只要 libctru，
+  # "每核心一个 CIA"的形态打包成 makecode_arcade_libretro.cia。链接只要 libctru，
   # 零新增依赖（CIA 打包用 RA 仓库自带的
   # pkg/ctr/tools/makerom-linux/bannertool-linux）。RetroArch 默认 pin
   # tip 快照 d7cc9bc（tool69 实测组合），原因见 workflow_dispatch 输入说明。
@@ -299,14 +299,14 @@ jobs:
               tail -15 /tmp/ra-ctr.log | cut -c1-300 | sed 's/^/::error::  /'
               exit 1
             }
-          cp retroarch_3ds.cia mca_libretro.cia
+          cp retroarch_3ds.cia makecode_arcade_libretro.cia
           # info 与桌面包同源：core.info.in 模板 + kCoreVersion 版本号，
           # 文件名随核心文件名（RA 规则：info 与核心二进制同名）
           VERSION=$(sed -n 's/.*kCoreVersion = "\([^"]*\)".*/\1/p' "$GITHUB_WORKSPACE/core/src/libretro_core.cpp" | head -1)
           [ -n "$VERSION" ] || { echo "::error::读不到 kCoreVersion"; exit 1; }
-          sed "s|@VERSION@|$VERSION|" "$GITHUB_WORKSPACE/tools/core.info.in" > mca_libretro.info
-          grep -E 'display_(name|version)' mca_libretro.info
-          ls -l mca_libretro.cia mca_libretro.info
+          sed "s|@VERSION@|$VERSION|" "$GITHUB_WORKSPACE/tools/core.info.in" > makecode_arcade_libretro.info
+          grep -E 'display_(name|version)' makecode_arcade_libretro.info
+          ls -l makecode_arcade_libretro.cia makecode_arcade_libretro.info
 
       - name: 校验 core 真链进 ELF
         run: |
@@ -339,15 +339,15 @@ jobs:
         with:
           name: ctr-core-pack
           path: |
-            /tmp/ra/mca_libretro.cia
-            /tmp/ra/mca_libretro.info
+            /tmp/ra/makecode_arcade_libretro.cia
+            /tmp/ra/makecode_arcade_libretro.info
           if-no-files-found: error
 
   # ============================================================ Vita core SELF
   # 第二级构建：Makefile.vita 默认走 vitaGL 路径，需要 5 个
   # 额外依赖库（taiHEN -> SceShaccCgExt -> vitashark -> math-neon ->
   # vitaGL），由 tools/setup_vita_gl_stack.sh 固化（tool69 同配方）。
-  # 产物：mca_libretro.self（并入用户已装的 RetroArch）+ mca_libretro.info。
+  # 产物：makecode_arcade_libretro.self（并入用户已装的 RetroArch）+ makecode_arcade_libretro.info。
   # 核心 VPK 与极简前端均已不再构建/分发。
   ra-vita:
     name: Vita core SELF + info
@@ -415,13 +415,13 @@ jobs:
         run: |
           set -u
           cd /tmp/ra || exit 1
-          cp retroarch_vita.self mca_libretro.self
+          cp retroarch_vita.self makecode_arcade_libretro.self
           # info 与桌面包同源（同 ra-ctr，见那里的注释）
           VERSION=$(sed -n 's/.*kCoreVersion = "\([^"]*\)".*/\1/p' "$GITHUB_WORKSPACE/core/src/libretro_core.cpp" | head -1)
           [ -n "$VERSION" ] || { echo "::error::读不到 kCoreVersion"; exit 1; }
-          sed "s|@VERSION@|$VERSION|" "$GITHUB_WORKSPACE/tools/core.info.in" > mca_libretro.info
-          grep -E 'display_(name|version)' mca_libretro.info
-          ls -l mca_libretro.self mca_libretro.info
+          sed "s|@VERSION@|$VERSION|" "$GITHUB_WORKSPACE/tools/core.info.in" > makecode_arcade_libretro.info
+          grep -E 'display_(name|version)' makecode_arcade_libretro.info
+          ls -l makecode_arcade_libretro.self makecode_arcade_libretro.info
 
       - name: 校验 core SELF + info
         run: |
@@ -435,18 +435,18 @@ jobs:
             fail() { echo "FAIL: $*"; exit 1; }
             # 核心 SELF 必须带 fSELF 头（SCE\0）：RA 靠 exec 加载，裸 ELF 起不来。
             # dash 的 printf 不认 \xHH，用八进制 \000。
-            head -c 4 mca_libretro.self > /tmp/self-head
+            head -c 4 makecode_arcade_libretro.self > /tmp/self-head
             printf 'SCE\000' > /tmp/sce-magic
             cmp -s /tmp/sce-magic /tmp/self-head \
-              || { od -An -tx1 -N8 mca_libretro.self; fail "SELF 头不是 fSELF（SCE\\0）"; }
-            echo "mca_libretro.self: $(stat -c %s mca_libretro.self) B, fSELF 头正确"
-            grep -q 'supported_extensions = "pxt64"' mca_libretro.info \
+              || { od -An -tx1 -N8 makecode_arcade_libretro.self; fail "SELF 头不是 fSELF（SCE\\0）"; }
+            echo "makecode_arcade_libretro.self: $(stat -c %s makecode_arcade_libretro.self) B, fSELF 头正确"
+            grep -q 'supported_extensions = "pxt64"' makecode_arcade_libretro.info \
               || fail "info 里 supported_extensions 不是 pxt64"
-            grep -q 'display_name = "MakeCode Arcade (unofficial)"' mca_libretro.info \
+            grep -q 'display_name = "MakeCode Arcade (unofficial)"' makecode_arcade_libretro.info \
               || fail "info 缺 display_name"
             VER=$(sed -n 's/.*kCoreVersion = "\([^"]*\)".*/\1/p' "$GITHUB_WORKSPACE/core/src/libretro_core.cpp" | head -1)
             [ -n "$VER" ] || fail "读不到 kCoreVersion"
-            grep -q "display_version = \"$VER\"" mca_libretro.info \
+            grep -q "display_version = \"$VER\"" makecode_arcade_libretro.info \
               || fail "info display_version 与 kCoreVersion($VER) 不符"
             n=$(arm-vita-eabi-nm retroarch_vita.elf.unstripped.elf 2>/dev/null | grep -cE ' T retro_')
             echo "retro_* T 符号: $n 个"
@@ -469,8 +469,8 @@ jobs:
         with:
           name: vita-core-pack
           path: |
-            /tmp/ra/mca_libretro.self
-            /tmp/ra/mca_libretro.info
+            /tmp/ra/makecode_arcade_libretro.self
+            /tmp/ra/makecode_arcade_libretro.info
           if-no-files-found: error
 
   # ============================================================ 手动补传
@@ -495,11 +495,11 @@ jobs:
           set -euo pipefail
           mkdir -p pkg
           # 3DS：核心 CIA（内含 RA 前端本体，装进 sdmc:/retroarch/cores/）
-          cp art/ctr-core-pack/mca_libretro.cia pkg/
+          cp art/ctr-core-pack/makecode_arcade_libretro.cia pkg/
           # Vita：裸 SELF（并进已装 RetroArch 的目录）
-          cp art/vita-core-pack/mca_libretro.self pkg/
+          cp art/vita-core-pack/makecode_arcade_libretro.self pkg/
           # info 内容跨平台通用，只上传一份（文件名与两个 core 都同名）
-          cp art/ctr-core-pack/mca_libretro.info pkg/
+          cp art/ctr-core-pack/makecode_arcade_libretro.info pkg/
           ls -l pkg/
 
       - name: 轮询等待 Release 并上传

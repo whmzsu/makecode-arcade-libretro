@@ -26,8 +26,8 @@
 
 | 文件 | 给谁用 |
 |---|---|
-| `makecode_arcade_ctr.zip` | 3DS 核心（内含 `mca_libretro.cia` + `mca_libretro.info`）：解压后把 cia 复制进官方 RA 的 `cores/`、info 放 `cores/info/`，new3ds 实测通过 |
-| `makecode_arcade_vita.zip` | PS Vita 核心（内含 `mca_libretro.self` + `mca_libretro.info`）：解压后并入官方 RA 的 app 目录 + `info/` |
+| `makecode_arcade_ctr.zip` | 3DS 核心（内含 `makecode_arcade_libretro.cia` + `makecode_arcade_libretro.info`）：解压后把 cia 复制进官方 RA 的 `cores/`、info 放 `cores/info/`，new3ds 实测通过 |
+| `makecode_arcade_vita.zip` | PS Vita 核心（内含 `makecode_arcade_libretro.self` + `makecode_arcade_libretro.info`）：解压后并入官方 RA 的 app 目录 + `info/` |
 | `makecode_arcade_switch.zip` | Nintendo Switch（NRO，放 `sdmc:/switch/`） |
 
 > **3DS / Vita 都建议先装官方 RetroArch**（从 RetroArch 官网 / buildbot 下载），
@@ -35,13 +35,30 @@
 > 选核心、开游戏。极简前端（`mca_ctr.*` / `mca_vita.vpk`）与核心 VPK 已不再提供；
 > info 不再单独作为资产，已打进各平台 zip。
 >
-> **3DS**：解压 `makecode_arcade_ctr.zip`，把 `mca_libretro.cia` 放到
-> `sdmc:/retroarch/cores/`、`mca_libretro.info` 放到 `sdmc:/retroarch/cores/info/`，
+> **3DS**：解压 `makecode_arcade_ctr.zip`，把 `makecode_arcade_libretro.cia` 放到
+> `sdmc:/retroarch/cores/`、`makecode_arcade_libretro.info` 放到 `sdmc:/retroarch/cores/info/`，
 > 重启 RA，Load Core 即出现 MakeCode Arcade。（也可直接用 FBI 装 CIA 得到独立图标入口。）
 >
-> **Vita**：解压 `makecode_arcade_vita.zip`，VitaShell 开权限，把 `mca_libretro.self`
-> 放官方 RA 的 app 目录、`mca_libretro.info` 放其 `info/` 下。此前版本进游戏报
+> **Vita**：解压 `makecode_arcade_vita.zip`，VitaShell 开权限，把 `makecode_arcade_libretro.self`
+> 放官方 RA 的 app 目录、`makecode_arcade_libretro.info` 放其 `info/` 下。此前版本进游戏报
 > `C2-12828-1` 已定位修复，请用最新版 self 复验；若仍崩附 `psp2core-*.psp2dmp`。
+> 画面被拉满全屏、改成 4:3 也不生效的，是早期存过的 core override 在覆盖全局设置：
+> 删掉 `ux0:/data/retroarch/config/MakeCode Arcade/` 整个目录重启 RA 即可（前端设置问题，与核心无关）。
+>
+> **更名说明**：自本版起，3DS/Vita 的核心文件从旧短名 `mca_libretro.cia/.self`
+> 统一更名为 `makecode_arcade_libretro.cia/.self`（与 PC/Android/Switch 一致，
+> info 同步更名）。功能无变化；**Vita 老用户请删除旧文件** `mca_libretro.self`
+> 与 `mca_libretro.info`（否则 Load Core 列表会出现重复项），3DS 按标题 ID
+> 安装、无需处理。
+>
+> **⚠️ Vita 删旧文件的顺序很重要**：RetroArch 启动时会加载"上次使用的核心"，
+> 若旧文件被删、而 RA 记住的仍是旧路径，**RA 会打不开**。正确做法是先装新核心 →
+> 在 RA 里 Load Core 选 `makecode_arcade_libretro.self` → 正常退出 RA → 再删旧文件。
+> 已经踩到这个坑的话，用 VitaShell 把 `makecode_arcade_libretro.self` 复制一份
+> 改名为 `mca_libretro.self`（`info/` 下同样复制 `makecode_arcade_libretro.info`
+> 为 `mca_libretro.info`）放回原位，RA 即可启动；进去切到新核心、正常退出后，
+> 再删掉这两个改名副本。仍打不开时，编辑 `ux0:/data/retroarch/retroarch.cfg`，
+> 把 `libretro_path` 清空或改为新核心完整路径。
 
 **三、卡带**
 

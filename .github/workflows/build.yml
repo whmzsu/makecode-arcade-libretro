@@ -1289,7 +1289,7 @@ jobs:
           # 「10 主包」计数误算，也会和桌面包的同名 .info 冲突。
           # 3DS / Vita 与 Switch 同构：core 文件 + info 打成一个 zip，
           # 玩家一次下载解压即可，不再单独发裸 info。
-          cmp art/ctr-core-pack/mca_libretro.info art/vita-core-pack/mca_libretro.info
+          cmp art/ctr-core-pack/makecode_arcade_libretro.info art/vita-core-pack/makecode_arcade_libretro.info
           # 用 python3 打 zip（runner 的 python3 稳定在；zip 命令不是每处都有）。
           # 注意：块标量剥公共缩进留相对缩进，python 各行保持一致的相对层级。
           python3 -c "
@@ -1297,11 +1297,11 @@ jobs:
           for src, out in [('art/ctr-core-pack', 'core/dist/platform/makecode_arcade_ctr.zip'),
                            ('art/vita-core-pack', 'core/dist/platform/makecode_arcade_vita.zip')]:
               with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as z:
-                  for name in ('mca_libretro.cia', 'mca_libretro.self'):
+                  for name in ('makecode_arcade_libretro.cia', 'makecode_arcade_libretro.self'):
                       p = os.path.join(src, name)
                       if os.path.exists(p):
                           z.write(p, name)
-                  z.write(os.path.join(src, 'mca_libretro.info'), 'mca_libretro.info')
+                  z.write(os.path.join(src, 'makecode_arcade_libretro.info'), 'makecode_arcade_libretro.info')
           "
           cp art/nx-switch-nro/makecode_arcade_switch.zip core/dist/platform/
           echo "== core/dist 目录 =="
@@ -1369,8 +1369,8 @@ jobs:
           done
           python3 -c "
           import sys, zipfile
-          pairs = [('core/dist/platform/makecode_arcade_ctr.zip', ('mca_libretro.cia','mca_libretro.info')),
-                   ('core/dist/platform/makecode_arcade_vita.zip', ('mca_libretro.self','mca_libretro.info'))]
+          pairs = [('core/dist/platform/makecode_arcade_ctr.zip', ('makecode_arcade_libretro.cia','makecode_arcade_libretro.info')),
+                   ('core/dist/platform/makecode_arcade_vita.zip', ('makecode_arcade_libretro.self','makecode_arcade_libretro.info'))]
           for z, need in pairs:
               n = set(zipfile.ZipFile(z).namelist())
               missing = [x for x in need if x not in n]
@@ -1379,13 +1379,13 @@ jobs:
               print(f'  {z}: {sorted(n)}')
           "
           # 三份 info 全部同源（core.info.in 模板 + kCoreVersion）：ctr/vita
-          # zip 内的 mca_libretro.info 由 3ds-vita.yml 从模板生成，桌面
+          # zip 内的 makecode_arcade_libretro.info 由 3ds-vita.yml 从模板生成，桌面
           # 10 包与 Switch zip 的 makecode_arcade_libretro.info 由各自
           # 打包步生成。这里统一断言 display_version 对齐 tag。
           python3 -c "
           import sys, zipfile, re
-          for z, info in [('core/dist/platform/makecode_arcade_ctr.zip', 'mca_libretro.info'),
-                          ('core/dist/platform/makecode_arcade_vita.zip', 'mca_libretro.info'),
+          for z, info in [('core/dist/platform/makecode_arcade_ctr.zip', 'makecode_arcade_libretro.info'),
+                          ('core/dist/platform/makecode_arcade_vita.zip', 'makecode_arcade_libretro.info'),
                           ('core/dist/platform/makecode_arcade_switch.zip', 'makecode_arcade_libretro.info')]:
               d = zipfile.ZipFile(z).read(info).decode()
               got = re.search(r'display_version = \"([^\"]+)\"', d)

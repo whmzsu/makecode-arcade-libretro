@@ -19,6 +19,18 @@
 |---|---|
 | ![跳到砖块上](docs/media/photo-jump.jpg) | ![金币入袋](docs/media/photo-coin.jpg) |
 
+**Nintendo 3DS**（new3DS 实机）：
+
+| 游戏画面 | RA 快捷菜单 |
+|---|---|
+| ![3DS 实机游戏画面](docs/media/photo-3ds.jpg) | ![3DS 快捷菜单](docs/media/photo-3ds-menu.jpg) |
+
+**PS Vita**（画面比例正确显示 4:3；两张只是手机拍摄方向不同，游戏画面本身正常横屏）：
+
+| 横拍 | 竖拍 |
+|---|---|
+| ![PS Vita 实机横拍](docs/media/photo-vita.jpg) | ![PS Vita 实机竖拍](docs/media/photo-vita-portrait.jpg) |
+
 ## 发版支持的平台
 
 每个 `core-v*` tag 的 Release 都带全量资产：**12 个主包 + 5 个 debuginfo 包 +
@@ -308,13 +320,13 @@ Lakka 的 `/storage/cores/`（SSH 默认 root/lakka），刷新核心列表即�
 `makecode_arcade_vita.zip`，解压一次拿全），极简前端与核心 VPK 线已放下，
 不再构建/分发。
 
-- **3DS 核心文件**：`mca_libretro.cia`（UniqueId `0xF1CA1`）。先装官方 3DS RA，
+- **3DS 核心文件**：`makecode_arcade_libretro.cia`（UniqueId `0xF1CA1`）。先装官方 3DS RA，
   把同一 `.cia` 复制到 `sdmc:/retroarch/cores/`、`.info` 放到
   `sdmc:/retroarch/cores/info/`，重启 RA 即在 Load Core 列表出现 MakeCode Arcade，
   再 Load Content 选 `.pxt64`（卡带放哪都行，`sdmc:/mca/` 只是示例路径）。**new3ds 真机验收通过**：按键、
   菜单、卡带装载全绿、流畅。也可直接用 FBI 装该 CIA 得到独立图标入口（内含 RA），
   两种方式都能玩，推荐统一在官方 RA 里切核心。
-- **Vita 核心文件**：`mca_libretro.self` + `mca_libretro.info`。先装官方 Vita RA
+- **Vita 核心文件**：`makecode_arcade_libretro.self` + `makecode_arcade_libretro.info`。先装官方 Vita RA
   （`RETROVITA`），VitaShell 开权限，self 放其 app 目录、info 放 `info/` 下，
   Load Core 即出现 MakeCode Arcade。官方 Vita RA 是静态模型（每核心一个完整
   RA+core 的 SELF，换核即 exec 重启，无动态加载）。此前 `Validation OK →
@@ -322,7 +334,7 @@ Lakka 的 `/storage/cores/`（SSH 默认 root/lakka），刷新核心列表即�
   RA 换 content 重置 stdio 后悬垂；PATCH 16（v0.3.9）修复，真机复验通过
   （0.3.10 连续开关内容颜色与稳定性均正常）。
 
-`.info`（`mca_libretro.info`）3DS/Vita 通用，`supported_extensions = pxt64`。
+`.info`（`makecode_arcade_libretro.info`）3DS/Vita 通用，`supported_extensions = pxt64`。
 测试包、安装步骤与真机验收清单见 `docs/3DS-VITA-TEST.md`。
 
 core 静态库构建：

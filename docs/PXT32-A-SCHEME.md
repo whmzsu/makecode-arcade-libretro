@@ -9,7 +9,7 @@
 > **2026-11-18 补注**：第 11 节记录的极简前端（`frontends/ctr`、
 > `frontends/vita`）与核心 VPK 已不再构建/分发，源码目录已删除；核心 CIA
 > 打包素材迁至 `core/assets/ctr/`，`.info` 统一由 `tools/core.info.in`
-> 模板生成（3DS/Vita 包内文件名为 `mca_libretro.info`，随核心二进制同名）。
+> 模板生成（3DS/Vita 包内文件名为 `makecode_arcade_libretro.info`，随核心二进制同名）。
 > 第 11 节表格与命令保留作历史记录。
 >
 > 2026-11-16。承接 `probe/pxt32`（P0/P1）——P1 实测证实 32 位硬阻断是 GC 的
