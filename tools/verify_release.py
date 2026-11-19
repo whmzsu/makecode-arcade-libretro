@@ -7,7 +7,7 @@
 
 主包 makecode_arcade_<platform>.zip
   * 核心二进制按扩展名显式挑选，包里绝不能有 .pdb 之类调试符号；
-  * ELF/PE 机器类型与包名平台一致（血泪：x86 包混入 arm64、Win 包只有 .pdb）；
+  * ELF/PE/Mach-O 机器类型与包名平台一致（血泪：x86 包混入 arm64、Win 包只有 .pdb）；
   * .info 的 display_version == 源码 kCoreVersion；
   * ELF 动态依赖白名单、glibc 基线、retro_* 导出数量；
   * Android arm64 无 libc++_shared、LOAD 段 16KB 对齐（armv7 不查——
@@ -38,6 +38,7 @@ HERE = Path(__file__).resolve().parent
 # zip 平台短名 -> (期望格式, 机器类型)
 # ELF e_machine: 3=x86, 40=arm, 62=x86_64, 183=aarch64
 # PE Machine: 0x14c=x86, 0x8664=x64, 0xaa64=ARM64, 0x1c4=ARMNT
+# Mach-O cputype: 0x01000007=x86_64, 0x0100000c=arm64（含 CPU_ARCH_ABI64 位）
 EXPECT = {
     "windows-x64":   ("PE", 0x8664),
     "windows-arm64": ("PE", 0xAA64),
@@ -49,6 +50,9 @@ EXPECT = {
     "android-arm64": ("ELF", 183),
     "android-armv7": ("ELF", 40),
     "lakka-arm64":   ("ELF", 183),
+    # Mach-O cputype: 0x01000007=x86_64, 0x0100000c=arm64（含 CPU_ARCH_ABI64 位）
+    "macos-x64":     ("MACHO", 0x01000007),
+    "macos-arm64":   ("MACHO", 0x0100000C),
 }
 # 需要 strip（因而需要 -debuginfo 包）的平台前缀
 NEED_DEBUGINFO = ("linux-", "lakka-")
@@ -72,6 +76,11 @@ def machine_of(data: bytes) -> tuple[str, int]:
         return "PE?", 0
     if data[:4] == b"\x7fELF":
         return "ELF", struct.unpack_from("<H", data, 18)[0]
+    # Mach-O 64-bit: magic cffaedfe（小端）或 feedfacf（大端）；cputype 在偏移 4。
+    # zig 产的是小端。0x01000007=x86_64 / 0x0100000c=arm64。
+    if data[:4] in (b"\xcf\xfa\xed\xfe", b"\xfe\xed\xfa\xcf"):
+        endian = "<" if data[:4] == b"\xcf\xfa\xed\xfe" else ">"
+        return "MACHO", struct.unpack_from(endian + "i", data, 4)[0]
     return "?", 0
 
 
@@ -197,6 +206,25 @@ def main() -> int:
                         if n < 20:
                             notes.append("PE 导出表 retro_* 不足：" + alt.strip()[:120])
                     dep = "PE 导入表"
+                elif fmt == "MACHO":
+                    # Mach-O dylib（macOS）：架构已由 machine_of + EXPECT 断言，
+                    # .info 版本在下面统一验。不套 ELF 的 NODELETE/glibc/strip
+                    # 断言（Mach-O 没有这些）。retro_* 导出用 llvm-nm -gU 查，
+                    # 尽力而为：runner 没装 llvm-nm 时不记 FAIL（架构断言已够）。
+                    dep = "Mach-O dylib"
+                    nm_found = False
+                    for nmbin in ("llvm-nm", "llvm-nm.exe", "llvm-nm-14", "llvm-nm-15",
+                                  "llvm-nm-16", "llvm-nm-17"):
+                        out = sh([nmbin, "-gU", f.name])
+                        n = len(set(re.findall(r"retro_\w+", out)))
+                        if n:
+                            exports = str(n)
+                            nm_found = True
+                            if n < 20:
+                                notes.append("Mach-O 导出 retro_* 不足")
+                            break
+                    if not nm_found:
+                        exports = "未查(无llvm-nm)"
                 if bad:
                     notes.append("包内混入 " + ",".join(bad))
                 ver_ok = info_ver == version

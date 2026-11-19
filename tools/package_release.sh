@@ -30,9 +30,10 @@ if [ -z "$PYTHON_BIN" ]; then
   exit 2
 fi
 
-# 发版目标 = build_matrix.sh 的 MAIN_TARGETS + lakka musl。
+# 发版目标 = build_matrix.sh 的 MAIN_TARGETS + lakka musl + macOS 两架构。
 # 2026-11-17 起含 32 位（A 方案 GC 旁路表进 main 后 PXT64 布局在 32 位平台
-# 可用，CI 有构建回归兜底）；3DS/Vita/Switch 前端整包由 3ds-vita.yml /
+# 可用，CI 有构建回归兜底）；2026-11-19 起含 macOS x64/arm64（zig 可复现构型，
+# dylib 不 strip、无 debuginfo）。3DS/Vita/Switch 前端整包由 3ds-vita.yml /
 # nx.yml 在同一 tag 上另行上传到同一个 Release。
 MAIN_TARGETS=(
   x86_64-windows-gnu
@@ -45,6 +46,8 @@ MAIN_TARGETS=(
   aarch64-linux-android21
   armv7a-linux-androideabi21
   aarch64-linux-musl
+  aarch64-macos
+  x86_64-macos
 )
 
 case "${1:-}" in
@@ -86,6 +89,8 @@ platform_of() {
     aarch64-linux-android21)   echo "android-arm64" ;;
     armv7a-linux-androideabi21) echo "android-armv7" ;;
     aarch64-linux-musl)        echo "lakka-arm64" ;;
+    aarch64-macos)             echo "macos-arm64" ;;
+    x86_64-macos)              echo "macos-x64" ;;
     *)                         echo "${1//\//-}" ;;
   esac
 }

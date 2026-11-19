@@ -21,7 +21,7 @@
 
 ## 发版支持的平台
 
-每个 `core-v*` tag 的 Release 都带全量资产：**10 个主包 + 5 个 debuginfo 包 +
+每个 `core-v*` tag 的 Release 都带全量资产：**12 个主包 + 5 个 debuginfo 包 +
 3 个平台包**，见 [Releases](https://github.com/whmzsu/makecode-arcade-libretro/releases)。
 所有平台运行同一形态的 **PXT64** 卡带——32 位平台经 GC 旁路表（A 方案）跑
 同一镜像，无需换卡带。
@@ -31,6 +31,7 @@
 | Windows | `makecode_arcade_windows-x64` / `-arm64` / `-x86` | x64 / ARM64 / x86（32 位） | 标准 libretro 核心（.dll） |
 | Linux（glibc ≥ 2.17） | `makecode_arcade_linux-x64` / `-arm64` / `-x86` / `-armhf` | x64 / ARM64 / x86 / ARMhf（后两个 32 位） | glibc 动态 DSO；每个包配 `-debuginfo`（build-id 配对 addr2line） |
 | Android | `makecode_arcade_android-arm64` / `-armv7` | ARM64 / ARMv7（32 位） | arm64 按 16 KB 页对齐 |
+| macOS | `makecode_arcade_macos-x64` / `-arm64` | x64 / ARM64 | libretro 核心（.dylib）；zig 交叉可复现构型，无 debuginfo 包 |
 | Lakka / LibreELEC | `makecode_arcade_lakka-arm64` | ARM64 | **musl 全静态 DSO**（`readelf -d` 无 NEEDED，任何 Linux 可 dlopen） |
 | Nintendo Switch | `makecode_arcade_switch` | ARM64 | NRO + `.info`（RetroArch NX） |
 | Nintendo 3DS | `makecode_arcade_ctr` | ARM11（32 位） | `.cia` + `.info` |
@@ -269,8 +270,8 @@ tools/package_release.sh  # 打包成可直接放进 RetroArch 的 zip
 >
 > 当前状态（2026-11-19）：CI 的 32 位 job 既做**构建回归**兜底（zig
 > `x86-windows-gnu` / `x86-linux-gnu.2.17` / `arm-linux-gnueabihf.2.17` +
-> NDK `armeabi-v7a`），也进**发版矩阵**——推 `core-v*` tag 出 **10 个主包**
-> （6 全 64 位 + 4 个 32 位）。3DS（new3ds 真机）与 PS Vita（真机，PATCH
+> NDK `armeabi-v7a`），也进**发版矩阵**——推 `core-v*` tag 出 **12 个主包**
+> （8 个 64 位含 macOS 两架构 + 4 个 32 位）。3DS（new3ds 真机）与 PS Vita（真机，PATCH
 > 16-20 后多次开关内容颜色与稳定性已复验）均已验收；Vita 版 RetroArch 的
 > `Core provided` 比例不生效属**前端通病**（其他核心同样拉满），需手动设
 > 4:3 + Save Core Overrides，见 `docs/3DS-VITA-TEST.md`。老款 3DS 无设备
@@ -486,10 +487,10 @@ dispatch、产物挂 workflow artifact；**推 `core-v*` tag 时自动跑**，�
   （linux-x64 / linux-arm64 / linux-x86 / linux-armhf / lakka-arm64）另出一个
   `makecode_arcade_<platform>-debuginfo.zip`，内含未 strip 的原件，只在需要把
   崩溃地址翻译回源码行时才下载。两个包靠 `-Wl,--build-id=sha1` 生成的
-  build-id 对齐，所以核心部分总共是 **15 个 zip**（10 主包 + 5 调试包），
+  build-id 对齐，所以核心部分总共是 **17 个 zip**（12 主包 + 5 调试包），
   另加 3 个平台 zip（`makecode_arcade_ctr.zip` / `_vita.zip` / `_switch.zip`，
   3DS/Vita/Switch 的核心文件与 info 已各自打包，info 不单独作为资产），
-  一个 Release 共 18 个 zip。
+  一个 Release 共 20 个 zip。macOS 两个 dylib 包不 strip、无调试包。
 - 凭据用仓库内置 `GITHUB_TOKEN`（job 级 `contents: write`，全局仍是只读），
   **不需要 PAT**。Release 对象与附件上传只有 HTTPS API 提供，git/SSH 到不了
   这一层——SSH key 只能推 commit 和 tag。

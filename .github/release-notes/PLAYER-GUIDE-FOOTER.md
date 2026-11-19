@@ -13,6 +13,8 @@
 | `makecode_arcade_linux-arm64.zip` | Linux 掌机 64 位 ARM（RK3566/RK3326 等） |
 | `makecode_arcade_linux-x86.zip` | Linux 32 位 x86 |
 | `makecode_arcade_linux-armhf.zip` | Linux 32 位 ARM（retroarch32 机器） |
+| `makecode_arcade_macos-x64.zip` | macOS Intel（x64，.dylib） |
+| `makecode_arcade_macos-arm64.zip` | macOS Apple Silicon（M 系列，.dylib） |
 | `makecode_arcade_android-arm64.zip` | Android 64 位（绝大多数手机/掌机） |
 | `makecode_arcade_android-armv7.zip` | Android 32 位（老设备） |
 | `makecode_arcade_lakka-arm64.zip` | Lakka / LibreELEC（musl 系统） |

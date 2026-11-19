@@ -2,7 +2,7 @@
 
 只读本地 zip，不联网。检查三件事：
   1. 每个主包里有核心二进制 + .info，且 .info 的 display_version 与 tag 一致
-  2. 核心二进制的架构（PE Machine / ELF e_machine）与包名对得上
+  2. 核心二进制的架构（PE Machine / ELF e_machine / Mach-O cputype）与包名对得上
   3. 平台资产（ctr/vita/switch）内容清单符合约定
 
 用法：python tools/verify_github_assets.py out/release/github-core-v0.3.10 0.3.10
@@ -13,7 +13,7 @@ import struct
 import sys
 import zipfile
 
-# 包名 -> 期望架构。PE 用 Machine，ELF 用 e_machine
+# 包名 -> 期望架构。PE 用 Machine，ELF 用 e_machine，Mach-O 用 cputype
 EXPECT = {
     "makecode_arcade_windows-x64.zip":   ("pe", 0x8664),
     "makecode_arcade_windows-arm64.zip": ("pe", 0xaa64),
@@ -25,6 +25,8 @@ EXPECT = {
     "makecode_arcade_android-arm64.zip": ("elf", 183),
     "makecode_arcade_android-armv7.zip": ("elf", 40),
     "makecode_arcade_lakka-arm64.zip":   ("elf", 183),
+    "makecode_arcade_macos-x64.zip":     ("macho", 0x01000007),
+    "makecode_arcade_macos-arm64.zip":   ("macho", 0x0100000c),
 }
 
 
@@ -41,6 +43,14 @@ def elf_machine(data):
     if data[:4] != b"\x7fELF":
         return None
     return struct.unpack_from("<H", data, 18)[0]
+
+
+def macho_cputype(data):
+    # Mach-O 64-bit: magic cffaedfe（小端）/ feedfacf（大端）；cputype 偏移 4
+    if data[:4] in (b"\xcf\xfa\xed\xfe", b"\xfe\xed\xfa\xcf"):
+        endian = "<" if data[:4] == b"\xcf\xfa\xed\xfe" else ">"
+        return struct.unpack_from(endian + "i", data, 4)[0]
+    return None
 
 
 def check_one(name, path, ver):
@@ -61,7 +71,12 @@ def check_one(name, path, ver):
             if len(core) != 1:
                 return None, "核心二进制数量 %d" % len(core)
             data = zf.read(core[0])
-            got = pe_machine(data) if kind == "pe" else elf_machine(data)
+            if kind == "pe":
+                got = pe_machine(data)
+            elif kind == "macho":
+                got = macho_cputype(data)
+            else:
+                got = elf_machine(data)
             if got != want:
                 return None, "架构不匹配：期望 %s/%s，实际 %s" % (
                     kind, hex(want), hex(got) if got else None)

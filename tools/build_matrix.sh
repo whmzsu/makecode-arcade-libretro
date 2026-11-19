@@ -2,7 +2,7 @@
 # build_matrix.sh — 交叉编译矩阵
 #
 # 档位：
-#   ./build_matrix.sh            # 主流目标（发版用，9 个：Win x64/arm64/x86、Linux x64/arm64/x86/armhf、Android arm64/armv7）
+#   ./build_matrix.sh            # 主流目标（发版用，11 个：Win x64/arm64/x86、Linux x64/arm64/x86/armhf、Android arm64/armv7、macOS arm64/x64）
 #   ./build_matrix.sh --all      # 全架构（验证用，含 riscv/loongarch/ppc/s390x/musl/macOS/大端…，均 64 位）
 #   ./build_matrix.sh <triple>…  # 只跑指定目标
 #
@@ -38,6 +38,9 @@ MAIN_TARGETS=(
   # Android
   aarch64-linux-android21
   armv7a-linux-androideabi21
+  # macOS（zig 可复现构型；2026-11-19 起进发版矩阵）
+  aarch64-macos
+  x86_64-macos
 )
 
 # —— 扩展目标：--all 时追加 ——
@@ -54,9 +57,6 @@ EXTRA_TARGETS=(
   s390x-linux-gnu
   # 大端
   aarch64_be-linux-gnu
-  # macOS
-  aarch64-macos
-  x86_64-macos
   # Android 其它 64 位 ABI
   x86_64-linux-android21
 )

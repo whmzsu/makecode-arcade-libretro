@@ -21,7 +21,7 @@ PCs and low-end ARM handhelds (RK3326 / RK3566 and similar).
 
 ## Release platforms
 
-Every `core-v*` tag ships a full asset set: **10 core packages + 5 debuginfo
+Every `core-v*` tag ships a full asset set: **12 core packages + 5 debuginfo
 packages + 3 platform bundles**, see
 [Releases](https://github.com/whmzsu/makecode-arcade-libretro/releases).
 All platforms run the same **PXT64** cartridge format — 32-bit targets go
@@ -33,6 +33,7 @@ separate cartridges are needed.
 | Windows | `makecode_arcade_windows-x64` / `-arm64` / `-x86` | x64 / ARM64 / x86 (32-bit) | standard libretro core (.dll) |
 | Linux (glibc ≥ 2.17) | `makecode_arcade_linux-x64` / `-arm64` / `-x86` / `-armhf` | x64 / ARM64 / x86 / ARMhf (last two 32-bit) | glibc dynamic DSO; each has a paired `-debuginfo` (build-id + addr2line) |
 | Android | `makecode_arcade_android-arm64` / `-armv7` | ARM64 / ARMv7 (32-bit) | arm64 is 16 KB page aligned |
+| macOS | `makecode_arcade_macos-x64` / `-arm64` | x64 / ARM64 | libretro core (.dylib); reproducible zig cross-build, no debuginfo package |
 | Lakka / LibreELEC | `makecode_arcade_lakka-arm64` | ARM64 | **musl fully-static DSO** (no NEEDED entries; dlopen-able on any Linux) |
 | Nintendo Switch | `makecode_arcade_switch` | ARM64 | NRO + `.info` (RetroArch NX) |
 | Nintendo 3DS | `makecode_arcade_ctr` | ARM11 (32-bit) | `.cia` + `.info` |
@@ -279,8 +280,8 @@ tools/package_release.sh  # Package into zips ready to drop into RetroArch
 > Current status (2026-11-19): the CI 32-bit jobs serve both as **build
 > regression** safety nets (zig `x86-windows-gnu` / `x86-linux-gnu.2.17` /
 > `arm-linux-gnueabihf.2.17` + NDK `armeabi-v7a`) and as part of the
-> **release matrix** — a `core-v*` tag now produces **10 main packages**
-> (6 all-64-bit + 4×32-bit). Both the 3DS (new3ds, real device) and
+> **release matrix** — a `core-v*` tag now produces **12 main packages**
+> (8 all-64-bit incl. macOS x64/arm64 + 4×32-bit). Both the 3DS (new3ds, real device) and
 > PS Vita (real device) have passed acceptance; after PATCH 16-20 the Vita
 > was re-verified across repeated content open/close for color and
 > stability. The Vita RetroArch build's `Core provided` aspect ratio not
@@ -537,16 +538,17 @@ just pick one from each group.
   lakka-arm64) also ship a `makecode_arcade_<platform>-debuginfo.zip`
   containing the unstripped original, only needed to translate crash
   addresses back to source lines. Both are tied together by the
-  `-Wl,--build-id=sha1` build-id, so the core part totals **15 zips**
-  (10 main + 5 debuginfo), plus 3 platform zips (`makecode_arcade_ctr.zip` /
+  `-Wl,--build-id=sha1` build-id, so the core part totals **17 zips**
+  (12 main + 5 debuginfo), plus 3 platform zips (`makecode_arcade_ctr.zip` /
   `_vita.zip` / `_switch.zip` — the 3DS/Vita/Switch core files and info are
-  bundled per platform, info is no longer a separate asset): 18 zips per
-  Release in total.
+  bundled per platform, info is no longer a separate asset): 20 zips per
+  Release in total. The two macOS dylib packages are unstripped with no
+  debuginfo counterpart.
 - Credentials use the repo's built-in `GITHUB_TOKEN` (job-level
   `contents: write`; globally still read-only). **No PAT needed.** Release
   objects and asset uploads only exist over the HTTPS API — git/SSH can't
   reach that layer; the SSH key only pushes commits and tags.
-- Hard assertions before release: exactly 10 main packages and 5 debuginfo
+- Hard assertions before release: exactly 12 main packages and 5 debuginfo
   packages, every main package's `.info` `display_version` must equal the
   tag — one short or mismatched version turns the job red, so a partial
   release can't ship.
