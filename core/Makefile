@@ -65,12 +65,20 @@ ifneq ($(COVERAGE),)
    COV_TAG  := -cov
 endif
 
+# 分段性能计时（make platform=unix MCA_PROFILE=1）。默认关闭、零开销；
+# 打开后用独立对象目录，绝不覆盖正常产物。计数器与打印见
+# runtime/pxtapp/mca_profile.h / core/src/libretro_core.cpp。
+ifneq ($(MCA_PROFILE),)
+   PROFILE_FLAGS := -DMCA_PROFILE
+   PROFILE_TAG  := -prof
+endif
+
 # 产物与对象：对象按平台分目录，避免多目标构建互相覆盖（build/ 已在 .gitignore）
 # platform 可能带后缀（如 unix-armv7-hardfloat-neon），空格/斜杠会破坏路径，
 # 统一压成 - 分隔的目录名
 empty      :=
 space      := $(empty) $(empty)
-BUILD_TAG  := $(subst $(space),-,$(strip $(platform)))$(SAN_TAG)$(COV_TAG)
+BUILD_TAG  := $(subst $(space),-,$(strip $(platform)))$(SAN_TAG)$(COV_TAG)$(PROFILE_TAG)
 BUILD_DIR  := $(CORE_DIR)/build/make/$(BUILD_TAG)
 OBJ_DIR    := $(BUILD_DIR)/obj
 
@@ -92,6 +100,8 @@ LDFLAGS   += $(SANFLAGS)
 CXXFLAGS  += $(COVFLAGS)
 CFLAGS    += $(COVFLAGS)
 LDFLAGS   += $(COVFLAGS)
+CXXFLAGS  += $(PROFILE_FLAGS)
+CFLAGS    += $(PROFILE_FLAGS)
 
 INCFLAGS := -I$(CORE_DIR)/src -I$(PXTAPP_DIR)
 
@@ -235,8 +245,11 @@ else
    LDFLAGS += -Wl,--build-id=sha1
 endif
 
-# 插桩产物别覆盖 core/ 根下那个"当前正式可用"的 .so：覆盖率构型改落对象目录
+# 插桩产物别覆盖 core/ 根下那个"当前正式可用"的 .so：覆盖率/计时构型改落对象目录
 ifneq ($(COVERAGE),)
+   TARGET := $(BUILD_DIR)/$(notdir $(TARGET))
+endif
+ifneq ($(MCA_PROFILE),)
    TARGET := $(BUILD_DIR)/$(notdir $(TARGET))
 endif
 

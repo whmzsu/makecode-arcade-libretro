@@ -1,5 +1,6 @@
 #include "pxt.h"
 #include "mca_tick.h"
+#include "mca_profile.h"   // 分段性能计时（默认关闭、零开销）
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -777,7 +778,9 @@ static void mainRunLoop() {
         g_virtTimeNum += MCA_FRAME_STEP;
         // 发布一帧给前端（内容 = 上一圈逻辑执行完后的画面缓冲）。
         // 放在圈顶而不是圈尾：圈内有多处 continue，放圈尾会漏帧，帧数就对不上了。
+        MCA_PF_BEGIN(pub);
         pxt_screen_publish(g_loops); // 拷缓冲 + 置序号 + 广播（同一把锁）
+        MCA_PF_END(pub, MCA_PF_VM_PUBLISH);
         // MCA v0.2.14：panic 之后不能在这里 return。
         // 直接 return 会回到 initRuntime 末尾的 systemReset()（pthread_exit），
         // 那条路在 Mingw 上崩、在 Linux 上绕过 multiStart 的收尾。改成 continue，
@@ -813,7 +816,9 @@ static void mainRunLoop() {
                 if (f->wakeTime || f->waitSource)
                     continue; // we got suspended again
             }
+            MCA_PF_BEGIN(exec);
             exec_loop(f);
+            MCA_PF_END(exec, MCA_PF_VM_EXEC);
             // panic 后不能在这里 `return`（会落到 initRuntime 末尾的
             // systemReset() → pthread_exit），也不能单纯 `break`（那会跳出
             // 外层 for，同样从 mainRunLoop 返回）。就在这里把收尾做掉，

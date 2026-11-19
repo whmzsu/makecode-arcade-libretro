@@ -25,6 +25,36 @@
 #include "nx_diag.h"
 // 3DS/Vita 静态链接平台的 GC 堆注入：非目标平台展开成 (void)0
 #include "platform_gc_heap.h"
+// 分段性能计时（默认关闭、零开销）。见 runtime/pxtapp/mca_profile.h
+#include "mca_profile.h"
+
+#ifdef MCA_PROFILE
+// 各 TU 共用的累计槽（唯一定义点）。scheduler.cpp 通过 MCA_PF_END 累加
+// VM_EXEC / VM_PUBLISH 两段；本文件累加前端四段。
+struct McaProfSlot g_mca_prof[MCA_PF_N];
+static unsigned g_prof_reports = 0;
+static void mca_prof_do_report(void) {
+    static const char* kNames[MCA_PF_N] = {
+        "FRONT_TOTAL", "PULL_SCREEN", "PIXEL_CONV", "AUDIO",
+        "VIDEO", "VM_EXEC", "VM_PUBLISH"
+    };
+    fprintf(stderr, "[MCA-PROF] report#%u  stage            us/call  calls\n", ++g_prof_reports);
+    for (int i = 0; i < MCA_PF_N; ++i) {
+        const McaProfSlot& s = g_mca_prof[i];
+        const double us = s.calls ? (double)s.ns / (double)s.calls / 1000.0 : 0.0;
+        fprintf(stderr, "[MCA-PROF]           %-14s %8.1f  %llu\n",
+                kNames[i], us, (unsigned long long)s.calls);
+    }
+    // PULL_SCREEN 主要是等 VM 产帧：它 + VM_EXEC 是判断瓶颈在前端还是 VM 的关键
+    const double pull = g_mca_prof[MCA_PF_PULL_SCREEN].calls
+        ? (double)g_mca_prof[MCA_PF_PULL_SCREEN].ns / g_mca_prof[MCA_PF_PULL_SCREEN].calls / 1000.0 : 0.0;
+    const double exec = g_mca_prof[MCA_PF_VM_EXEC].calls
+        ? (double)g_mca_prof[MCA_PF_VM_EXEC].ns / g_mca_prof[MCA_PF_VM_EXEC].calls / 1000.0 : 0.0;
+    fprintf(stderr, "[MCA-PROF] PULL_SCREEN %.1f us + VM_EXEC %.1f us = %.1f us/frame budget\n",
+            pull, exec, pull + exec);
+}
+#define mca_prof_report mca_prof_do_report
+#endif
 
 using namespace mca;
 
@@ -634,9 +664,12 @@ void push_button_edges(uint32_t cur, uint32_t prev) {
 void render_vm_frame() {
     vm_flush_logs(vm_log_emit);
 
+    MCA_PF_BEGIN(pull);
     vm_pull_screen(g_bgra);
+    MCA_PF_END(pull, MCA_PF_PULL_SCREEN);
     // BGRA32（字节序 B,G,R,A）→ 前端像素格式。先按 RGB565 打包，降级时再折成
     // 0RGB1555；两条路都只做移位/掩码，单帧 76800 像素的代价可以忽略。
+    MCA_PF_BEGIN(conv);
     const bool rgb565 = (g_pixel_format == RETRO_PIXEL_FORMAT_RGB565);
     for (int i = 0; i < kScreenWidth * kScreenHeight; ++i) {
         const uint32_t px = g_bgra[i];
@@ -646,10 +679,13 @@ void render_vm_frame() {
         const uint16_t c = static_cast<uint16_t>((r5 << 11) | (g6 << 5) | b5);
         g_fb[i] = rgb565 ? c : out_color(c);
     }
+    MCA_PF_END(conv, MCA_PF_PIXEL_CONV);
 
+    MCA_PF_BEGIN(audio);
     vm_pull_audio(g_audio_mono, kAudioSamplesPerFrame);
     for (int i = 0; i < kAudioSamplesPerFrame; ++i)
         g_audio[2 * i] = g_audio[2 * i + 1] = g_audio_mono[i];
+    MCA_PF_END(audio, MCA_PF_AUDIO);
 
     const int panic = vm_panic_code();
     // -1 = 用户代码/宿主请求的重启中（systemReset 会把 panicCode 置 -1），
@@ -669,6 +705,7 @@ void render_vm_frame() {
 } // namespace
 
 void retro_run(void) {
+    MCA_PF_BEGIN(total);
     // NX 诊断开关（其他平台恒为 0）。见 nxMode() 的说明。
     const int nxmode = MCA_NX_MODE();
 
@@ -727,8 +764,10 @@ void retro_run(void) {
     }
 
     if (nxmode != 2 && g_audio_batch) g_audio_batch(g_audio, kAudioSamplesPerFrame);
+    MCA_PF_BEGIN(video);
     if (nxmode != 1 && g_video)
         g_video(g_fb, kScreenWidth, kScreenHeight, kScreenWidth * sizeof(uint16_t));
+    MCA_PF_END(video, MCA_PF_VIDEO);
 
     // 每 30 帧一行运行期 trace（0.5 秒一次），写完再动堆：
     // 探针如果崩了，文件最后一行就是崩溃帧号。
@@ -743,7 +782,11 @@ void retro_run(void) {
 #endif
     }
 
+    MCA_PF_END(total, MCA_PF_FRONT_TOTAL);
     g_frame++;
+#ifdef MCA_PROFILE
+    if ((g_frame % MCA_PROF_EVERY) == 0) mca_prof_report();
+#endif
 }
 
 // ---- 导出符号完整性守卫 -------------------------------------------------
