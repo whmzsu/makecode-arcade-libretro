@@ -36,7 +36,7 @@ static unsigned g_prof_reports = 0;
 static void mca_prof_do_report(void) {
     static const char* kNames[MCA_PF_N] = {
         "FRONT_TOTAL", "PULL_SCREEN", "PIXEL_CONV", "AUDIO",
-        "VIDEO", "VM_EXEC", "VM_PUBLISH"
+        "VIDEO", "VM_EXEC", "DRAW_IMAGE", "VM_PUBLISH"
     };
     fprintf(stderr, "[MCA-PROF] report#%u  stage            us/call  calls\n", ++g_prof_reports);
     for (int i = 0; i < MCA_PF_N; ++i) {

@@ -1,4 +1,5 @@
 #include "pxt.h"
+#include "mca_profile.h"
 
 
 #if IMAGE_BITS == 1
@@ -626,7 +627,17 @@ Image_ doubled(Image_ img) {
     return r;
 }
 
+// MCA_PROFILE：把原函数改名为 Impl，外层包装统计 blit 段（覆盖所有 return 路径）。
+// 默认构建下 MCA_PF_BEGIN/END 展开成 ((void)0)，包装退化为直接转发，零开销。
+static bool drawImageCoreImpl(Image_ img, Image_ from, int x, int y, int color);
 bool drawImageCore(Image_ img, Image_ from, int x, int y, int color) {
+    MCA_PF_BEGIN(drawimg);
+    bool r = drawImageCoreImpl(img, from, x, y, color);
+    MCA_PF_END(drawimg, MCA_PF_DRAW_IMAGE);
+    return r;
+}
+
+static bool drawImageCoreImpl(Image_ img, Image_ from, int x, int y, int color) {
     auto w = from->width();
     auto h = from->height();
     auto sh = img->height();

@@ -43,6 +43,7 @@ enum McaProfStage {
     MCA_PF_AUDIO,
     MCA_PF_VIDEO,
     MCA_PF_VM_EXEC,
+    MCA_PF_DRAW_IMAGE,   // drawImageCore 子段（VM_EXEC 的子集，量化 blit 占比）
     MCA_PF_VM_PUBLISH,
     MCA_PF_N
 };

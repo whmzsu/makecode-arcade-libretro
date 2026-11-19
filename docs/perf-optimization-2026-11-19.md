@@ -48,6 +48,9 @@ RG353M/RG353V（RK3566）146–150 fps（2.4–2.5×），无需动。
 
 `tools/bench_throughput.sh <core.so> [frames=1200] [repeats=3] [outdir=out/bench]`
 
+Android 真机无 Python/无 `%N`：C 宿主 `tools/mca_host_android.c` 的 `--wall` 开关
+在 STATS 行追加 `wall_ms`/`fps`（单调钟，默认关闭不影响原口径），63 卡 sweep 用此口径。
+
 统一卡带（ping / Blocky / cubeland）、帧数、`--turbo`、重复取中位数，
 CSV 附末帧哈希（吞吐再高、画面和 golden 不一致也无意义）。同一脚本可在
 tool69 与 R36S 上跑，输出口径一致。`CARTS_DIR=` 可覆盖卡带目录。
@@ -104,21 +107,80 @@ tool69 与 R36S 上跑，输出口径一致。`CARTS_DIR=` 可覆盖卡带目录
 **结论**：
 
 1. **VM_EXEC 仍是唯一随复杂度暴涨的核心段**，真机上 965→11594 us（0.97→11.6 ms），
-   cubeland 单帧游戏逻辑+绘制就吃掉 11.6 ms——这就是低端掉帧主因，与 tool69 判断一致。
+   cubeland 单帧就吃掉 11.6 ms——这就是低端掉帧主因，与 tool69 判断一致。
 2. **VM 线程跟不上前端**：900 帧前端产出里 VM 只算了 530–694 次（59%–77%），
    PULL_SCREEN 8977 us 是前端空等 VM 的时间，与 VM_EXEC 是同一份时间，不能相加。
 3. **PIXEL_CONV 在 ARM 上 ~146 us（比 x86 高一个量级）但仍只占 cubeland 预算 0.8%**，
    确认不是优化靶子；之前"代价可忽略"的判断在真机上依然成立。
-4. 优化靶子锁定 `VM_EXEC` 内部的 `image.cpp` blit/drawImageCore。
 
-## 下一步（靶子已锁定，待优化）
+## 63 卡全量吞吐 sweep（78P01，600 帧 --wall，2026-11-19）
 
-1. 定点优化 `image.cpp` 的 `drawImageCore`（覆盖率仅 18%、863 行未执行，
-   上游自带 "expanded version 5% faster" 注释），这是 VM_EXEC 的大头。
-2. 每步优化后：golden 三例逐位一致 + 全卡带 sweep 逐位比对 + 吞吐基线对比
-   （78P01 已有可复现口径：ping ≥1200 / Blocky ~343 / cubeland ~104 fps）。
-3. R36S 仍关机，开机后可补一份 RK3326 同口径画像（当前 78P01 的 A7 是最低端，
-   热点排序结论可直接用）。
+`tools/mca_host_android.c` 加 `--wall`（默认关，STATS 行追加 `wall_ms`/`fps`），
+解决了老 toybox `date` 无 `%N`、秒级精度不够的问题。63 张真实卡带全量跑完
+（`out/78p01/sweep63.txt`）：**62 张 rc=0，1 张已知坏卡 `sm64thign` load_game FAIL**。
+
+**最慢 12 张（78P01 = 系列最低端 2×A7）**：
+
+| 卡带 | fps | 600帧耗时 | distinct |
+|---|---|---|---|
+| unique_cube | 9.7 | 62.1s | 267 |
+| Horizontally_Spinning_Rat | 9.9 | 60.8s | 15 |
+| TEXTURED_BROHANN_CUBE | 9.9 | 60.8s | 2 |
+| 3D_dinosaur_model | 17.2 | 34.8s | 218 |
+| 3D_dinosaur_model_resolution_increase | 17.3 | 34.7s | 175 |
+| low-poly_picachu_at_SUPER_HIGH_FPS | 26.2 | 22.9s | 2 |
+| arcade-cube-land | 105.3 | 5.7s | 15 |
+| stereoscopic_3d | 106.3 | 5.6s | 2 |
+| Cave_Explorer | 109.1 | 5.5s | 220 |
+| Spin | 156.9 | 3.8s | 299 |
+| Hot_Air_Balloon | 167.1 | 3.6s | 15 |
+| **arcade-jumpy-platformer** | **168.2** | **3.6s** | 15 |
+
+**jupmy 结论**：用户直觉它卡，但实测 **168 fps = 60fps 目标的 2.8× 余量，不卡**；
+3 次重跑 hash 全一致（`1c0f2dd4…`）、fps 168–173 稳定。它在 63 张里排第 12 慢，
+属于中下，但绝对吞吐远超实时需求。它慢于 ping(1154fps) 是因为 dist=15 的场景
+每帧都有绘制，而 ping 大量帧逻辑空转。
+
+**真正 <60fps 的 6 张**（实机 60fps 节拍下会掉帧）：unique_cube、
+Horizontally_Spinning_Rat、TEXTURED_BROHANN_CUBE、两张 3D_dinosaur_model、
+low-poly_picachu。全是 3D/软件光栅类重卡。注意：`unique_cube` 三次三个不同 hash
+（`5fc5…`/`b41a…`/`44a0…`），`Horizontally_Spinning_Rat` 历史也有墙钟抖动——
+这两张的 hash 不可用于逐位比对，但 fps 稳定（9.7/9.9），吞吐数据可用。
+
+## 方向修正：drawImageCore 不是瓶颈（2026-11-19 实测）
+
+此前依据"覆盖率仅 18%、863 行未执行、上游注释 5% faster"推断 `image.cpp` 的
+`drawImageCore` 是 VM_EXEC 大头。**加了 DRAW_IMAGE 子段实测后推翻该推断**：
+
+| 卡带 | DRAW_IMAGE us/call | calls / 300帧 | 每帧 blit 耗时 | VM_EXEC 每帧 | blit 占比 |
+|---|---|---|---|---|---|
+| ping | 30.2 | 4876 | ~0.5 ms | 0.98 ms | 高（但绝对值可忽略） |
+| Blocky | 3.8 | 15037 | ~0.19 ms | 6.5 ms | **~3%** |
+| cubeland | 8.4 | 4410 | ~0.12 ms | 11.7 ms | **~1%** |
+
+`drawImageCore` 已是高度展开的优化循环，**每次调用仅几微秒**，不是靶子。
+VM_EXEC 的 99% 在 **PXT 解释器主循环**（`core---vm/vm.cpp:599 exec_loop()` 的
+opcode 函数指针分派 `opcodes[op](ctx, arg)`）——cubeland 逻辑重、每帧执行大量字节码。
+之前"覆盖率低=值得优化"的推理是错的：覆盖率低是因为这段本来就快。
+
+`mca_profile.h` 新增 `MCA_PF_DRAW_IMAGE` 段常驻（默认零开销），以后每轮优化都能
+直接看 blit 占比，不用再猜。`DRAW_IMAGE` 插桩见 image.cpp 的 `drawImageCoreImpl` 包装。
+
+## 下一步（靶子转向解释器，待决策）
+
+VM_EXEC 的大头是解释器 opcode 分派，可选方向（**均未动手，需先评估风险/收益**）：
+
+1. **解释器分派优化**：`exec_loop` 的 `opcodes[op](ctx, arg)` 间接调用在 ARM 上
+   分支预测代价高。可试 computed-goto / 内联高频 opcode，但涉及 PXT ABI，
+   逐位一致验证成本高。**收益未知，风险高**。
+2. **不改解释器，改 GC/分配**：若热点在对象分配（GC sweep），有更安全的切入点。
+   需先加 GC 子段实测再定。
+3. **接受现状**：低端机 cubeland ~104fps 已远超 60fps 目标（1.7× 余量），
+   78P01 是系列最低端；R36S 口径 65fps/1.08× 才是真瓶颈，但那台关机无法测。
+   若目标是"够用"，可能不必为 1.08× 的边际机型承担核心改动风险。
+
+通用验证铁律不变：golden 三例逐位一致 + 全卡带 sweep + 吞吐基线对比
+（78P01 口径 ping ≥1200 / Blocky ~343 / cubeland ~104 fps）。
 
 ## 已知限制
 

@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <time.h>
 
 #include "libretro.h"
 
@@ -56,6 +57,7 @@ static set_gc_heap_fn g_set_gc_heap = NULL;
 static unsigned g_gc_heap_size = 0;  // --gc-heap=SIZE：注入一块 malloc 堆给核心
 static char g_data_dir[512] = ".";
 static int g_quiet = 0;
+static int g_wall = 0;                // --wall：STATS 行追加墙钟 ms / fps（低端吞吐口径）
 static int g_reject_rgb565 = 0;   // --reject-rgb565：模拟只接受 0RGB1555 的前端
 
 // ---- 可选输入注入（默认全关，行为等同无参回归宿主）----
@@ -413,6 +415,8 @@ int main(int argc, char** argv) {
             snprintf(g_data_dir, sizeof(g_data_dir), "%s", argv[i] + 11);
         else if (strcmp(argv[i], "--quiet") == 0)
             g_quiet = 1;
+        else if (strcmp(argv[i], "--wall") == 0)
+            g_wall = 1;
         else if (strcmp(argv[i], "--reject-rgb565") == 0)
             g_reject_rgb565 = 1;
         else if (strncmp(argv[i], "--gc-heap=", 10) == 0) {
@@ -548,6 +552,8 @@ int main(int argc, char** argv) {
     say("[host] av %ux%u fps=%.3f sr=%.1f", av.geometry.base_width, av.geometry.base_height,
         av.timing.fps, av.timing.sample_rate);
 
+    struct timespec w0 = {0, 0}, w1 = {0, 0};
+    if (g_wall) clock_gettime(CLOCK_MONOTONIC, &w0);
     for (int i = 0; i < frames; ++i) {
         g_cur_frame = (unsigned)i;
         g_core.run();
@@ -570,8 +576,14 @@ int main(int argc, char** argv) {
     } else {
         printf("FINAL-FRAME-HASH NONE  (核心没有出帧)\n");
     }
-    printf("STATS video=%lu distinct=%lu audio_frames=%lu audio_peak=%d\n", g_video_frames,
+    if (g_wall) clock_gettime(CLOCK_MONOTONIC, &w1);
+    printf("STATS video=%lu distinct=%lu audio_frames=%lu audio_peak=%d", g_video_frames,
            g_distinct, g_audio_frames, g_audio_peak);
+    if (g_wall) {
+        double ms = (double)(w1.tv_sec - w0.tv_sec) * 1000.0 + (double)(w1.tv_nsec - w0.tv_nsec) / 1e6;
+        printf(" wall_ms=%.1f fps=%.1f", ms, ms > 0 ? frames * 1000.0 / ms : 0.0);
+    }
+    printf("\n");
 
     g_core.unload_game();
     g_core.deinit();
