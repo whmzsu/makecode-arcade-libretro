@@ -19,6 +19,28 @@
 |---|---|
 | ![跳到砖块上](docs/media/photo-jump.jpg) | ![金币入袋](docs/media/photo-coin.jpg) |
 
+## 发版支持的平台
+
+每个 `core-v*` tag 的 Release 都带全量资产：**10 个主包 + 5 个 debuginfo 包 +
+3 个平台包**，见 [Releases](https://github.com/whmzsu/makecode-arcade-libretro/releases)。
+所有平台运行同一形态的 **PXT64** 卡带——32 位平台经 GC 旁路表（A 方案）跑
+同一镜像，无需换卡带。
+
+| 平台 | 资产（`core-v0.3.10` 起） | 位数 | 形态 / 备注 |
+|---|---|---|---|
+| Windows | `makecode_arcade_windows-x64` / `-arm64` / `-x86` | x64 / ARM64 / x86（32 位） | 标准 libretro 核心（.dll） |
+| Linux（glibc ≥ 2.17） | `makecode_arcade_linux-x64` / `-arm64` / `-x86` / `-armhf` | x64 / ARM64 / x86 / ARMhf（后两个 32 位） | glibc 动态 DSO；每个包配 `-debuginfo`（build-id 配对 addr2line） |
+| Android | `makecode_arcade_android-arm64` / `-armv7` | ARM64 / ARMv7（32 位） | arm64 按 16 KB 页对齐 |
+| Lakka / LibreELEC | `makecode_arcade_lakka-arm64` | ARM64 | **musl 全静态 DSO**（`readelf -d` 无 NEEDED，任何 Linux 可 dlopen） |
+| Nintendo Switch | `makecode_arcade_switch` | ARM64 | NRO + `.info`（RetroArch NX） |
+| Nintendo 3DS | `makecode_arcade_ctr` | ARM11（32 位） | `.cia` + `.info` |
+| PS Vita | `makecode_arcade_vita` | ARMv7（32 位） | `.self` + `.info`，并入已安装的 RetroArch |
+
+> debuginfo 包只对 ELF 平台发布（linux x64 / arm64 / x86 / armhf + lakka，
+> 共 5 个），与主包靠 `--build-id=sha1` 配对；Windows 平台出问题的排查路径见
+> 「测试」一节。3DS / Vita / Switch 的安装与已知边界见
+> `docs/3DS-VITA-TEST.md` 与下文对应小节。
+
 ## 与既有两个 core 的关系
 
 本项目相关姊妹仓库（同为 whmzsu 所有，均已在生产使用）：
@@ -245,13 +267,14 @@ tools/package_release.sh  # 打包成可直接放进 RetroArch 的 zip
 > 本地 golden 三例 + 63 张卡带逐位一致）。PXT32 镜像（32 位原生布局，上游
 > `vm_patch_image` 的 TODO 分支）依旧不存在——也不再需要。
 >
-> 当前状态（2026-11-17）：CI 的 32 位 job 既做**构建回归**兜底（zig
+> 当前状态（2026-11-19）：CI 的 32 位 job 既做**构建回归**兜底（zig
 > `x86-windows-gnu` / `x86-linux-gnu.2.17` / `arm-linux-gnueabihf.2.17` +
 > NDK `armeabi-v7a`），也进**发版矩阵**——推 `core-v*` tag 出 **10 个主包**
-> （6 全 64 位 + 4 个 32 位）。3DS 核心形态已在 new3ds 真机验收通过；
-> Vita 核心形态（self+info 并入已装 RA）此前报 `C2-12828-1`，2026-11-18
-> 已定位并修复核心 `mcaTrace()` 的悬垂 `FILE*`，待真机复验；老款 3DS
-> 无设备未验。玩家遇到问题请提 issue 并附错误码 / `mca_trace.log` / dump。
+> （6 全 64 位 + 4 个 32 位）。3DS（new3ds 真机）与 PS Vita（真机，PATCH
+> 16-20 后多次开关内容颜色与稳定性已复验）均已验收；Vita 版 RetroArch 的
+> `Core provided` 比例不生效属**前端通病**（其他核心同样拉满），需手动设
+> 4:3 + Save Core Overrides，见 `docs/3DS-VITA-TEST.md`。老款 3DS 无设备
+> 未验。玩家遇到问题请提 issue 并附错误码 / `mca_trace.log` / dump。
 
 ### Lakka / LibreELEC（musl）
 
@@ -295,8 +318,8 @@ Lakka 的 `/storage/cores/`（SSH 默认 root/lakka），刷新核心列表即�
   Load Core 即出现 MakeCode Arcade。官方 Vita RA 是静态模型（每核心一个完整
   RA+core 的 SELF，换核即 exec 重启，无动态加载）。此前 `Validation OK →
   start main loop` 后崩 `C2-12828-1`，根因是 `mcaTrace()` 缓存的 `FILE*` 在
-  RA 换 content 重置 stdio 后悬垂；2026-11-18 已修（Vita 分支直写 stderr、
-  不 fopen 不缓存）并重编 self，待真机复验。
+  RA 换 content 重置 stdio 后悬垂；PATCH 16（v0.3.9）修复，真机复验通过
+  （0.3.10 连续开关内容颜色与稳定性均正常）。
 
 `.info`（`mca_libretro.info`）3DS/Vita 通用，`supported_extensions = pxt64`。
 测试包、安装步骤与真机验收清单见 `docs/3DS-VITA-TEST.md`。

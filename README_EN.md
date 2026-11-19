@@ -19,6 +19,31 @@ PCs and low-end ARM handhelds (RK3326 / RK3566 and similar).
 |---|---|
 | ![jumping onto bricks](docs/media/photo-jump.jpg) | ![collecting a coin](docs/media/photo-coin.jpg) |
 
+## Release platforms
+
+Every `core-v*` tag ships a full asset set: **10 core packages + 5 debuginfo
+packages + 3 platform bundles**, see
+[Releases](https://github.com/whmzsu/makecode-arcade-libretro/releases).
+All platforms run the same **PXT64** cartridge format — 32-bit targets go
+through the GC side-table scheme (Plan A) with the identical image, so no
+separate cartridges are needed.
+
+| Platform | Assets (since `core-v0.3.10`) | Bits | Format / notes |
+|---|---|---|---|
+| Windows | `makecode_arcade_windows-x64` / `-arm64` / `-x86` | x64 / ARM64 / x86 (32-bit) | standard libretro core (.dll) |
+| Linux (glibc ≥ 2.17) | `makecode_arcade_linux-x64` / `-arm64` / `-x86` / `-armhf` | x64 / ARM64 / x86 / ARMhf (last two 32-bit) | glibc dynamic DSO; each has a paired `-debuginfo` (build-id + addr2line) |
+| Android | `makecode_arcade_android-arm64` / `-armv7` | ARM64 / ARMv7 (32-bit) | arm64 is 16 KB page aligned |
+| Lakka / LibreELEC | `makecode_arcade_lakka-arm64` | ARM64 | **musl fully-static DSO** (no NEEDED entries; dlopen-able on any Linux) |
+| Nintendo Switch | `makecode_arcade_switch` | ARM64 | NRO + `.info` (RetroArch NX) |
+| Nintendo 3DS | `makecode_arcade_ctr` | ARM11 (32-bit) | `.cia` + `.info` |
+| PS Vita | `makecode_arcade_vita` | ARMv7 (32-bit) | `.self` + `.info`, loaded by an already-installed RetroArch |
+
+> Debuginfo packages cover ELF platforms only (linux x64 / arm64 / x86 /
+> armhf + lakka — 5 total), paired with the main package via
+> `--build-id=sha1`; for Windows troubleshooting see the "Testing" section.
+> 3DS / Vita / Switch installation and known limitations: see
+> `docs/3DS-VITA-TEST.md` and the matching subsections below.
+
 ## Relationship to the two existing cores
 
 Related sibling repositories (all owned by whmzsu, all in production use):
@@ -251,16 +276,18 @@ tools/package_release.sh  # Package into zips ready to drop into RetroArch
 > layout, the upstream `vm_patch_image` TODO branch) still does not exist —
 > and is no longer needed.
 >
-> Current status (2026-11-17): the CI 32-bit jobs serve both as **build
+> Current status (2026-11-19): the CI 32-bit jobs serve both as **build
 > regression** safety nets (zig `x86-windows-gnu` / `x86-linux-gnu.2.17` /
 > `arm-linux-gnueabihf.2.17` + NDK `armeabi-v7a`) and as part of the
 > **release matrix** — a `core-v*` tag now produces **10 main packages**
-> (6 all-64-bit + 4×32-bit). The 3DS core form has passed real-device
-> acceptance on new3ds; the Vita core form (self+info merged into installed
-> RA) previously crashed with `C2-12828-1`, traced on 2026-11-18 to a
-> dangling `FILE*` in the core's `mcaTrace()` and fixed — pending real-device
-> re-verification. No old-3DS hardware available yet. If you hit problems,
-> open an issue with the error code / `mca_trace.log` / dump.
+> (6 all-64-bit + 4×32-bit). Both the 3DS (new3ds, real device) and
+> PS Vita (real device) have passed acceptance; after PATCH 16-20 the Vita
+> was re-verified across repeated content open/close for color and
+> stability. The Vita RetroArch build's `Core provided` aspect ratio not
+> taking effect is a **frontend-wide issue** (other cores stretch the same
+> way) — set 4:3 manually + Save Core Overrides, see
+> `docs/3DS-VITA-TEST.md`. No old-3DS hardware available yet. If you hit
+> problems, open an issue with the error code / `mca_trace.log` / dump.
 
 ### Lakka / LibreELEC (musl)
 
@@ -313,8 +340,8 @@ and the core VPK line have been retired from builds and distribution.
   switching cores execs a new process — no dynamic loading). It previously
   crashed with `C2-12828-1` right after `Validation OK → start main loop`: the
   cached `FILE*` in `mcaTrace()` went dangling when RA reset stdio on content
-  switch. Fixed on 2026-11-18 (Vita branch writes straight to stderr, no
-  fopen/cache) and the SELF rebuilt — pending real-device re-verification.
+  switch. Fixed in PATCH 16 (v0.3.9) and re-verified on a real device
+  (v0.3.10: color and stability both hold across repeated content open/close).
 
 `.info` (`mca_libretro.info`) is shared between 3DS and Vita
 (`supported_extensions = pxt64`). Test packages, install steps, and
