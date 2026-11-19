@@ -20,7 +20,9 @@
 # 收录原则：只列已验证能编过的平台。3DS/Vita 静态库已在 GitHub Actions 的
 # devkitPro/vitaSDK 容器编译 + 真机验收（PATCH 16-20），故纳入 buildbot：
 # 官方模板自己拉 RetroArch 源码，把静态库链成 .cia/.3dsx/.self。
-# macOS / iOS / 其余主机平台工具链未验证，暂不列，避免 CI 长期红灯。
+# macOS 本地 zig 交叉已编出 dylib、符号干净（全是 libSystem 可解析），故接入；
+# 但 buildbot 用真 clang + 10.9/10.15 目标，首轮官方跑通前仍是唯一未验点。
+# iOS / 其余主机平台工具链未验证，暂不列，避免 CI 长期红灯。
 
 .core-defs:
   variables:
@@ -58,6 +60,12 @@ include:
   # Android（ndk-build，走 core/jni/Android.mk + Application.mk）
   - project: 'libretro-infrastructure/ci-templates'
     file: '/android-jni.yml'
+
+  # macOS x64（真 clang + 10.9 部署目标）/ arm64（Apple Silicon runner）
+  - project: 'libretro-infrastructure/ci-templates'
+    file: '/osx-x64.yml'
+  - project: 'libretro-infrastructure/ci-templates'
+    file: '/osx-arm64.yml'
 
   # 3DS / Vita 静态链接（模板把 core/makecode_arcade_libretro_{ctr,vita}.a
   # 搬进官方 RetroArch 树，链成 .cia/.3dsx/.self 分发）
@@ -139,6 +147,20 @@ android-arm64-v8a:
 android-armeabi-v7a:
   extends:
     - .libretro-android-jni-armeabi-v7a
+    - .core-defs
+
+# ---------------------------------------------------------------- macOS
+# 模板注入 platform=osx + CC/CXX=clang，产物 core/makecode_arcade_libretro.dylib，
+# after_script 自动搬到根并 lipo 校验架构。.core-defs 的 MAKEFILE_PATH=core
+# 覆盖模板默认 "."。x64 用 10.9 部署目标，arm64 用 Apple Silicon + 10.15。
+libretro-build-osx-x64:
+  extends:
+    - .libretro-osx-x64-make-default
+    - .core-defs
+
+libretro-build-osx-arm64:
+  extends:
+    - .libretro-osx-arm64-make-default
     - .core-defs
 
 # ---------------------------------------------------------------- 3DS
