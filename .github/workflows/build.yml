@@ -1035,48 +1035,18 @@ jobs:
           file "$dylib" | grep -q "Mach-O 64-bit.*$want" \
             || { echo "::error::dylib 架构不是 $want"; exit 1; }
 
-      # 与 golden job 同一个比对脚本：纯 ctypes.CDLL，macOS 自带 python3 即可
-      - name: dlopen + 末帧哈希比对（golden 三例）
-        # 必须用块标量：GitHub 把 `run: a \` + 续行折叠成一行，ci_regress.sh
-        # 会把续行 token 当第二个位置参数（CORE）报"找不到核心"
-        run: |
-          tools/ci_regress.sh out/macos-verify/makecode_arcade_libretro.dylib \
-            --bmp-dir out/macos-verify-bmp
-
-      # 顺带把 --reinit 也跑一遍：PATCH 20 的像素格式粘滞不是架构相关的，
-      # 但 macOS 静态状态同样跨 dlclose 存活（Mach-O 无 -z nodelete 概念），
-      # 值得在真机上确认一次"关游戏重开颜色不变"。
-      - name: 二次加载（--reinit，PATCH 20 真机回归）
-        run: |
-          set -euo pipefail
-          python3 tools/libretro_host.py \
-            out/macos-verify/makecode_arcade_libretro.dylib \
-            tools/fixtures/ping.pxt64 300 --turbo --reinit=2 \
-            --data-dir=out/macos-verify-reinit | tee out/macos-verify-reinit.log
-          got=$(grep -oE '(FINAL|REOPEN)-FRAME-HASH [0-9a-f]{32}' out/macos-verify-reinit.log \
-                | awk '{print $2}' || true)
-          n=$(printf '%s\n' "$got" | grep -c . || true)
-          uniq=$(printf '%s\n' "$got" | sort -u | wc -l)
-          first=$(printf '%s\n' "$got" | head -1)
-          want=$(awk -F'|' '$1 ~ /ping\.pxt64/ {print $4}' \
-                 tools/fixtures/golden-frames.txt | tr -d '\r')
-          [ "$n" -eq 3 ] || { echo "::error::期望 3 轮哈希，实际 $n 轮"; exit 1; }
-          [ "$uniq" -eq 1 ] || {
-            echo "::error::三轮末帧不一致：$(printf '%s' "$got" | tr '\n' ' ')"; exit 1;
-          }
-          [ "$first" = "$want" ] || {
-            echo "::error::重开哈希 $first 与基线 $want 不符"; exit 1;
-          }
-          nfmt=$(grep -c 'SET_PIXEL_FORMAT = 2' out/macos-verify-reinit.log || true)
-          [ "$nfmt" -ge 6 ] \
-            || { echo "::error::macOS 像素格式只协商 $nfmt 次（应为 6）"; exit 1; }
-          echo "macOS 三轮重开一致 $first；SET_PIXEL_FORMAT 共 $nfmt 次"
+      # golden 三例 + --reinit 三轮的断言都收在 tools/macos_verify.sh：
+      # 纯 ctypes.CDLL，macOS 自带 python3 即可。独立脚本而非内联 run: |
+      # 是为了绕开 macOS /bin/bash 3.2 对块标量里中文注解紧贴 $var 的解析异常
+      # （首次实跑踩过：报 unbound variable，但断言其实全过）。
+      - name: dlopen + golden 三例 + --reinit 三轮
+        run: bash tools/macos_verify.sh out/macos-verify/makecode_arcade_libretro.dylib
 
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
           name: macos-verify-bmp-${{ matrix.arch }}
-          path: out/macos-verify-bmp/*.bmp
+          path: out/macos_verify/bmp/*.bmp
           if-no-files-found: ignore
           retention-days: 14
 
