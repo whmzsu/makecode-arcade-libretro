@@ -17,8 +17,10 @@
 # Windows job 会误走 Unix 分支，拿 mingw 链 .so 时报 `unrecognized option -z`
 # 直接红灯（实测）。对照 bsnes 的 .core-defs-windows 也显式给 platform。
 #
-# 收录原则：只列本地验证过能编过的平台。macOS / iOS / 主机平台暂不列，
-# 等对应工具链上验证过再加，避免 CI 出现长期红灯。
+# 收录原则：只列已验证能编过的平台。3DS/Vita 静态库已在 GitHub Actions 的
+# devkitPro/vitaSDK 容器编译 + 真机验收（PATCH 16-20），故纳入 buildbot：
+# 官方模板自己拉 RetroArch 源码，把静态库链成 .cia/.3dsx/.self。
+# macOS / iOS / 其余主机平台工具链未验证，暂不列，避免 CI 长期红灯。
 
 .core-defs:
   variables:
@@ -56,6 +58,13 @@ include:
   # Android（ndk-build，走 core/jni/Android.mk + Application.mk）
   - project: 'libretro-infrastructure/ci-templates'
     file: '/android-jni.yml'
+
+  # 3DS / Vita 静态链接（模板把 core/makecode_arcade_libretro_{ctr,vita}.a
+  # 搬进官方 RetroArch 树，链成 .cia/.3dsx/.self 分发）
+  - project: 'libretro-infrastructure/ci-templates'
+    file: '/ctr-static.yml'
+  - project: 'libretro-infrastructure/ci-templates'
+    file: '/vita-static.yml'
 
 stages:
   - build-prepare
@@ -132,9 +141,28 @@ android-armeabi-v7a:
     - .libretro-android-jni-armeabi-v7a
     - .core-defs
 
+# ---------------------------------------------------------------- 3DS
+# 静态模板：make platform=ctr → core/makecode_arcade_libretro_ctr.a →
+# 搬进 RA 树 libretro_ctr.a → make -f Makefile.ctr 出 .cia/.3dsx。
+# 注意模板默认 MAKEFILE_PATH=.，但我们 .core-defs 显式给 core（模板先
+# extends、.core-defs 后 extends，后者覆盖），勿删。
+libretro-build-ctr:
+  extends:
+    - .libretro-ctr-static-retroarch-master
+    - .core-defs
+
+# ---------------------------------------------------------------- Vita
+# 静态模板：make platform=vita → core/makecode_arcade_libretro_vita.a →
+# 搬进 RA 树 libretro_vita.a → make -f Makefile.vita 出 .self/.vitagl.self。
+libretro-build-vita:
+  extends:
+    - .libretro-vita-static-retroarch-master
+    - .core-defs
+
 # 32 位口径（2026-11-19）：收录矩阵含 win-i686 / linux-i686 / android
 # armeabi-v7a（发版 zip 另有 linux-armhf，buildbot 没有标准 armhf .so
 # 模板所以不收录）。技术上 32 位已可用——A 方案 GC 旁路表进 main 后
 # PXT64 布局在 32 位平台跑通，见 README「32 位与 64 位」与
-# docs/PXT32-A-SCHEME.md。3DS / Vita 核心形态已真机验收（含 PATCH 16-20），
-# 但这两条线走独立的 ctr/vita 静态构建，不在本 buildbot 矩阵内。
+# docs/PXT32-A-SCHEME.md。3DS / Vita 静态核心形态已真机验收（含 PATCH 16-20），
+# 现已纳入本 buildbot 矩阵（上方两个 static job）。NX 线上游崩溃挂起
+# （libretro/RetroArch#18905），暂不加入 libnx 模板避免分发坏包。
