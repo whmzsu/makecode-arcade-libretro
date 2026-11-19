@@ -1037,8 +1037,11 @@ jobs:
 
       # 与 golden job 同一个比对脚本：纯 ctypes.CDLL，macOS 自带 python3 即可
       - name: dlopen + 末帧哈希比对（golden 三例）
-        run: tools/ci_regress.sh out/macos-verify/makecode_arcade_libretro.dylib \
-               --bmp-dir out/macos-verify-bmp
+        # 必须用块标量：GitHub 把 `run: a \` + 续行折叠成一行，ci_regress.sh
+        # 会把续行 token 当第二个位置参数（CORE）报"找不到核心"
+        run: |
+          tools/ci_regress.sh out/macos-verify/makecode_arcade_libretro.dylib \
+            --bmp-dir out/macos-verify-bmp
 
       # 顺带把 --reinit 也跑一遍：PATCH 20 的像素格式粘滞不是架构相关的，
       # 但 macOS 静态状态同样跨 dlclose 存活（Mach-O 无 -z nodelete 概念），
