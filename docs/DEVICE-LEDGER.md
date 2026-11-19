@@ -34,7 +34,7 @@
 - Lakka 的核心在 `/storage/cores/`，卡带在 `/flash/roms/pxt64_collections/`（20 张）。
 - R36S（原）2026-11-12 维修回归：实机 `strings` 显示此前为 **0.3.2**（台账误记 0.3.3），已升 **0.3.9**；golden 三例末帧哈希与 x86_64 基线逐位一致（0556e78f / e82844f7 / 0eb7884c），3 张 PATCH 夹具（crash-scale / crash-idiv / oversize-section）全过，其中 oversize-section 为预期 `load_game -> FAIL`（VM error 1014）。
 
-## 3. Android 掌机（4 台）
+## 3. Android 掌机（5 台）
 
 | 别名 | adb id | 设备 | 系统 | 屏幕 | 核心 | 用途 |
 |---|---|---|---|---|---|---|
@@ -42,8 +42,9 @@
 | `rtwo` | `ZY22GCKKB4` | Motorola XT2301-5（骁龙 8 Gen 2） | **Android 16 / SDK 36** | — | 0.3.5 | RA 1.21.0 是 `targetSdk=28` 才跑得起来 |
 | `oxygen` | `b2aec2db` | Xiaomi Mi Max 2（骁龙 625） | **Android 7.1.1 / SDK 25** | — | **0.3.9** | **常规长测机**：3.7GB / data 43GB |
 | `hydrogen` | `13c2be8e` | Xiaomi Mi Max（一代，骁龙 650） | **Android 7.0 / SDK 24** | — | **0.3.9** | shell 宿主 21/21 一致（SDK<30 无 TBI） |
+| `78p01` | `VGWSAQD6GQLN6LJR` | 78Dian 78P01（MT6592，8×A7 1.14G / 2GB） | **Android 4.2.2 / SDK 17** | 720×1280 | 0.3.10 armv7（垫片） | **唯一纯 32 位系统** + 最低端性能样本；21/21 逐位一致 |
 
-合计 **15 台**：9 台 Linux 掌机 + 1 台 Switch(Lakka) + 1 台送修 + 4 台 Android。
+合计 **16 台**：9 台 Linux 掌机 + 1 台 Switch(Lakka) + 1 台送修 + 5 台 Android。
 
 2026-11-09 用 0.3.7 的 `android-arm64` 核心（md5 `8e3e37c383cd290a72cf34f901aa5935`，
 455 136 B）在 Mi Max 2 上跑 21 张卡带 ×600 帧：**21/21 与桌面 x86_64 基线逐位一致**，
@@ -61,6 +62,16 @@
 > 2026-11-14 在小米 Mi Max 一代（SDK 24，`hydrogen`/`13c2be8e`，shell 域）上同一套 21 卡 ×600 帧：
 > **21/21 与桌面 x86_64 基线逐位一致**（`run_shellhost.sh` 结论「全部一致」、exit=0）。
 > 证明 0.3.9 在更老的 SDK 24 上也等价，TBI/906 未触发（SDK<30 预期内），可作第二台 Android 回归机。
+>
+> **78P01（2026-11-19）**：纯 32 位系统（主 ABI 就是 `armeabi-v7a`，不是 arm64 兼容模式），
+> MT6592 八核 A7 但默认只有 2 核在线、1.14GHz，Android 4.2.2 / SDK 17，已装 `com.retroarch.ra32`。
+> 发版 armv7 核心（API 21 编译）在这里 `dlopen` 直接失败——老 bionic 缺 9 个符号
+> （`log2`/`strtold`/`wcstof`/`wcstoll`/`android_set_abort_message`/`dl_unwind_find_exidx` 等）。
+> 用 `tools/android_test/api17_shim.c` 编出 `LD_PRELOAD` 垫片补齐后，0.3.10 armv7 核心
+> **21 卡 ×600 帧 21/21 与 android21 基线逐位一致，全部 rc=0**；
+> 2400 帧墙钟吞吐 ping ≥1200 / Blocky ~343 / cube-land ~104 fps（2 核 A7、秒级精度）。
+> 这台补上了 32 位验收此前只在 SDK 24/25 的 arm64 机上做过的空白，也是最低端性能样本。
+> 垫片只是测试脚手架，不进发布物；玩家用 RA32 装核心不受影响（RetroArch 自带这些符号）。
 
 ## 4. 版本登记（linux-arm64 核心）
 
@@ -84,8 +95,10 @@
   + zlib 压缩 JSON，可用 `zlib.decompress` 解开核对。
 - 换核心后 `.bak` 必须移出核心目录，否则被前端 glob 成重复条目。
 
-**只有 2 台常开**
-- `cubexx` / `rgb30c` 是唯一两台保持联网的；其余关机或送修，要动先请用户开机。
+**常开情况（2026-11-19 实测）**
+- Linux 掌机目前只有 `cubexx`（.149）在线；`rgb30c`（.101）ping 与 22 端口都不通（台账此前标"在线"已滞后）。
+- Android 侧当前 USB 在线：`oxygen`、`hydrogen`、`78p01`（另有一台 adb id 未登记，见 §3）。
+- 其余设备关机或送修，要动先请用户开机。
 - 2026-11-10 08:24~19:23 `cubexx`（.149）短暂关机：无 ARP、22 端口超时，同网段扫 22 端口只剩
   .1（路由）/ .69（工具机）/ .84（另一台 dropbear，root 密码不对，不是 cubexx）/
   .101（rgb30c）/ .196 —— **判设备关机或掉网，不是改 IP**。19:23 开机后已补升 0.3.8 并实测通过。

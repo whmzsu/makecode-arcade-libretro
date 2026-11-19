@@ -36,6 +36,14 @@ RG353M/RG353V（RK3566）146–150 fps（2.4–2.5×），无需动。
 - 验证：默认构建 golden 三例 = `0556e78f / e82844f7 / 0eb7884c` 逐位一致；
   默认版无计时符号。
 
+### 1b. armv7 profile 核心构建（真机用，对象隔离）
+- `BUILD_SUFFIX=-prof EXTRA_CXXFLAGS=-DMCA_PROFILE ./tools/build_target.sh armv7a-linux-androideabi21`
+  产物落 `core/dist/armv7a-linux-androideabi21-prof/`，`BUILD_SUFFIX` 只改目录名、
+  `TARGET_FLAGS` 仍用原始 triple，正式 armv7 对象零污染。
+- profile 版与正式版同 900 帧末帧 hash 逐位一致（cubeland `23210fb3…`）：计时不影响画面。
+- 78P01 这类 SDK 17 老机需 `tools/android_test/api17_shim.c` 的 LD_PRELOAD 垫片才能
+  dlopen API 21 核心（见 `DEVICE-LEDGER.md` §3）。
+
 ### 2. 可复现吞吐基线
 
 `tools/bench_throughput.sh <core.so> [frames=1200] [repeats=3] [outdir=out/bench]`
@@ -77,15 +85,40 @@ tool69 与 R36S 上跑，输出口径一致。`CARTS_DIR=` 可覆盖卡带目录
    算），不能相加当成两个独立成本。判断瓶颈看 VM_EXEC 即可。
 4. VIDEO 段是 Python 宿主回调，真机由前端处理，不可比。
 
-## 下一步（需把尺子搬到目标机）
+## 78P01 真机画像（armv7 / SDK 17 / MT6592 2×A7@1.14G，us/call，900 帧 report#3）
 
-tool69 是 x86，**热点排序要按 R36S 的真实数字重测**才有意义——ARM 无 x86 的
-自动向量化，`image.cpp` 各 bpp 分支的相对成本可能不同。步骤：
+这是第一份**真 ARM**热点画像（此前 tool69 是 x86）。垫片后跑 profile 核心，
+三卡带全 `EXIT=0`、末帧 hash 与正式版逐位一致。
 
-1. R36S 上装 `out/core-prof.so` + 用 `bench_throughput.sh` 同口径跑，出真实热点画像。
-2. 若确认 VM_EXEC 内部 blit 占大头 → 定点优化 `image.cpp` 的 `drawImageCore`
-   （覆盖率仅 18%、863 行未执行，上游自带 "expanded version 5% faster" 注释）。
-3. 每步优化后：golden 三例逐位一致 + 全卡带 sweep 逐位比对 + 吞吐基线对比。
+| 阶段 | ping | Blocky | cubeland | 随卡带变化 | 对照 tool69(x86) |
+|---|---|---|---|---|---|
+| FRONT_TOTAL | 817 | 4171 | 9183 | 涨 11× | 357→1084 |
+| PULL_SCREEN（前端等 VM） | 638 | 3976 | 8977 | **涨 14×** | 92→829 |
+| PIXEL_CONV（BGRA→565） | 145 | 147 | 156 | **恒定** | 10→18（ARM 高 8–14×，无向量化） |
+| AUDIO | 4 | 13 | 5 | 恒定 | 0.7→1.1 |
+| VIDEO（宿主回调） | 20 | 24 | 31 | 恒定 | 190–227（C 宿主无前端缩放，不可比） |
+| VM_EXEC（逻辑+绘制） | 965 | 6549 | 11594 | **涨 12×** | 161→1157 |
+| VM_PUBLISH | 154 | 47 | 25 | 降（竞争） | ~2 |
+| VM_EXEC 实际 calls | 530 | 544 | 694 | 900 帧里 VM 只产 530–694 帧 | — |
+
+**结论**：
+
+1. **VM_EXEC 仍是唯一随复杂度暴涨的核心段**，真机上 965→11594 us（0.97→11.6 ms），
+   cubeland 单帧游戏逻辑+绘制就吃掉 11.6 ms——这就是低端掉帧主因，与 tool69 判断一致。
+2. **VM 线程跟不上前端**：900 帧前端产出里 VM 只算了 530–694 次（59%–77%），
+   PULL_SCREEN 8977 us 是前端空等 VM 的时间，与 VM_EXEC 是同一份时间，不能相加。
+3. **PIXEL_CONV 在 ARM 上 ~146 us（比 x86 高一个量级）但仍只占 cubeland 预算 0.8%**，
+   确认不是优化靶子；之前"代价可忽略"的判断在真机上依然成立。
+4. 优化靶子锁定 `VM_EXEC` 内部的 `image.cpp` blit/drawImageCore。
+
+## 下一步（靶子已锁定，待优化）
+
+1. 定点优化 `image.cpp` 的 `drawImageCore`（覆盖率仅 18%、863 行未执行，
+   上游自带 "expanded version 5% faster" 注释），这是 VM_EXEC 的大头。
+2. 每步优化后：golden 三例逐位一致 + 全卡带 sweep 逐位比对 + 吞吐基线对比
+   （78P01 已有可复现口径：ping ≥1200 / Blocky ~343 / cubeland ~104 fps）。
+3. R36S 仍关机，开机后可补一份 RK3326 同口径画像（当前 78P01 的 A7 是最低端，
+   热点排序结论可直接用）。
 
 ## 已知限制
 

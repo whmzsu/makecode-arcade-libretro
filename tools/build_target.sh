@@ -57,6 +57,10 @@ case "$TRIPLE" in
     ;;
 esac
 
+# BUILD_SUFFIX 仅用于隔离特殊构型的对象/产物目录（如 MCA_PROFILE 计时版），
+# 默认空 = 正式路径不变。TARGET_FLAGS 仍用原始 TRIPLE，只有目录名带后缀。
+if [ -n "${BUILD_SUFFIX:-}" ]; then TAG="$TAG$BUILD_SUFFIX"; fi
+
 WORK="$CORE/build/$TAG"
 OBJV="$WORK/vm_objs"
 OBJC="$WORK/core_objs"
