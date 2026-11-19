@@ -1,0 +1,44 @@
+Third-party notices for makecode-arcade-libretro
+================================================
+
+The project's own code is licensed under MIT (see LICENSE). The following
+vendored components keep their original licenses and copyright notices.
+
+1. pxt VM and C++ runtime (runtime/pxtapp/)
+   Source: https://github.com/microsoft/pxt and
+           https://github.com/microsoft/pxt-arcade
+   License: MIT
+
+   MIT License
+
+   Copyright (c) Microsoft Corporation. All rights reserved.
+
+   Permission is hereby granted, free of charge, to any person obtaining a copy
+   of this software and associated documentation files (the "Software"), to deal
+   in the Software without restriction, including without limitation the rights
+   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+   copies of the Software, and to permit persons to whom the Software is
+   furnished to do so, subject to the following conditions:
+
+   The above copyright notice and this permission notice shall be included in all
+   copies or substantial portions of the Software.
+
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+   SOFTWARE
+
+   Local modifications (frame stepping in scheduler.cpp, GC tag side-table in
+   runtime/pxtapp/core---vm/gc.cpp, host ABI glue) are our own; see
+   tools/check_pxt_patches.py for the patch inventory.
+
+2. libretro API header (core/libretro.h)
+   Source: https://github.com/libretro/libretro-common
+   License: MIT, Copyright (C) 2010-2024 The RetroArch team
+   The full notice is embedded at the top of core/libretro.h.
+
+No third-party game content, artwork, music or executables are distributed with
+the core. Cartridges (.pxt64) are supplied by players.

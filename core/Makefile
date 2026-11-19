@@ -182,16 +182,24 @@ else ifneq (,$(findstring win,$(platform)))
    # mingw-w64）的 win32 线程模型不会自动链 winpthreads，链接时报
    # undefined reference to pthread_mutex_lock。探测工具链里哪个库在就链哪个
    #（-print-file-name 找不到时原样返回名字本身，据此判断）。
-   PTHREAD_A := $(shell $(CC) -print-file-name=libpthread.a 2>/dev/null)
-   ifeq ($(PTHREAD_A),libpthread.a)
-      PTHREAD_A := $(shell $(CC) -print-file-name=libwinpthread.a 2>/dev/null)
-   endif
-   ifneq ($(PTHREAD_A),)
-   ifneq ($(PTHREAD_A),libpthread.a)
-   ifneq ($(PTHREAD_A),libwinpthread.a)
-      LDLIBS += -lpthread
-   endif
-   endif
+   # GNU mingw（buildbot 的 MXE / apt mingw-w64）默认动态链 libgcc、libstdc++
+   # 和 winpthread，玩家机器上没这三个 DLL 就打不开核心。实测三个都会进
+   # import table，因此这里整包静态链。zig 的 -dumpmachine 是 *-windows-gnu，
+   # 不含 mingw，走下面原有的探测分支，不受影响。
+   ifneq (,$(findstring mingw,$(shell $(CC) -dumpmachine 2>/dev/null)))
+      LDLIBS += -static-libgcc -static-libstdc++ -Wl,-Bstatic -lwinpthread -Wl,-Bdynamic
+   else
+      PTHREAD_A := $(shell $(CC) -print-file-name=libpthread.a 2>/dev/null)
+      ifeq ($(PTHREAD_A),libpthread.a)
+         PTHREAD_A := $(shell $(CC) -print-file-name=libwinpthread.a 2>/dev/null)
+      endif
+      ifneq ($(PTHREAD_A),)
+      ifneq ($(PTHREAD_A),libpthread.a)
+      ifneq ($(PTHREAD_A),libwinpthread.a)
+         LDLIBS += -lpthread
+      endif
+      endif
+      endif
    endif
    # 把 Windows API 基线抬到 Win7（只用 #ifndef 兜底，见该头文件注释）：
    # mingw-gcc 默认按 XP 裁 windows.h，platform.cpp 的 GetTickCount64 编不过；

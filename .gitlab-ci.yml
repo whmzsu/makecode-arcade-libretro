@@ -4,8 +4,13 @@
 # 模板来源：libretro-infrastructure/ci-templates
 # 约定：
 #   CORENAME      —— 产物名 <CORENAME>_libretro.<ext>，须与 .info 的 systemid 对应
+#   MAKEFILE      —— Makefile 文件名（模板的 script 用 -f ${MAKEFILE}）
 #   MAKEFILE_PATH —— 仓库内 Makefile 所在目录（本仓库的 Makefile 在 core/）
 #   JNI_PATH      —— 含 jni/ 的目录（android-jni 模板用）
+#
+# 产物落点：buildbot 只收仓库根的 <CORENAME>_libretro.<ext>。本仓库 Makefile
+# 把 .so/.dll 放在 core/，所以每个桌面 job 的 after_script 都要搬到根目录
+# （对照 bsnes 的 .core-defs-linux / -windows 写法），不能只 test -f 就结束。
 #
 # 收录原则：只列本地验证过能编过的平台。macOS / iOS / 主机平台暂不列，
 # 等对应工具链上验证过再加，避免 CI 出现长期红灯。
@@ -13,8 +18,20 @@
 .core-defs:
   variables:
     CORENAME: makecode_arcade
+    MAKEFILE: Makefile
     MAKEFILE_PATH: core
     JNI_PATH: core
+
+# 本仓库的 Makefile 把产物放在 core/，而 buildbot 收的是仓库根的同名文件。
+.artifacts-dll:
+  after_script:
+    - mv ${MAKEFILE_PATH}/${CORENAME}_libretro.dll ${CORENAME}_libretro.dll
+    - if [ "${STRIP_CORE_LIB:-1}" -eq 1 ]; then ${STRIP:-strip} --strip-unneeded ${CORENAME}_libretro.dll; fi
+
+.artifacts-so:
+  after_script:
+    - mv ${MAKEFILE_PATH}/${CORENAME}_libretro.so ${CORENAME}_libretro.so
+    - if [ "${STRIP_CORE_LIB:-1}" -eq 1 ]; then ${STRIP:-strip} --strip-unneeded ${CORENAME}_libretro.so; fi
 
 include:
   # Windows x64 / x86 32 位（MinGW 交叉编译，产物 .dll）
@@ -45,6 +62,7 @@ libretro-build-windows-x64:
   extends:
     - .libretro-windows-x64-mingw-make-default
     - .core-defs
+    - .artifacts-dll
   script:
     - make -C ${MAKEFILE_PATH} -f ${MAKEFILE} -j${NUMPROC}
     # 防假绿（Supermodel 教训）：platform 不匹配时 make 会静默 exit 0，
@@ -55,6 +73,7 @@ libretro-build-windows-i686:
   extends:
     - .libretro-windows-i686-mingw-make-default
     - .core-defs
+    - .artifacts-dll
   script:
     - make -C ${MAKEFILE_PATH} -f ${MAKEFILE} -j${NUMPROC}
     - test -f ${MAKEFILE_PATH}/${CORENAME}_libretro.dll
@@ -64,6 +83,7 @@ libretro-build-linux-x64:
   extends:
     - .libretro-linux-x64-make-default
     - .core-defs
+    - .artifacts-so
   script:
     - make -C ${MAKEFILE_PATH} -f ${MAKEFILE} -j${NUMPROC}
     - test -f ${MAKEFILE_PATH}/${CORENAME}_libretro.so
@@ -72,6 +92,7 @@ libretro-build-linux-aarch64:
   extends:
     - .libretro-linux-aarch64-make-default
     - .core-defs
+    - .artifacts-so
   script:
     - make -C ${MAKEFILE_PATH} -f ${MAKEFILE} -j${NUMPROC}
     - test -f ${MAKEFILE_PATH}/${CORENAME}_libretro.so
@@ -80,6 +101,7 @@ libretro-build-linux-i686:
   extends:
     - .libretro-linux-i686-make-default
     - .core-defs
+    - .artifacts-so
   script:
     - make -C ${MAKEFILE_PATH} -f ${MAKEFILE} -j${NUMPROC}
     - test -f ${MAKEFILE_PATH}/${CORENAME}_libretro.so
@@ -95,9 +117,9 @@ android-armeabi-v7a:
     - .libretro-android-jni-armeabi-v7a
     - .core-defs
 
-# 32 位口径（2026-11-17）：收录矩阵加 win-i686 / linux-i686 / android
+# 32 位口径（2026-11-19）：收录矩阵含 win-i686 / linux-i686 / android
 # armeabi-v7a（发版 zip 另有 linux-armhf，buildbot 没有标准 armhf .so
 # 模板所以不收录）。技术上 32 位已可用——A 方案 GC 旁路表进 main 后
 # PXT64 布局在 32 位平台跑通，见 README「32 位与 64 位」与
-# docs/PXT32-A-SCHEME.md。**注意：3DS/Vita 真机验收尚未完成**，Core
-# Downloader 的玩家如遇问题请反馈 issue。
+# docs/PXT32-A-SCHEME.md。3DS / Vita 核心形态已真机验收（含 PATCH 16-20），
+# 但这两条线走独立的 ctr/vita 静态构建，不在本 buildbot 矩阵内。
