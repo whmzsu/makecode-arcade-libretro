@@ -12,6 +12,11 @@
 # 把 .so/.dll 放在 core/，所以每个桌面 job 的 after_script 都要搬到根目录
 # （对照 bsnes 的 .core-defs-linux / -windows 写法），不能只 test -f 就结束。
 #
+# platform 必须显式注入：buildbot 模板只注入 CC/CXX/STRIP，不传 platform；
+# 本仓库 Makefile 在 platform 为空时按 uname 探测，而 buildbot runner 是 Linux，
+# Windows job 会误走 Unix 分支，拿 mingw 链 .so 时报 `unrecognized option -z`
+# 直接红灯（实测）。对照 bsnes 的 .core-defs-windows 也显式给 platform。
+#
 # 收录原则：只列本地验证过能编过的平台。macOS / iOS / 主机平台暂不列，
 # 等对应工具链上验证过再加，避免 CI 出现长期红灯。
 
@@ -63,6 +68,8 @@ libretro-build-windows-x64:
     - .libretro-windows-x64-mingw-make-default
     - .core-defs
     - .artifacts-dll
+  variables:
+    platform: win64
   script:
     - make -C ${MAKEFILE_PATH} -f ${MAKEFILE} -j${NUMPROC}
     # 防假绿（Supermodel 教训）：platform 不匹配时 make 会静默 exit 0，
@@ -74,6 +81,8 @@ libretro-build-windows-i686:
     - .libretro-windows-i686-mingw-make-default
     - .core-defs
     - .artifacts-dll
+  variables:
+    platform: win32
   script:
     - make -C ${MAKEFILE_PATH} -f ${MAKEFILE} -j${NUMPROC}
     - test -f ${MAKEFILE_PATH}/${CORENAME}_libretro.dll
@@ -84,6 +93,8 @@ libretro-build-linux-x64:
     - .libretro-linux-x64-make-default
     - .core-defs
     - .artifacts-so
+  variables:
+    platform: unix-x64
   script:
     - make -C ${MAKEFILE_PATH} -f ${MAKEFILE} -j${NUMPROC}
     - test -f ${MAKEFILE_PATH}/${CORENAME}_libretro.so
@@ -93,6 +104,8 @@ libretro-build-linux-aarch64:
     - .libretro-linux-aarch64-make-default
     - .core-defs
     - .artifacts-so
+  variables:
+    platform: unix-aarch64
   script:
     - make -C ${MAKEFILE_PATH} -f ${MAKEFILE} -j${NUMPROC}
     - test -f ${MAKEFILE_PATH}/${CORENAME}_libretro.so
@@ -102,6 +115,8 @@ libretro-build-linux-i686:
     - .libretro-linux-i686-make-default
     - .core-defs
     - .artifacts-so
+  variables:
+    platform: unix-i686
   script:
     - make -C ${MAKEFILE_PATH} -f ${MAKEFILE} -j${NUMPROC}
     - test -f ${MAKEFILE_PATH}/${CORENAME}_libretro.so
