@@ -166,18 +166,22 @@ opcode 函数指针分派 `opcodes[op](ctx, arg)`）——cubeland 逻辑重、�
 `mca_profile.h` 新增 `MCA_PF_DRAW_IMAGE` 段常驻（默认零开销），以后每轮优化都能
 直接看 blit 占比，不用再猜。`DRAW_IMAGE` 插桩见 image.cpp 的 `drawImageCoreImpl` 包装。
 
-## 下一步（靶子转向解释器，待决策）
+## 最终结论：优化阶段收口（2026-11-19 决策）
 
-VM_EXEC 的大头是解释器 opcode 分派，可选方向（**均未动手，需先评估风险/收益**）：
+63 卡全量吞吐实测（78P01 / 600 帧 / `--wall`）后定案：**不再动核心**。
 
-1. **解释器分派优化**：`exec_loop` 的 `opcodes[op](ctx, arg)` 间接调用在 ARM 上
-   分支预测代价高。可试 computed-goto / 内联高频 opcode，但涉及 PXT ABI，
-   逐位一致验证成本高。**收益未知，风险高**。
-2. **不改解释器，改 GC/分配**：若热点在对象分配（GC sweep），有更安全的切入点。
-   需先加 GC 子段实测再定。
-3. **接受现状**：低端机 cubeland ~104fps 已远超 60fps 目标（1.7× 余量），
-   78P01 是系列最低端；R36S 口径 65fps/1.08× 才是真瓶颈，但那台关机无法测。
-   若目标是"够用"，可能不必为 1.08× 的边际机型承担核心改动风险。
+1. **正常游戏余量充足**：最重的常规卡 cubeland 在系列最低端的 78P01 上
+   11.7ms/帧，仍在 60fps 的 16.7ms 预算内；用户关心的 jupmy 168fps（2.8× 余量）。
+   `--turbo` 下的"VM 跟不上前端"是全速拉帧的假象，真实 60fps 节拍下不成立。
+2. **吃紧的 6 张救不回来**：unique_cube 等 3D/软件光栅 demo 每帧 100ms+
+   （9.7fps），解释器再快 50% 也到不了 60fps；它们是极端 demo，非玩家实际游玩内容。
+3. **唯一有空间处代价过高**：VM_EXEC 的 99% 是 `exec_loop` 的 opcode 函数指针分派，
+   改它等于 fork 自造解释器——逐位一致难保证、10 主包 + 3DS/Vita/NX 全平台重验、
+   长期维护负担，而收益只落在上述极端卡上。
+
+**保留的尺子**（本轮产出，默认零开销，不进发布行为）：`MCA_PF_DRAW_IMAGE` 常驻子段
++ `drawImageCoreImpl` 包装、`mca_host --wall` 单调钟计时、`build_target.sh BUILD_SUFFIX`
+构建隔离。将来若真有优化需求，可直接量化收益再决策，不必重新搭测量链路。
 
 通用验证铁律不变：golden 三例逐位一致 + 全卡带 sweep + 吞吐基线对比
 （78P01 口径 ping ≥1200 / Blocky ~343 / cubeland ~104 fps）。
