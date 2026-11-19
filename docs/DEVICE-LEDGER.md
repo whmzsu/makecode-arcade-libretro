@@ -10,8 +10,8 @@
 
 | 别名 | IP | 型号 | SoC / 内存 | 系统 / 内核 | RA | 核心 | 状态 |
 |---|---|---|---|---|---|---|---|
-| `cubexx` | 192.168.1.149 | Anbernic RG CubeXX（H700，标识 `rgcubexx-h`） | 4×A55 1.80G / 973MB | muOS 2606.0 (ANDROMEDA) / 4.9.170 | 1.22.2 | **0.3.9** | 在线 |
-| `rgb30c` | 192.168.1.101 | Powkiddy RGB30 | RK3566 1.99G / 967MB | Debian 13 (trixie) / 5.10.226 | 1.22.2 | **0.3.9** | 在线 |
+| `cubexx` | 192.168.1.149 | Anbernic RG CubeXX（H700，标识 `rgcubexx-h`） | 4×A55 1.80G / 973MB | muOS 2606.0 (ANDROMEDA) / 4.9.170 | 1.22.2 | **0.3.10** | 在线 |
+| `rgb30c` | 192.168.1.101 | Powkiddy RGB30 | RK3566 1.99G / 967MB | Debian 13 (trixie) / 5.10.226 | 1.22.2 | **0.3.10** | 在线 |
 | `rg353m` | 192.168.1.130 | Anbernic RG353M | RK3566 1.99G / **1971MB** | Debian 13 / 5.10.226 | 1.22.2 | 0.3.3 | 关机 |
 | `rg353v` | 192.168.1.77 | Anbernic RG353V/VS | RK3566 1.99G / 967MB | Debian 13 / 5.10.226 | 1.22.2 | 0.3.3 | 关机 |
 | `rk2023` | 192.168.1.17 | Powkiddy RK2023 | RK3566 1.99G / 964MB | **Ubuntu 19.10** / 4.19.172（glibc 2.30） | **1.19.1** | 0.3.3 | 关机 |
@@ -28,7 +28,8 @@
 | 别名 | IP | 设备 | 规格 | 系统 | 核心 | 状态 |
 |---|---|---|---|---|---|---|
 | （Lakka） | 192.168.1.61 | Nintendo Switch OLED（Mariko） | 6 核 2.295G / 3.9GB | Lakka / L4T 4.9.140 | 0.3.3 `lakka-arm64` | 关机 |
-| `r36s`（原） | 192.168.1.81 | 初代 R36S | RK3326 1.30G | Debian | 0.3.9 | 在线 |
+| `r36s`（原） | 192.168.1.81 | 初代 R36S | RK3326 1.30G | Debian | 0.3.9 | 关机 |
+| `clone-r36s` | 192.168.1.78（原 .31/.137 之外第三台 clone） | R36S Clone Type2 | RK3326 1.30G | Debian 13 | **0.3.10** | 在线 |
 
 - Switch 另有独立的 `nx-v*` 线（Horizon 静态库 + NRO），挂起等上游，产物同为 0.3.3。
 - Lakka 的核心在 `/storage/cores/`，卡带在 `/flash/roms/pxt64_collections/`（20 张）。
@@ -43,8 +44,21 @@
 | `oxygen` | `b2aec2db` | Xiaomi Mi Max 2（骁龙 625） | **Android 7.1.1 / SDK 25** | — | **0.3.9** | **常规长测机**：3.7GB / data 43GB |
 | `hydrogen` | `13c2be8e` | Xiaomi Mi Max（一代，骁龙 650） | **Android 7.0 / SDK 24** | — | **0.3.9** | shell 宿主 21/21 一致（SDK<30 无 TBI） |
 | `78p01` | `VGWSAQD6GQLN6LJR` | 78Dian 78P01（MT6592，8×A7 1.14G / 2GB） | **Android 4.2.2 / SDK 17** | 720×1280 | 0.3.10 armv7（垫片） | **唯一纯 32 位系统** + 最低端性能样本；21/21 逐位一致 |
+| `persee` | `GB8ZA96JUN` | Orbbec Persee 电视盒子（RK3288，4×A17 / 2GB） | **Android 5.1.1 / SDK 22**（userdebug，可 adb root） | 1920×1080 | **0.3.10 armv7（免垫片）** | **低端电视盒样本**：SDK 22 直接 dlopen 成功，证明 78P01 的缺符号是 SDK 17 特有；RA32 1.22.2 已装、Intent 直启跑卡带正常 |
 
-合计 **16 台**：9 台 Linux 掌机 + 1 台 Switch(Lakka) + 1 台送修 + 5 台 Android。
+合计 **17 台**：10 台 Linux 掌机 + 1 台 Switch(Lakka) + 1 台送修 + 5 台 Android。
+
+2026-11-19 部署 0.3.10（linux-arm64 md5 `005a7c49ffa27139813f54365bd73387`，733 880 B）：
+- **rgb30c / cubexx / clone-r36s** 三台升级，golden 三例与基线逐位一致
+  （0556e78f / e82844f7 / 0eb7884c），`--reinit=2` 三轮 `SET_PIXEL_FORMAT` 协商 6 次、
+  末帧哈希不变 —— PATCH 20（重载重协商）真机生效。
+- **persee（RK3288 电视盒子，新入库）**：0.3.10 android-armv7（md5 `0575ef6cf5d381715e6968729363b18c`）
+  **无需垫片**直接 dlopen（SDK 22 bionic 已有 log2/strtold 等符号），21 卡 ×600 帧
+  **21/21 与 android21 基线逐位一致**；12000 帧吞吐 ping ~3000 / Blocky ~2000 /
+  cube-land ~214 fps（约为 78P01 的 2~6 倍）。装 RA32 1.22.2 后 Load Core 列表出现
+  「MakeCode Arcade (unofficial)」，Intent 带 ROM/LIBRETRO extra 直启 Pong 正常出画。
+- clone-r36s / rgb30c 核心目录的历史 `.bak` 已移出（铁律：.bak 留在核心目录会被前端
+  glob 成重复条目）。
 
 2026-11-09 用 0.3.7 的 `android-arm64` 核心（md5 `8e3e37c383cd290a72cf34f901aa5935`，
 455 136 B）在 Mi Max 2 上跑 21 张卡带 ×600 帧：**21/21 与桌面 x86_64 基线逐位一致**，
@@ -77,6 +91,7 @@
 
 | 版本 | 核心 MD5 | 大小 | 备注 |
 |---|---|---|---|
+| 0.3.10 | linux-arm64 `005a7c49ffa27139813f54365bd73387` / 733 880 B<br>android-armv7 `0575ef6cf5d381715e6968729363b18c` / 712 940 B | — | **PATCH 20**（重载重协商，修 Vita 偏色）等 5 条真机缺陷；32 位包落地（含 android-armv7）。2026-11-19 已铺 3 台 Linux 掌机 + 电视盒子（免垫片 21/21），详见上方部署记录 |
 | 0.3.9 | `2cb2236308791b49eb96b08202502d33` | 733 432 B | **PATCH 13/14/15**：两处整数除零不再带崩宿主；镜像段校验失败 `load_game` 返回 false 并打 `VM error 1014`。两台 Linux 掌机 golden 三例与 0.3.8 逐位一致 + 3 张回归夹具全过，真 RA 退出码 0 |
 | 0.3.8 | `eb4eb21716d77ecaabd77357b5ce1ea7` | 732 496 B | **首个 strip 版本**（原 5.0 MB）+ 独立 `-debuginfo.zip`；补 Android/musl 的 `DF_1_NODELETE`。qemu 跑 golden 三例与 0.3.7 逐位一致 |
 | 0.3.7 | `a3e8b64dc602fc98de331a7a1c1dc003` | 5 007 984 B | 修 PATCH 11/12 + 退出 139（`DF_1_NODELETE`）；两机实测退出码 0 |
@@ -95,9 +110,12 @@
   + zlib 压缩 JSON，可用 `zlib.decompress` 解开核对。
 - 换核心后 `.bak` 必须移出核心目录，否则被前端 glob 成重复条目。
 
-**常开情况（2026-11-19 实测）**
-- Linux 掌机目前只有 `cubexx`（.149）在线；`rgb30c`（.101）ping 与 22 端口都不通（台账此前标"在线"已滞后）。
-- Android 侧当前 USB 在线：`oxygen`、`hydrogen`、`78p01`（另有一台 adb id 未登记，见 §3）。
+**常开情况（2026-11-19 晚实测）**
+- Linux 掌机在线：`cubexx`（.149）、`rgb30c`（.101）、`clone-r36s`（.78，Debian 13、
+  hostname `clone-r36s`，是 .31/.137 之外的第三台 R36S Clone）；`r36s`（原 .81）不在线。
+- 网段另有 .88（**路由器**）与 .196（**小 NAS**，Ubuntu OpenSSH 8.9）在线，均非测试设备。
+  .88 只回应 ssh-rsa 且凭据不符，是 DHCP 租约过期导致的地址冲突假象，别当掌机去连。
+- Android 侧当前 USB 在线：`oxygen`、`hydrogen`、`78p01`、`persee`（新）。
 - 其余设备关机或送修，要动先请用户开机。
 - 2026-11-10 08:24~19:23 `cubexx`（.149）短暂关机：无 ARP、22 端口超时，同网段扫 22 端口只剩
   .1（路由）/ .69（工具机）/ .84（另一台 dropbear，root 密码不对，不是 cubexx）/

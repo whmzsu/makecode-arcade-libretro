@@ -24,7 +24,8 @@ PROJ="$(cd "$HERE/../.." && pwd)"
 REMOTE=/data/local/tmp/mca
 CARTS=""
 CORE=""   # 留空 = 自动探测 out/android-manual-test/ 下唯一的 .so（版本号不写死）
-HOSTBIN="$PROJ/out/android/mca_host"
+# 纯 32 位设备（armeabi-v7a）要换成 32 位宿主：HOSTBIN=$PROJ/out/android/mca_host32
+HOSTBIN="${HOSTBIN:-$PROJ/out/android/mca_host}"
 FRAMES=600
 ROUNDS=1
 SERIAL=""
