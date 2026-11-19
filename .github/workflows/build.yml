@@ -40,6 +40,8 @@
 #     免费）上用第三方前端 miniretro 跑 900 帧冒烟 —— 行为层验证
 #   golden-hash：末帧 MD5 比对（2 卡带 3 用例）—— 像素层验证，唯一能抓住
 #     "契约全绿但画面画错了"的断言
+#   macos-verify：发版 dylib 在 GitHub macOS runner（arm64 + x64）上真 dlopen
+#     + golden 三例 + --reinit，macOS 产物唯一一次真实系统加载验证
 #   pxt-patches：14 个必要补丁是否还在（不编译，几秒）
 #   crash-regression：3 张回归夹具盯 PATCH 13/14（两处整数除零）与 15（加载失败可见）
 #   package：把上面各 job 的产物打成发行包，再解包 dlopen 跑 60 帧
@@ -947,7 +949,8 @@ jobs:
   # 实验：Makefile 支持 osx，但本机没有 macOS 工具链，作者未在真机验证过
   # 加载/音频；先只做"编得过"的观察，红了不算回归失败（continue-on-error）
   #
-  # 镜像是 macos-15（Intel x64），不是 macos-14 —— 后者已于 2026-11-02 被
+  # 镜像是 macos-15（Apple Silicon arm64；本 job 编 universal，runner 架构
+  # 不影响产物），不是 macos-14 —— 后者已于 2026-11-02 被
   # GitHub 整体退役，用它会得到 "The configuration 'macos-14-arm64-us-default'
   # is not supported"，job 一秒结束、runner_name 为空、steps 为 0，看起来像
   # 神秘失败，实际是机器借不到。
@@ -982,6 +985,96 @@ jobs:
           name: osx-universal
           path: core/makecode_arcade_libretro.dylib
           if-no-files-found: warn
+          retention-days: 14
+
+  # ------------------------------------------- macOS 真机加载 + 像素验证
+  # 上面那个 macos job 是"真 clang 编不编得过"的实验（continue-on-error），
+  # 这里验证的是**发版口径的产物**：zig 交叉编出的 dylib，在 GitHub 官方
+  # macOS runner 上真 dlopen + 跑 golden 三例。这是 macOS 产物第一次在真实
+  # 系统上加载——其余平台都做过 dlopen 冒烟，唯独 macOS 只有静态架构检查。
+  #
+  # 分两条 runner 而不是一条 universal：macos-15 是 Apple Silicon（arm64），
+  # macos-15-intel 才是 Intel x64；各跑各架构的 dylib，正好覆盖发版两主包。
+  # macos-14 全系列 2026-11-02 退役，别回退到那个标签。
+  #
+  # 断言口径与 golden job 完全一致（tools/fixtures/golden-frames.txt），
+  # 基线跨架构通用已在 x86_64-linux / zig-aarch64-linux / zig-windows 三处
+  # 实测过；这里再加 macOS 两架构。**失败即红**，不再是 continue-on-error。
+  macos-verify:
+    name: macos-verify-${{ matrix.arch }}
+    needs: [zig]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+            triple: aarch64-macos
+          - arch: x64
+            runner: macos-15-intel
+            triple: x86_64-macos
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # 拿 zig job 那份产物，就是进发版 zip 的同一个二进制（不经重新编译）
+      - uses: actions/download-artifact@v4
+        with:
+          name: zig-${{ matrix.triple }}
+          path: out/macos-verify
+
+      - name: 确认 runner 架构与产物一致
+        run: |
+          set -euo pipefail
+          echo "runner uname: $(uname -m) / sw_vers: $(sw_vers -productVersion)"
+          dylib=out/macos-verify/makecode_arcade_libretro.dylib
+          file "$dylib"
+          want=$([ "${{ matrix.arch }}" = arm64 ] && echo arm64 || echo x86_64)
+          [ "$(uname -m)" = "$want" ] \
+            || { echo "::error::runner 架构 $(uname -m) 与期望 $want 不符"; exit 1; }
+          file "$dylib" | grep -q "Mach-O 64-bit.*$want" \
+            || { echo "::error::dylib 架构不是 $want"; exit 1; }
+
+      # 与 golden job 同一个比对脚本：纯 ctypes.CDLL，macOS 自带 python3 即可
+      - name: dlopen + 末帧哈希比对（golden 三例）
+        run: tools/ci_regress.sh out/macos-verify/makecode_arcade_libretro.dylib \
+               --bmp-dir out/macos-verify-bmp
+
+      # 顺带把 --reinit 也跑一遍：PATCH 20 的像素格式粘滞不是架构相关的，
+      # 但 macOS 静态状态同样跨 dlclose 存活（Mach-O 无 -z nodelete 概念），
+      # 值得在真机上确认一次"关游戏重开颜色不变"。
+      - name: 二次加载（--reinit，PATCH 20 真机回归）
+        run: |
+          set -euo pipefail
+          python3 tools/libretro_host.py \
+            out/macos-verify/makecode_arcade_libretro.dylib \
+            tools/fixtures/ping.pxt64 300 --turbo --reinit=2 \
+            --data-dir=out/macos-verify-reinit | tee out/macos-verify-reinit.log
+          got=$(grep -oE '(FINAL|REOPEN)-FRAME-HASH [0-9a-f]{32}' out/macos-verify-reinit.log \
+                | awk '{print $2}' || true)
+          n=$(printf '%s\n' "$got" | grep -c . || true)
+          uniq=$(printf '%s\n' "$got" | sort -u | wc -l)
+          first=$(printf '%s\n' "$got" | head -1)
+          want=$(awk -F'|' '$1 ~ /ping\.pxt64/ {print $4}' \
+                 tools/fixtures/golden-frames.txt | tr -d '\r')
+          [ "$n" -eq 3 ] || { echo "::error::期望 3 轮哈希，实际 $n 轮"; exit 1; }
+          [ "$uniq" -eq 1 ] || {
+            echo "::error::三轮末帧不一致：$(printf '%s' "$got" | tr '\n' ' ')"; exit 1;
+          }
+          [ "$first" = "$want" ] || {
+            echo "::error::重开哈希 $first 与基线 $want 不符"; exit 1;
+          }
+          nfmt=$(grep -c 'SET_PIXEL_FORMAT = 2' out/macos-verify-reinit.log || true)
+          [ "$nfmt" -ge 6 ] \
+            || { echo "::error::macOS 像素格式只协商 $nfmt 次（应为 6）"; exit 1; }
+          echo "macOS 三轮重开一致 $first；SET_PIXEL_FORMAT 共 $nfmt 次"
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: macos-verify-bmp-${{ matrix.arch }}
+          path: out/macos-verify-bmp/*.bmp
+          if-no-files-found: ignore
           retention-days: 14
 
   # ---------------------------------------------------------------- 打包
