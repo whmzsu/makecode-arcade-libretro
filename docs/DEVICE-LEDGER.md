@@ -107,6 +107,7 @@
 
 | 版本 | 核心 MD5 | 大小 | 备注 |
 |---|---|---|---|
+| 0.3.11 | linux-arm64 `83befb0d19aa99b2f77b23554242abea` / 733 880 B<br>android-arm64 `e69c817a8f9db59e420818d90037e226` / 456 688 B | — | **零行为变化**（二进制仅版本号字符串不同）：命名统一 `makecode_arcade_libretro`、macOS x64/arm64 首次进 Release、12 主包。CIA banner 点阵字模补全（修 `3` 歪斜 + `O` 缺字）——首版 Release 因图标问题撤版重发，现行 tag 指向 `5ad275f`。golden 三例本地逐位一致；新 tag run `44731664054` 全绿、20 资产齐全 |
 | 0.3.10 | linux-arm64 `005a7c49ffa27139813f54365bd73387` / 733 880 B<br>android-armv7 `0575ef6cf5d381715e6968729363b18c` / 712 940 B | — | **PATCH 20**（重载重协商，修 Vita 偏色）等 5 条真机缺陷；32 位包落地（含 android-armv7）。2026-11-19 已铺 3 台 Linux 掌机 + 电视盒子（免垫片 21/21），详见上方部署记录 |
 | 0.3.9 | `2cb2236308791b49eb96b08202502d33` | 733 432 B | **PATCH 13/14/15**：两处整数除零不再带崩宿主；镜像段校验失败 `load_game` 返回 false 并打 `VM error 1014`。两台 Linux 掌机 golden 三例与 0.3.8 逐位一致 + 3 张回归夹具全过，真 RA 退出码 0 |
 | 0.3.8 | `eb4eb21716d77ecaabd77357b5ce1ea7` | 732 496 B | **首个 strip 版本**（原 5.0 MB）+ 独立 `-debuginfo.zip`；补 Android/musl 的 `DF_1_NODELETE`。qemu 跑 golden 三例与 0.3.7 逐位一致 |
