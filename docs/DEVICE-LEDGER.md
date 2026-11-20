@@ -20,7 +20,7 @@
 | `r36sclonea` | 192.168.1.31 | R36S Clone Type2（RG351MP 壳，host `r36s-clone-a`） | RK3326 1.30G / 918MB | Debian 13 / **4.4.189** | 1.22.2 | 0.3.3 | 关机 |
 | `r36scloneb` | 192.168.1.137 | R36S Clone Type2（RG351MP 壳，host `r36s-clone-b`） | RK3326 1.30G / 918MB | Debian 13 / **4.4.189** | 1.22.2 | 0.3.3 | 关机 |
 
-系统分布：Debian 13 ×7 / ArkOS ×1（rk2023，实为 Ubuntu 19.10 底）/ muOS ×1。
+系统分布：Debian 13 ×8（本表 7 + §2 的原 `r36s`）/ ArkOS ×1（rk2023，实为 Ubuntu 19.10 底）/ muOS ×1。
 卡带目录：Debian=`/roms/makecode`、ArkOS=`~/makecode`、muOS=`/mnt/mmc/ROMS/MakeCode Arcade`。
 
 ## 2. 其他平台
@@ -28,28 +28,29 @@
 | 别名 | IP | 设备 | 规格 | 系统 | 核心 | 状态 |
 |---|---|---|---|---|---|---|
 | （Lakka） | 192.168.1.61 | Nintendo Switch OLED（Mariko） | 6 核 2.295G / 3.9GB | Lakka / L4T 4.9.140 | 0.3.3 `lakka-arm64` | 关机 |
-| `r36s`（原） | 192.168.1.81 | 初代 R36S | RK3326 1.30G | Debian | 0.3.9 | 关机 |
-| `clone-r36s` | 192.168.1.78（原 .31/.137 之外第三台 clone） | R36S Clone Type2 | RK3326 1.30G | Debian 13 | **0.3.10** | 在线 |
+| `r36s`（原） | **192.168.1.78**（曾为 .81，DHCP 换址） | 初代 R36S（hostname `clone-r36s`，DTB 同为 `R36S Clone Type2`） | RK3326 1.30G | Debian 13 | **0.3.10** | 在线 |
 
 - Switch 另有独立的 `nx-v*` 线（Horizon 静态库 + NRO），挂起等上游，产物同为 0.3.3。
 - Lakka 的核心在 `/storage/cores/`，卡带在 `/flash/roms/pxt64_collections/`（20 张）。
 - R36S（原）2026-11-12 维修回归：实机 `strings` 显示此前为 **0.3.2**（台账误记 0.3.3），已升 **0.3.9**；golden 三例末帧哈希与 x86_64 基线逐位一致（0556e78f / e82844f7 / 0eb7884c），3 张 PATCH 夹具（crash-scale / crash-idiv / oversize-section）全过，其中 oversize-section 为预期 `load_game -> FAIL`（VM error 1014）。
+  2026-11-19 起 DHCP 换址到 **.78**（原 .81 已不可达），同日升 **0.3.10**；它的 hostname 是
+  `clone-r36s`、DTB 也叫 `R36S Clone Type2`，**别据此判成 clone 机**——初代 R36S 刷的就是这套镜像。
 
-## 3. Android 掌机（5 台）
+## 3. Android 设备（6 台，含 1 台电视盒子）
 
 | 别名 | adb id | 设备 | 系统 | 屏幕 | 核心 | 用途 |
 |---|---|---|---|---|---|---|
 | G Cloud | `2429TNR40628` | 罗技 G Cloud `GR0006` | Android 11 / SDK 30 | 1080×1920 @320 | 0.3.5 | 无 root，RA 里能跑；shell 宿主必 906 |
 | `rtwo` | `ZY22GCKKB4` | Motorola XT2301-5（骁龙 8 Gen 2） | **Android 16 / SDK 36** | — | 0.3.5 | RA 1.21.0 是 `targetSdk=28` 才跑得起来 |
-| `oxygen` | `b2aec2db` | Xiaomi Mi Max 2（骁龙 625） | **Android 7.1.1 / SDK 25** | — | **0.3.9** | **常规长测机**：3.7GB / data 43GB |
-| `hydrogen` | `13c2be8e` | Xiaomi Mi Max（一代，骁龙 650） | **Android 7.0 / SDK 24** | — | **0.3.9** | shell 宿主 21/21 一致（SDK<30 无 TBI） |
+| `oxygen` | `b2aec2db` | Xiaomi Mi Max 2（骁龙 625） | **Android 7.1.1 / SDK 25** | — | **0.3.10**（shell 宿主） | **常规长测机**：3.7GB / data 43GB；RA 内核心未动 |
+| `hydrogen` | `13c2be8e` | Xiaomi Mi Max（一代，骁龙 650） | **Android 7.0 / SDK 24** | — | **0.3.10**（shell 宿主） | 21/21 一致（SDK<30 无 TBI） |
 | `78p01` | `VGWSAQD6GQLN6LJR` | 78Dian 78P01（MT6592，8×A7 1.14G / 2GB） | **Android 4.2.2 / SDK 17** | 720×1280 | 0.3.10 armv7（垫片） | **唯一纯 32 位系统** + 最低端性能样本；21/21 逐位一致 |
 | `persee` | `GB8ZA96JUN` | Orbbec Persee 电视盒子（RK3288，4×A17 / 2GB） | **Android 5.1.1 / SDK 22**（userdebug，可 adb root） | 1920×1080 | **0.3.10 armv7（免垫片）** | **低端电视盒样本**：SDK 22 直接 dlopen 成功，证明 78P01 的缺符号是 SDK 17 特有；RA32 1.22.2 已装、Intent 直启跑卡带正常 |
 
-合计 **17 台**：10 台 Linux 掌机 + 1 台 Switch(Lakka) + 1 台送修 + 5 台 Android。
+合计 **17 台**：10 台 Linux 掌机（§1 的 9 台 + §2 的原 `r36s`）+ 1 台 Switch(Lakka) + 6 台 Android（含 1 台电视盒子）。
 
 2026-11-19 部署 0.3.10（linux-arm64 md5 `005a7c49ffa27139813f54365bd73387`，733 880 B）：
-- **rgb30c / cubexx / clone-r36s** 三台升级，golden 三例与基线逐位一致
+- **rgb30c / cubexx / r36s（原 .78）** 三台升级，golden 三例与基线逐位一致
   （0556e78f / e82844f7 / 0eb7884c），`--reinit=2` 三轮 `SET_PIXEL_FORMAT` 协商 6 次、
   末帧哈希不变 —— PATCH 20（重载重协商）真机生效。
 - **persee（RK3288 电视盒子，新入库）**：0.3.10 android-armv7（md5 `0575ef6cf5d381715e6968729363b18c`）
@@ -57,7 +58,7 @@
   **21/21 与 android21 基线逐位一致**；12000 帧吞吐 ping ~3000 / Blocky ~2000 /
   cube-land ~214 fps（约为 78P01 的 2~6 倍）。装 RA32 1.22.2 后 Load Core 列表出现
   「MakeCode Arcade (unofficial)」，Intent 带 ROM/LIBRETRO extra 直启 Pong 正常出画。
-- clone-r36s / rgb30c 核心目录的历史 `.bak` 已移出（铁律：.bak 留在核心目录会被前端
+- r36s（原 .78）/ rgb30c 核心目录的历史 `.bak` 已移出（铁律：.bak 留在核心目录会被前端
   glob 成重复条目）。
 
 2026-11-09 用 0.3.7 的 `android-arm64` 核心（md5 `8e3e37c383cd290a72cf34f901aa5935`，
@@ -86,6 +87,21 @@
 > 2400 帧墙钟吞吐 ping ≥1200 / Blocky ~343 / cube-land ~104 fps（2 核 A7、秒级精度）。
 > 这台补上了 32 位验收此前只在 SDK 24/25 的 arm64 机上做过的空白，也是最低端性能样本。
 > 垫片只是测试脚手架，不进发布物；玩家用 RA32 装核心不受影响（RetroArch 自带这些符号）。
+>
+> **persee（2026-11-19，新增）**：RK3288 电视盒子，Android 5.1.1 / SDK 22，纯 armv7，
+> `adb root` 可用。0.3.10 armv7 核心**免垫片**直接 dlopen（SDK 22 的 bionic 已有 `log2`/
+> `strtold` 等）——反证 78P01 的缺口是 SDK 17 特有。21 卡 ×600 帧 21/21 逐位一致；
+> 装 RA32 1.22.2 后 Load Core 出现「MakeCode Arcade (unofficial)」，Intent 直启跑卡带正常出画。
+> 该机 `/data` 的 `df` 报 3.1 GB 空闲但写文件必 `ENOSPC`（疑似分区实际尺寸小于文件系统记录），
+> 只能 `adb push` 到 `/sdcard` 再由设备端起进程读，`/data/local/tmp` 不可再新建文件。
+>
+> **0.3.10 全设备复核（2026-11-19 22:10）**：在线 7 台全部跑在 0.3.10 上且回归全过——
+> Linux 三台（cubexx/rgb30c/r36s）golden 三例 + `--reinit=2` + 三张夹具；Android 四台
+> （oxygen/hydrogen 21 卡、78p01 21 卡 + 垫片、persee 21 卡 + 真 RA）。
+> **跨位宽实测：32 位（persee armv7）与 64 位（oxygen arm64、Linux arm64）跑
+> `ping.pxt64` 300 帧的末帧哈希完全相同（`0556e78f…`）**，即 0.3.10 release notes 里
+> 「32 位与 64 位末帧哈希本来就不相同」的说法不成立（该句源自 32 位包首测时的时序差异判读），
+> 待 0.3.11 更正。跨位宽可比反而是好事：一套 golden 基线就能同时守住两套指针布局。
 
 ## 4. 版本登记（linux-arm64 核心）
 
@@ -111,10 +127,11 @@
 - 换核心后 `.bak` 必须移出核心目录，否则被前端 glob 成重复条目。
 
 **常开情况（2026-11-19 晚实测）**
-- Linux 掌机在线：`cubexx`（.149）、`rgb30c`（.101）、`clone-r36s`（.78，Debian 13、
-  hostname `clone-r36s`，是 .31/.137 之外的第三台 R36S Clone）；`r36s`（原 .81）不在线。
-- 网段另有 .88（**路由器**）与 .196（**小 NAS**，Ubuntu OpenSSH 8.9）在线，均非测试设备。
-  .88 只回应 ssh-rsa 且凭据不符，是 DHCP 租约过期导致的地址冲突假象，别当掌机去连。
+- Linux 掌机在线：`cubexx`（.149）、`rgb30c`（.101）、`r36s`（原，**现为 .78**；
+  原 .81 已不可达，hostname `clone-r36s` 是镜像默认值，不代表是 clone 机）。
+- 网段另有 `.88` 与 `.196`，均非测试设备：`.88` 是**路由器**（OpenWrt 默认 dropbear +
+  仅 ssh-rsa，banner 看着像老掌机，别去连；它的出现与 DHCP 租约过期的地址冲突是同一回事），
+  `.196` 是**小 NAS**（Ubuntu OpenSSH 8.9）。
 - Android 侧当前 USB 在线：`oxygen`、`hydrogen`、`78p01`、`persee`（新）。
 - 其余设备关机或送修，要动先请用户开机。
 - 2026-11-10 08:24~19:23 `cubexx`（.149）短暂关机：无 ARP、22 端口超时，同网段扫 22 端口只剩

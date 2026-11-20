@@ -23,7 +23,7 @@ Go to the releases page and grab the build for your device:
 
 > https://github.com/whmzsu/makecode-arcade-libretro/releases
 
-Find the newest release (currently **core-v0.3.9**). Below it is a row of archives — pick by platform:
+Find the newest release (currently **core-v0.3.10**). Below it is a row of archives — pick by platform:
 
 | Your device | Download this |
 |---|---|
