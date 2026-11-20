@@ -1,6 +1,6 @@
 # Upstream-ready core info for libretro-super:
 #   dist/info/makecode_arcade_libretro.info
-# Identical to tools/core.info.in with @VERSION@ resolved to 0.3.10;
+# Identical to tools/core.info.in with @VERSION@ resolved to 0.3.11;
 # regenerate on version bumps (source of truth: tools/core.info.in).
 display_name = "MakeCode Arcade (unofficial)"
 authors = "whmzsu and contributors"
@@ -12,7 +12,7 @@ systemname = "MakeCode Arcade"
 systemid = "makecode_arcade"
 license = "MIT"
 permissions = ""
-display_version = "0.3.10"
+display_version = "0.3.11"
 supports_no_game = "false"
 savestate = "false"
 cheats = "false"
