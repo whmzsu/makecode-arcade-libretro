@@ -130,6 +130,11 @@ cp retroarch_vita.self makecode_arcade_libretro.self
 
 3DS CIA 定制身份前先删 `.bnr/.icn/.smdh/.cia`（make 按 mtime 跳过）。
 
+上述三步已整合进 `$MCA_BIN/build_frontend_bundles.sh [tag]`：它会用 `$MCA_SRC`
+刷新 `build/workspace/{ctr,vita,nx}`，依次编出 CIA / SELF / NRO，按 CI 资产名
+打到 `release/local/<tag>/`。本地完整发版 = `package_release.sh` 的 12+5 标准包
+再加这 3 个前端整包，共 20 个 zip。
+
 ## 已知边界
 
 - **只认 `.pxt64`**：官方编译器只产 pxt64，PNG 不处理也不提示；玩家侧

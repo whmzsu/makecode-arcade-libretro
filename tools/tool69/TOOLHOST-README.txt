@@ -61,6 +61,9 @@ tool69 / 192.168.1.69 —— MakeCode Arcade libretro 核心的工具机使用�
                             ci=SOURCE.txt + SHA256SUMS；不完整目录只告警。
   fetch_ci_release.sh <tag> 从 GitHub Release API 下载 CI 资产到 release/ci/<tag>/，
                             逐项校验 size，并写 SOURCE.txt / SHA256SUMS。
+  build_frontend_bundles.sh  本地构建 3DS CIA / Vita SELF / Switch NRO 前端整包，
+                            用 $MCA_SRC 0.3.11 刷新 build/workspace/{ctr,vita,nx}
+                            后构建，产物落 release/local/<tag>/（共 20 个 zip）。
   compare_release_assets.py 比对本地与 CI 发版 zip 的字节及包内文件哈希。
   relay/fetch.sh           在 $MCA_RELAY 下逐 commit 增量拉取工具链 relay。
 
