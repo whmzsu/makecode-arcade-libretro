@@ -138,6 +138,8 @@ ci 为 `SOURCE.txt` + `SHA256SUMS`；不完整目录只告警不自动归档。
 | `measure_stack.sh` | 栈用量测量 |
 | `vm_boot_check.sh` | arm64 虚拟机（TCG）启动自检 |
 | `prune_versions.sh [--dry-run]` | 按版本保留策略归档正式产物/测试版本的旧目录 |
+| `fetch_ci_release.sh <tag>` | 从 GitHub Release 下载 CI 资产到 `release/ci/<tag>/` 并校验 size |
+| `compare_release_assets.py <local> <ci>` | 比对两目录 zip 字节与包内文件哈希 |
 | `relay/fetch.sh` | 在 `$MCA_RELAY` 下逐 commit 增量拉取工具链 relay |
 
 `verify_release.py` 与 `check_pe.py` 必须成对部署，并与 Windows 项目的 `tools/` 保持同步；
@@ -161,6 +163,13 @@ chroot "$MCA_SYSROOT_ARM64" /usr/bin/python3 /root/mca/tools/libretro_host.py \
 
 "$MCA_BIN/regress_arm64.sh" 600
 "$MCA_BIN/ci_matrix.sh"
+
+# 正式产物：本地构建包 / CI 下载包 / 版本清理预览
+./tools/package_release.sh
+"$MCA_BIN/fetch_ci_release.sh" core-v0.3.11
+python3 "$MCA_BIN/compare_release_assets.py" \
+    "$MCA_RELEASE_LOCAL/core-v0.3.11" "$MCA_RELEASE_CI/core-v0.3.11/assets"
+"$MCA_BIN/prune_versions.sh" --dry-run
 ```
 
 Windows 侧同步源码：

@@ -16,6 +16,8 @@ tool69（192.168.1.69）是常驻 Linux 验证节点：交叉编译、arm64 行�
 | `measure_stack.sh` | 栈用量测量 |
 | `vm_boot_check.sh` | arm64 虚拟机（TCG）启动自检 |
 | `prune_versions.sh [--dry-run]` | 版本保留归档：release/local+ci 各 5、build/test 3 |
+| `fetch_ci_release.sh <tag>` | GitHub Release 资产下载到 `release/ci/<tag>/` |
+| `compare_release_assets.py` | 比对本地与 CI 发版 zip 内容 |
 
 `env.sh` 也在此处留仓库备份；现场权威版是 `/opt/mca/env.sh`，修改后两边保持一致。
 构建/发版目录分层：`build/workspace` 活跃工作区、`build/test` 中间版本、

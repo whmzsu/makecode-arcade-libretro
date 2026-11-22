@@ -59,6 +59,9 @@ tool69 / 192.168.1.69 —— MakeCode Arcade libretro 核心的工具机使用�
   prune_versions.sh        版本保留：local/ci 各 5、build/test 3，超出 mv 到 archive。
                             支持 --dry-run；完整标记 local/test=BUILD-INFO.txt，
                             ci=SOURCE.txt + SHA256SUMS；不完整目录只告警。
+  fetch_ci_release.sh <tag> 从 GitHub Release API 下载 CI 资产到 release/ci/<tag>/，
+                            逐项校验 size，并写 SOURCE.txt / SHA256SUMS。
+  compare_release_assets.py 比对本地与 CI 发版 zip 的字节及包内文件哈希。
   relay/fetch.sh           在 $MCA_RELAY 下逐 commit 增量拉取工具链 relay。
 
 【关键结论（历史，仍有效）】
