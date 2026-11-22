@@ -51,8 +51,8 @@
 
 > debuginfo 包只对 ELF 平台发布（linux x64 / arm64 / x86 / armhf + lakka，
 > 共 5 个），与主包靠 `--build-id=sha1` 配对；Windows 平台出问题的排查路径见
-> 「测试」一节。3DS / Vita / Switch 的安装与已知边界见
-> `docs/3DS-VITA-TEST.md` 与下文对应小节。
+> 「测试」一节。3DS / Vita 的安装与已知边界见 `docs/3DS-VITA-TEST.md`，
+> Switch 见 `docs/SWITCH-BUILD.md`，玩家向步骤见下文对应小节。
 
 ## 与既有两个 core 的关系
 
@@ -90,6 +90,7 @@ makecode_arcade/
 │   ├── CROSS-COMPILE.md    交叉编译（目标矩阵 / 用法 / 踩坑）
 │   ├── ANDROID-2026-11-08.md  Android 测试方法（shell 宿主 / RA / 测试 APK）
 │   ├── 3DS-VITA-TEST.md    3DS/Vita 真机测试与验收（含本地构建流程）
+│   ├── SWITCH-BUILD.md     Switch NRO 构建与真机验收（含本地流程）
 │   ├── TEST-CORPUS.md      卡带语料与回归方法
 │   ├── OUT-DIRECTORY.md    out/ 本地工作目录使用规范
 │   ├── 玩家指南.md / Player-Guide.md  小白版安装游玩指南（中/英）
@@ -363,10 +364,12 @@ Switch **没有 `dlopen`**，核心不能像桌面那样丢一个 `.so` 进核�
 的产物是**静态库**（`makecode_arcade_libretro_libnx.a`，devkitA64 +
 `-fPIE`），由 RetroArch 的 `Makefile.libnx` 连同前端一起链成 NRO——
 **一个 NRO 内含且仅含一个核心**（官方在线更新器分发的也是这样一个个 `.nro`）。
-`tools/package_release.sh` 不参与这条线，由独立 workflow 负责。独立 Release
-只发在 `nx-v*` tag（版本号与 `core-v*` 同步，例如 `nx-v0.3.3` ↔
-`core-v0.3.3`）；推 `core-v*` tag 时 nx.yml 会把 `makecode_arcade_switch.zip`
-`core-release-upload` job 与 3DS/Vita 的上传 job 同构）：
+`tools/package_release.sh` 不参与这条线，由 `.github/workflows/nx.yml` 负责。
+推 `core-v*` tag 时由 `build.yml` 通过 `workflow_call` 调用 nx.yml，产物
+`makecode_arcade_switch.zip` 交回 `build.yml` 的 `release` job 与其他平台
+一次上传（nx.yml 自己的 `core-release-upload` 此时跳过）；推 `nx-v*` tag 时
+nx.yml 单独建一个 NRO Release（版本号与 `core-v*` 同步，例如 `nx-v0.3.3` ↔
+`core-v0.3.3`）。本地 tool69 构建与真机验收见 `docs/SWITCH-BUILD.md`。
 
 ```bash
 # .github/workflows/nx.yml 等价命令（devkitpro/devkita64 容器内）
@@ -447,19 +450,21 @@ cd ../makecode_arcade_cartconv/vm-build && npm install
 | `3DS / Vita core files (reusable)` | devkitARM / vitasdk 容器 | 编 core 静态库 + 链 RA 完整前端出 CIA/SELF（调 `3ds-vita.yml`；tag 时进发版） |
 | `Switch NRO (reusable)` | devkitA64 容器 | 编 core 静态库 + 链 RA 出 NRO（调 `nx.yml`；tag 时进发版） |
 | `package` | 汇总发行版工具链产物 → `tools/package_release.sh`，再解包 dlopen 跑 60 帧 | 5 个 zip |
-| `release`（只在推 `core-v*` tag 时） | 汇总 `zig-*` + `android-*` + `lakka-musl` 产物 → `package_release.sh` → `gh release create` | **10 个 zip**（6 全 64 位 + 4 个 32 位；含只有 zig 能出的 `windows-arm64`/`windows-x86`，以及只有 musl 工具链能出的 `lakka-arm64`） |
+| `release`（只在推 `core-v*` tag 时） | 汇总 `zig-*` + `android-*` + `lakka-musl` 产物 → `package_release.sh` → `gh release create` | `package_release.sh` 打 **10 个平台包**（6 全 64 位 + 4 个 32 位；含只有 zig 能出的 `windows-arm64`/`windows-x86`，以及只有 musl 工具链能出的 `lakka-arm64`）；连同 5 debuginfo + 3 前端整包，一次上传 20 个 zip |
 
-NX（Switch）不在这张表里：它由独立的 `.github/workflows/nx.yml` 负责，
-**推 `nx-v*` tag 时单独建一个 Release**（与核心发版分开，因为 NRO 要拉
-RetroArch 源码 + 装 portlibs，十几分钟，绑进主流水线会拖慢每次核心发版）。
-产物形态也不同——NRO 内含前端本体，不是可丢进 `cores/` 的 `.so`。
+矩阵表中 3DS/Vita 与 Switch 三行是**可复用工作流**（`3ds-vita.yml` 的
+core-ctr / core-vita / ra-ctr / ra-vita，`nx.yml` 的 core-libnx / nro）。
+平时在 push 或手动 dispatch 时只跑回归、产物挂 workflow artifact；
+**推 `core-v*` tag 时由 `build.yml` 通过 `workflow_call` 调用**，产物
+（`ctr-core-pack` / `vita-core-pack` / `nx-switch-nro`）交回 `build.yml` 的
+`release` job 一次上传。被调工作流自己的 `core-release-upload` 在
+`workflow_call` 下自动跳过，避免两条流水线轮询同一 Release 的竞态。
+`nx-v*` tag 仍单独触发 nx.yml 建 NRO-only Release；手动 dispatch 指定
+`upload_tag` 可排障补传。产物形态也不同——CIA / SELF / NRO 内含前端本体，
+不是可丢进 `cores/` 的 `.so`。
 
-3DS / Vita（含 RA 完整前端两级构建与核心包）同样不在这张表里：由独立的
-`.github/workflows/3ds-vita.yml` 负责（4 个 job：core-ctr / core-vita /
-ra-ctr / ra-vita；RA 版本默认 pin 已验证的 tip 快照）。平时只手动
-dispatch、产物挂 workflow artifact；**推 `core-v*` tag 时自动跑**，并由
-`frontend-release` job 把整包追加到核心发版的同一个 Release。安装包与
-验收清单见 `docs/3DS-VITA-TEST.md`。
+3DS/Vita 的安装包与验收清单见 `docs/3DS-VITA-TEST.md`；Switch 的本地构建、
+核心符号断言与真机边界见 `docs/SWITCH-BUILD.md`。
 
 工具链**刻意分两套**，别合并：
 
@@ -489,12 +494,13 @@ dispatch、产物挂 workflow artifact；**推 `core-v*` tag 时自动跑**，�
 | `.github/workflows/build.yml` | 本仓库（GitHub 托管机器） | 编译回归 + 测试用产物 |
 | `.gitlab-ci.yml` | libretro 官方 buildbot（镜像仓库） | 收录进 RetroArch Core Downloader 用 |
 
-**发布由 tag 触发**。推 `core-v*` tag 时，`release` job 等 `zig-*` 与
-`android-*` 编完，用与本地同一份 `tools/package_release.sh` 打 **10 个包**
-（6 全 64 位 + 4 个 32 位），再创建 GitHub Release 并把 zip 挂上去；3DS/Vita
-整包（3ds-vita.yml）与 Switch NRO zip（nx.yml）由各自的上传 job **追加到
-同一个 Release**。每个资产是干什么用的，发版正文尾部带一张分组表
-（`.github/release-notes/PLAYER-GUIDE-FOOTER.md`），照着拿一个就行。
+**发布由 tag 触发**。推 `core-v*` tag 时，`build.yml` 先通过 `workflow_call`
+调用 `3ds-vita.yml` 与 `nx.yml` 编出 CIA / SELF / NRO，`release` job 等这三条线
+和 `zig-*` / `android-*` / `lakka-musl` 全部完成，用与本地同一份
+`tools/package_release.sh` 打 **10 个平台包**（6 全 64 位 + 4 个 32 位），再把
+3 个前端整包一并归位，**一次 `gh release create` 上传全部 20 个 zip**（被调
+工作流的上传 job 此时跳过，不再各自轮询）。每个资产是干什么用的，发版正文
+尾部带一张分组表（`.github/release-notes/PLAYER-GUIDE-FOOTER.md`），照着拿一个就行。
 
 - 打包时对 Linux/ELF 核心做 `strip`（未 strip 的 linux-arm64 是 5.0 MB，其中
   4.3 MB 是 `.debug_*`；strip 后 732 KB，末帧哈希逐位不变）。五个 ELF 平台
@@ -582,6 +588,7 @@ functions.json 逐字节一致）。
 > - English (beginner edition): [`docs/Player-Guide.md`](docs/Player-Guide.md)
 >
 > 本地开发相关：3DS/Vita 真机测试见 [`docs/3DS-VITA-TEST.md`](docs/3DS-VITA-TEST.md)，
+> Switch 见 [`docs/SWITCH-BUILD.md`](docs/SWITCH-BUILD.md)，
 > tool69 工具机脚本归档在 [`tools/tool69/`](tools/tool69/)，
 > `out/` 工作目录的使用规范见 [`docs/OUT-DIRECTORY.md`](docs/OUT-DIRECTORY.md)。
 

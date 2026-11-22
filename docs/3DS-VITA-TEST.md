@@ -11,7 +11,11 @@
 > 不再分发。
 >
 > 源码分支 `probe/pxt32-3ds-vita` 已并入 main（`31d9969`）。测试包一律
-> **tool69 本地编译**，GitHub CI（`3ds-vita.yml`）只作回归兜底。
+> **tool69 本地编译**（`$MCA_BIN/build_frontend_bundles.sh`，见下文「构建」）；
+> GitHub CI（`3ds-vita.yml`）是回归与发版路径——推 `core-v*` tag 时由
+> `build.yml` 通过 `workflow_call` 调用并把产物交回 `release` job 统一上传。
+> 平时 push / 手动 dispatch 只出 workflow artifact。Switch 的本地构建与
+> 真机边界见 [Switch 构建与验收](SWITCH-BUILD.md)。
 >
 > **真机结论**：3DS 核心形态在 new3ds 验收通过，按键/菜单/卡带装载全绿，
 > 画面性能明显优于早先的 CPU 缩放前端；老款 3DS 手头无真机，但在 new3ds
@@ -27,9 +31,9 @@
 
 | 文件 | 说明 |
 |---|---|
-| `3DS/1-安装/makecode_arcade_libretro.cia` | **3DS 核心文件**：RA 完整前端 + mca core 静态链接，5 446 592 B（md5 `2960618d…`，UniqueId `0xF1CA1`），FBI 安装 |
+| `3DS/1-安装/makecode_arcade_libretro.cia` | **3DS 核心文件**：RA 完整前端 + mca core 静态链接，0.3.11 本地构建 5 447 104 B（md5 `a061403f…`，UniqueId `0xF1CA1`），FBI 安装 |
 | `3DS/1-安装/makecode_arcade_libretro.info` | 核心元数据，给 RA 的 Load Core 列表 / `.pxt64` 关联用（3DS/Vita 通用） |
-| `Vita/1-安装/makecode_arcade_libretro.self` | **Vita 核心文件**：fSELF，4 683 268 B（md5 `3c751257…`），并入官方 RA 的 app 目录 |
+| `Vita/1-安装/makecode_arcade_libretro.self` | **Vita 核心文件**：fSELF，0.3.11 本地构建 4 684 144 B（md5 `f76f4f6f…`），并入官方 RA 的 app 目录 |
 | `Vita/1-安装/makecode_arcade_libretro.info` | 同上，放 RA 的 `info/` 目录 |
 | `*/2-卡带/*.pxt64` | 4 张测试卡带（两平台各一份）：probe / ping / jumpy / Mouse_Adventure |
 
@@ -94,7 +98,9 @@ SELF，无动态加载）。
 源码 `$MCA_BUILD_WORKSPACE/{ctr,vita}`，RA 树
 `$MCA_TOOLCHAIN/relay/retroarch`（pin `d7cc9bc`）。
 工具链 `DEVKITPRO=$MCA_TOOLCHAIN/relay/extract/ctr/devkitpro`、
-`VITASDK=$MCA_TOOLCHAIN/relay/extract/vita/vitasdk`。
+`VITASDK=$MCA_TOOLCHAIN/relay/extract/vita/vitasdk`。并行度取
+`$MCA_BUILD_JOBS`（默认 6，留 2 核给系统；临时降载用
+`MCA_BUILD_JOBS=4 build_frontend_bundles.sh ...`）。
 
 先编 core 静态库，再把 `.a` 拷进 RA 树改名 `libretro_ctr.a` /
 `libretro_vita.a`，**先 clean 再链**（旧 `.o` 带过期特性宏会报
@@ -102,15 +108,16 @@ SELF，无动态加载）。
 `core/assets/ctr/` 下的 icon/banner/wav：
 
 ```
+JOBS="${MCA_BUILD_JOBS:-6}"
 # 3DS core
 export DEVKITPRO=$MCA_TOOLCHAIN/relay/extract/ctr/devkitpro
 export DEVKITARM=$DEVKITPRO/devkitARM
 export PATH=$DEVKITARM/bin:$DEVKITPRO/tools/bin:$PATH
-make -C $MCA_BUILD_WORKSPACE/ctr/core platform=ctr -j3
+make -C $MCA_BUILD_WORKSPACE/ctr/core platform=ctr -j"$JOBS"
 # 拷 makecode_arcade_libretro_ctr.a → RA 树 libretro_ctr.a
 cd $MCA_TOOLCHAIN/relay/retroarch
 make -f Makefile.ctr clean
-make -f Makefile.ctr -j3 HAVE_RETRONFS=0 HAVE_CHEEVOS_RVZ=0
+make -f Makefile.ctr -j"$JOBS" HAVE_RETRONFS=0 HAVE_CHEEVOS_RVZ=0
 make -f Makefile.ctr retroarch_3ds.cia HAVE_RETRONFS=0 HAVE_CHEEVOS_RVZ=0 \
   APP_TITLE="MakeCode Arcade" APP_PRODUCT_CODE="CTR-P-MCA2" \
   APP_UNIQUE_ID=0xF1CA1 APP_ICON=core/assets/ctr/icon48.png \
@@ -120,11 +127,11 @@ cp retroarch_3ds.cia makecode_arcade_libretro.cia
 # Vita core（VPK 线已放下，只出 self + info）
 export VITASDK=$MCA_TOOLCHAIN/relay/extract/vita/vitasdk
 export PATH=$VITASDK/bin:$PATH
-make -C $MCA_BUILD_WORKSPACE/vita/core platform=vita -j3
+make -C $MCA_BUILD_WORKSPACE/vita/core platform=vita -j"$JOBS"
 # 拷 makecode_arcade_libretro_vita.a → RA 树 libretro_vita.a
 cd $MCA_TOOLCHAIN/relay/retroarch
 make -f Makefile.vita clean
-make -f Makefile.vita retroarch_vita.self -j3
+make -f Makefile.vita retroarch_vita.self -j"$JOBS"
 cp retroarch_vita.self makecode_arcade_libretro.self
 ```
 

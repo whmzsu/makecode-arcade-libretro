@@ -254,7 +254,9 @@ ELF 共享库默认允许未定义符号（惰性绑定），所以**缺对象�
 （devkitARM / vitasdk，RA 树 pin `d7cc9bc`）。结论：
 
 - **3DS 核心形态**：new3ds 真机验收通过——按键、菜单、卡带装载全绿，
-  画面性能明显优于早先的 CPU 缩放前端。老款 3DS 手头无设备，暂未验。
+  画面性能明显优于早先的 CPU 缩放前端。老款 3DS 无真机，但在 new3ds 上
+  关闭 New 3DS clock/cache 模拟 old3ds 后 jumpy 明显卡顿（268MHz、无
+  L2 cache，硬件下限），只保证能跑、不保证流畅。
 - **3DS 安装**：建议先装官方 3DS RA，把核心 `.cia` 复制到
   `sdmc:/retroarch/cores/`、`.info` 放到 `sdmc:/retroarch/cores/info/`，重启 RA
   即在 Load Core 列表出现 MakeCode Arcade；也可直接用 FBI 装 CIA 得到独立图标入口。
@@ -264,7 +266,8 @@ ELF 共享库默认允许未定义符号（惰性绑定），所以**缺对象�
   取证定位为 `mcaTrace()` 缓存的 `FILE*` 在 RA 换 content 重置 stdio 后悬垂，
   `_svfprintf_r` 写野指针。2026-11-18 修复（Vita 分支直写 stderr、不 fopen
   不缓存，见 `runtime/pxtapp/core---vm/scheduler.cpp`）并重编 self
-  （md5 `3c751257…`），**待真机复验**。
+  （0.3.11 本地构建 md5 `f76f4f6f…`），**真机复验通过**（0.3.10 起连续
+  开关内容颜色与稳定性均正常）。
 - **GPU 硬缩放实验**：曾试 citro3d 顶屏 GPU 缩放，四轮修复（2 幂纹理、
   tiled 上传、VBlank、permutation）后真机仍黑屏，**已放弃**，源码回退
   （实验源码只在本地工作目录封存，不随仓库分发）。

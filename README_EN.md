@@ -54,8 +54,8 @@ separate cartridges are needed.
 > Debuginfo packages cover ELF platforms only (linux x64 / arm64 / x86 /
 > armhf + lakka — 5 total), paired with the main package via
 > `--build-id=sha1`; for Windows troubleshooting see the "Testing" section.
-> 3DS / Vita / Switch installation and known limitations: see
-> `docs/3DS-VITA-TEST.md` and the matching subsections below.
+> 3DS / Vita installation and known limitations: see `docs/3DS-VITA-TEST.md`;
+> Switch: `docs/SWITCH-BUILD.md`; beginner steps are in the subsections below.
 
 ## Relationship to the two existing cores
 
@@ -95,6 +95,7 @@ makecode_arcade/
 │   ├── CROSS-COMPILE.md    Cross-compiling (target matrix / usage / pitfalls)
 │   ├── ANDROID-2026-11-08.md  Android testing methods (shell host / RA / test APK)
 │   ├── 3DS-VITA-TEST.md    3DS/Vita real-device testing & acceptance (incl. local build flow)
+│   ├── SWITCH-BUILD.md     Switch NRO build & real-device acceptance (incl. local flow)
 │   ├── TEST-CORPUS.md      Cartridge corpus & regression methodology
 │   ├── OUT-DIRECTORY.md    Usage convention for the out/ working directory
 │   ├── Player-Guide.md     Beginner install & play guide (English; 玩家指南.md is the Chinese one)
@@ -386,11 +387,13 @@ the build product is a **static archive** (`makecode_arcade_libretro_libnx.a`,
 built with devkitA64, `-fPIE`) that RetroArch's `Makefile.libnx` links together
 with the frontend into a NRO - **one NRO carries exactly one core**, which is
 also the shape of the cores the official online updater distributes.
-`tools/package_release.sh` does not take part; a dedicated workflow handles it.
-A standalone Release is only created on `nx-v*` tags (version kept in sync with
-`core-v*`, e.g. `nx-v0.3.3` ↔ `core-v0.3.3`); on `core-v*` tags, nx.yml
-**appends `makecode_arcade_switch.zip` to the core release** (the
-`core-release-upload` job, structured like the 3DS/Vita upload job):
+`tools/package_release.sh` does not take part; `.github/workflows/nx.yml`
+handles it. On `core-v*` tags `build.yml` calls nx.yml via `workflow_call`
+and hands `makecode_arcade_switch.zip` back to its `release` job for a single
+upload alongside the other platforms (nx.yml's own `core-release-upload`
+is skipped then); on `nx-v*` tags nx.yml creates a standalone NRO Release
+(version kept in sync, e.g. `nx-v0.3.3` ↔ `core-v0.3.3`). Local tool69
+builds and real-device acceptance are in `docs/SWITCH-BUILD.md`.
 
 ```bash
 # equivalent to .github/workflows/nx.yml (inside devkitpro/devkita64)
@@ -481,25 +484,24 @@ bottom of the Actions run page).
 | `Switch NRO (reusable)` | devkitA64 container | Core static lib + RA NRO (calls `nx.yml`; lands in the release on tags) |
 | `pxt-patches` | pure Python, no compiling | Verifies the 19 required patches in the vendored pxt tree are still present (seconds) |
 | `package` | Collects distro-toolchain artifacts → `tools/package_release.sh` | 5 zips |
-| `release` (only on `core-v*` tags) | Collects `zig-*` + `android-*` + `lakka-musl` artifacts → `package_release.sh` → `gh release create` | **10 zips** (6 all-64-bit + 4×32-bit; including `windows-arm64`/`windows-x86`, which only zig can produce, and `lakka-arm64`, which only the musl toolchain can produce) |
+| `release` (only on `core-v*` tags) | Collects `zig-*` + `android-*` + `lakka-musl` artifacts → `package_release.sh` → `gh release create` | `package_release.sh` builds **10 platform zips** (6 all-64-bit + 4×32-bit; including `windows-arm64`/`windows-x86`, which only zig can produce, and `lakka-arm64`, which only the musl toolchain can produce); with 5 debuginfo + 3 frontend bundles, 20 zips are uploaded at once |
 
-NX (Switch) is not in this table: it is handled by a separate
-`.github/workflows/nx.yml` that **creates its own release on `nx-v*` tags**.
-It is kept apart from core releases because the NRO needs the RetroArch
-sources plus a pile of portlibs (a dozen-plus minutes), which would slow down
-every core release if chained into the main pipeline. The artifact shape
-differs too — an NRO embeds the frontend itself, it is not a `.so` you can
-drop into `cores/`.
+The three 3DS/Vita/Switch rows above are **reusable workflows**
+(`3ds-vita.yml`: core-ctr / core-vita / ra-ctr / ra-vita; `nx.yml`:
+core-libnx / nro). On ordinary pushes and manual dispatches they only run
+regression and attach workflow artifacts; **on `core-v*` tags `build.yml`
+calls them via `workflow_call`**, and their artifacts (`ctr-core-pack` /
+`vita-core-pack` / `nx-switch-nro`) go back to `build.yml`'s `release` job
+for one upload. Each called workflow's own `core-release-upload` skips
+itself under `workflow_call`, so two pipelines never poll the same Release.
+`nx-v*` tags still trigger nx.yml alone for an NRO-only Release; a manual
+dispatch with `upload_tag` can re-upload for troubleshooting. The artifact
+shape differs too — CIA/SELF/NRO embed the frontend and are not `.so` files
+you can drop into `cores/`.
 
-3DS / Vita (including the two-level full-RetroArch builds and the core
-packages) are likewise outside this table: the standalone
-`.github/workflows/3ds-vita.yml` handles them
-(4 jobs: core-ctr / core-vita / ra-ctr / ra-vita; the RA version is pinned
-to a verified tip snapshot by default). Outside of tag pushes it runs only
-via manual dispatch with artifacts as workflow artifacts; **on `core-v*`
-tags it runs automatically** and its `frontend-release` job appends the
-packages to the core release. Install packages and acceptance checklists are
-in `docs/3DS-VITA-TEST.md`.
+3DS/Vita install packages and acceptance checklists are in
+`docs/3DS-VITA-TEST.md`; Switch local builds, symbol assertions and
+real-device limits are in `docs/SWITCH-BUILD.md`.
 
 The toolchains are **deliberately split in two** — don't merge them:
 
@@ -535,14 +537,15 @@ Division of labor between the two CI files, don't mix them up:
 | `.github/workflows/build.yml` | This repo (GitHub-hosted runners) | Compile regression + test artifacts |
 | `.gitlab-ci.yml` | The official libretro buildbot (mirrored repo) | For inclusion in the RetroArch Core Downloader |
 
-**Releases are tag-triggered.** Pushing a `core-v*` tag makes the `release`
-job wait for `zig-*` and `android-*`, package **10 zips** (6 all-64-bit +
-4×32-bit) with the same local `tools/package_release.sh`, then create the
-GitHub Release and attach the zips. The 3DS/Vita packages (3ds-vita.yml) and
-the Switch NRO zip (nx.yml) are **appended to the same Release** by their own
-upload jobs. What each asset is for is spelled out in a grouped table at the
-end of the release notes (`.github/release-notes/PLAYER-GUIDE-FOOTER.md`) —
-just pick one from each group.
+**Releases are tag-triggered.** On a `core-v*` tag, `build.yml` first calls
+`3ds-vita.yml` and `nx.yml` via `workflow_call` to produce the CIA / SELF / NRO.
+Once those and `zig-*` / `android-*` / `lakka-musl` all finish, the `release`
+job packages **10 platform zips** (6 all-64-bit + 4×32-bit) with the same local
+`tools/package_release.sh`, folds in the three frontend bundles, and uploads
+**all 20 zips in one `gh release create`** (the called workflows' upload jobs
+skip themselves). What each asset is for is spelled out in a grouped table at
+the end of the release notes (`.github/release-notes/PLAYER-GUIDE-FOOTER.md`)
+— just pick one from each group.
 
 - Packaging strips Linux/ELF cores (unstripped linux-arm64 is 5.0 MB, 4.3 MB
   of `.debug_*`; stripped it is 732 KB with a bit-identical last frame). The
