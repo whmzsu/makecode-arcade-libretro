@@ -25,7 +25,7 @@
 ```
 /opt/mca/                        ← 唯一项目根
 ├── env.sh                       ← 全部路径的唯一定义点（脚本 source 后只认变量）
-├── TOOLHOST-NEW-ITEM-RULES.md   ← 根目录唯一入口说明（新增规则速查）
+├── README.md                    ← 根目录唯一入口说明（完整使用与规则）
 ├── src/                         ← 唯一源码树（git 主树，从 Windows 同步）
 ├── toolchain/                   ← 稳定层：装好后基本不动
 │   ├── bin/                     ├─ zig
@@ -197,12 +197,12 @@
 
 任何新增之前先回答一个问题：**它属于哪一层？** 原则上只允许落在 `/opt/mca/`
 四层内，不得在 `/opt` 根下再建 `mca-*` 同级目录。唯一例外是根目录的入口说明
-`TOOLHOST-NEW-ITEM-RULES.md`：它和 `env.sh` 一样是一眼可见的入口，仅此一份，
+`README.md`：它和 `env.sh` 一样是一眼可见的入口，仅此一份，
 后续不再增加其他根文件。
 
 | 要新增的东西 | 放到哪里 | 备注 |
 |---|---|---|
-| 根目录入口说明（仅此一份） | `/opt/mca/TOOLHOST-NEW-ITEM-RULES.md` | 方便一眼找到；不得再添其他根文件 |
+| 根目录入口说明（仅此一份） | `/opt/mca/README.md` | 完整使用与规则；不得再添其他根文件 |
 | 编译器、SDK、venv、chroot、VM 镜像、长期工具 | `toolchain/` | 装好后基本不动；新增路径必须先写进 `env.sh` |
 | 源码、从 Windows 同步的文件 | `src/` | 唯一真相源；构建产物不落这里 |
 | 构建产物、staging 副本 | `work/build/<target>/` | 全部可再生；用完即弃 |
@@ -215,7 +215,7 @@
 命名与引用纪律：
 
 1. 一律小写 + 短横线；名字表达“是什么”，不表达“谁建的”。唯一例外是根目录入口说明
-   `TOOLHOST-NEW-ITEM-RULES.md`（沿用大写文件名以便一眼识别）。
+   `README.md`（沿用大写文件名以便一眼识别）。
 2. 路径只在 `env.sh` 定义一次；脚本里禁止出现 `/opt/mca-*` 字面量。
 3. 旧路径 `/opt/mca-tools` `/opt/mca-work` `/opt/mca-data` 和旧变量名永久停用，
    只允许出现在 `archive/MANIFEST.md` 的还原记录里。

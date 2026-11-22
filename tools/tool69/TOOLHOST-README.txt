@@ -1,5 +1,6 @@
 tool69 / 192.168.1.69 —— MakeCode Arcade libretro 核心的工具机使用说明
 最后更新：2026-11-22（目录硬切换，旧 mca-tools/mca-work/mca-data 已停用）
+完整现场版：/opt/mca/README.md（本文件内容已并入）
 
 【定位】常驻 Linux 验证节点，不是发版机。Windows 本机只负责编辑与 git，
 所有交叉编译、arm64 行为回归、干净发行版构建都在这里跑。
@@ -13,8 +14,8 @@ tool69 / 192.168.1.69 —— MakeCode Arcade libretro 核心的工具机使用�
 
 【目录】（唯一项目根 /opt/mca，四层按变更速度分层）
   /opt/mca/env.sh          全部路径的唯一定义点（source 后拿到 PATH + 所有变量）
-  /opt/mca/TOOLHOST-NEW-ITEM-RULES.md
-                           根目录唯一入口说明：新增文件/文件夹规则速查
+  /opt/mca/README.md           根目录唯一入口说明（完整使用与目录规则）
+                               本文件已并入其中；现场以 /opt/mca/README.md 为准
   /opt/mca/src/            唯一源码树（git 主树，从 Windows git ls-files 同步）
   /opt/mca/toolchain/      稳定层：装好后基本不动
     bin/                   zig 0.17.0（清华 PyPI wheel）

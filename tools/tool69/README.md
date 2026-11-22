@@ -4,9 +4,8 @@ tool69（192.168.1.69）是常驻 Linux 验证节点：交叉编译、arm64 行�
 干净发行版构建都在那里跑。机器上的主拷贝在 `/opt/mca/work/scripts/`，**本目录
 是它的异地备份**——机器挂了或误删时从这里恢复。
 
-> 详细的环境说明（目录布局、chroot、资源纪律）见 `TOOLHOST-README.txt`，
-> 它是 tool69 上 `/opt/mca/work/scripts/` 里 README 的归档副本。
-> 目录规划的第一性原理设计见项目 `docs/TOOLHOST-LAYOUT.md`。
+> 完整使用与目录规则见项目 `docs/TOOLHOST-README.md`，现场副本在 `/opt/mca/README.md`；
+> 脚本明细见 `TOOLHOST-README.txt`，目录设计见 `docs/TOOLHOST-LAYOUT.md`。
 
 | 脚本 | 用途 |
 |---|---|
