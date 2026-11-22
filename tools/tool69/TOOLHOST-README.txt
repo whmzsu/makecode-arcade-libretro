@@ -28,7 +28,12 @@ tool69 / 192.168.1.69 —— MakeCode Arcade libretro 核心的工具机使用�
     sysroot-amd64/         Debian bookworm amd64 干净 rootfs（g++/make/ca-certificates）
     vm/                    完整 arm64 虚拟机镜像（TCG 软件模拟，异构客户机无法用 KVM）
   /opt/mca/work/           活跃层：全部可再生
-    build/                 各目标构建工作区（ctr / vita / vm-measure / v0310 等）
+    build/                 中间测试版本与活跃工作区
+      workspace/           ctr / vita / vm-measure（活跃构建工作区）
+      test/                中间测试版本，按版本分目录（保留 3 个）
+    release/               正式发版产物，与 build 并排
+      local/               本地构建正式产物，按版本（保留 5 个）
+      ci/                  GitHub CI 发版产物下载，按版本（保留 5 个，只读原件）
     reports/               所有回归 / 矩阵 / 体检 / 每日报告
     fixtures/carts/        21 张 .pxt64 语料（第三方游戏内容，不要提交进仓库）
     scripts/               本目录的运维脚本（见下）
@@ -51,6 +56,9 @@ tool69 / 192.168.1.69 —— MakeCode Arcade libretro 核心的工具机使用�
   toolhost_daily.sh        cron 每日 03:20：arm64 全量回归 + 两台在线掌机只读巡检 + 报告。
   compare_regress.py       回归结果比对（被 regress_arm64.sh 调用）。
   vm_boot_check.sh         完整 arm64 虚拟机启动检查。
+  prune_versions.sh        版本保留：local/ci 各 5、build/test 3，超出 mv 到 archive。
+                            支持 --dry-run；完整标记 local/test=BUILD-INFO.txt，
+                            ci=SOURCE.txt + SHA256SUMS；不完整目录只告警。
   relay/fetch.sh           在 $MCA_RELAY 下逐 commit 增量拉取工具链 relay。
 
 【关键结论（历史，仍有效）】

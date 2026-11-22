@@ -42,7 +42,12 @@
 │   ├── sysroot-amd64/           ├─ amd64 干净 rootfs
 │   └── vm/                      └─ arm64 虚拟机镜像
 ├── work/                        ← 活跃层：全部可再生，可整体清空
-│   ├── build/                   ├─ 各目标构建产物（离源码树）
+│   ├── build/                   ├─ 中间测试版本与活跃工作区
+│   │   ├── workspace/           ├─ ctr / vita / vm-measure
+│   │   └── test/                └─ 中间测试版本，按版本分目录
+│   ├── release/                 ├─ 正式发版产物（与 build 并排）
+│   │   ├── local/               ├─ 本地构建正式产物，按版本分目录
+│   │   └── ci/                  └─ GitHub CI 发版产物下载，按版本分目录
 │   ├── reports/                 ├─ 回归/矩阵/体检/每日报告
 │   ├── fixtures/carts/          ├─ 21 张 .pxt64 语料（第三方，勿入仓库）
 │   ├── scripts/                 ├─ 运维脚本
@@ -56,7 +61,7 @@
 |---|---|---|---|
 | `src/` | 天级 | 唯一真相源，git 管理 | 重新同步即可 |
 | `toolchain/` | 月级 | 编译器、SDK、chroot | 重新下载安装（代价高，故单独一层） |
-| `work/` | 天级 | 构建产物、报告、语料 | 全部可再生，语料需重新拷 |
+| `work/` | 天级 | 中间构建、正式产物、报告、语料 | 全部可再生，语料需重新拷 |
 | `archive/` | 只进不出 | 历史版本、旧产物、一次性探索 | 不可再生，故只移不删 |
 
 ---
@@ -74,6 +79,10 @@
 | `MCA_ARCHIVE` | `/opt/mca/archive` | `MCA_MUSL_ROOT` | `/opt/mca/toolchain/musl-cross` |
 | `MCA_RELAY` | `/opt/mca/toolchain/relay` | `MCA_VM` | `/opt/mca/toolchain/vm` |
 | `MCA_SYSROOT_ARM64` | `/opt/mca/toolchain/sysroot-arm64` | `MCA_SYSROOT_AMD64` | `/opt/mca/toolchain/sysroot-amd64` |
+| `MCA_RELEASE` | `/opt/mca/work/release` | `MCA_BUILD` | `/opt/mca/work/build` |
+| `MCA_RELEASE_LOCAL` | `/opt/mca/work/release/local` | `MCA_RELEASE_CI` | `/opt/mca/work/release/ci` |
+| `MCA_BUILD_WORKSPACE` | `/opt/mca/work/build/workspace` | `MCA_BUILD_TEST` | `/opt/mca/work/build/test` |
+| `MCA_KEEP_RELEASE` | `5` | `MCA_KEEP_TEST` | `3` |
 
 新增路径必须先加进 `env.sh` 再写引用；脚本里禁止硬编码项目根路径前缀。
 
@@ -88,12 +97,21 @@
 |---|---|---|
 | 编译器、SDK、venv、chroot、VM 镜像、长期工具 | `toolchain/` | 装好后基本不动；新路径必须先写进 `env.sh` |
 | 源码、从 Windows 同步的文件 | `src/` | 唯一真相源；构建产物不落这里 |
-| 构建产物、staging 副本 | `work/build/<target>/` | 全部可再生，用完即弃 |
+| 活跃构建工作区、staging 副本 | `work/build/workspace/<name>/` | 全部可再生，用完即弃 |
+| 中间测试版本 | `work/build/test/<version>/` | 非正式产物；默认保留 3 个 |
+| 本地正式构建产物 | `work/release/local/<version>/` | 按版本；默认保留 5 个 |
+| GitHub CI 发版产物下载 | `work/release/ci/<version>/` | 按版本；默认保留 5 个，视为只读原件 |
 | 回归/矩阵/体检/每日报告 | `work/reports/` | 只放报告产出物 |
 | 运维脚本 | `work/scripts/` | 只 source `env.sh`，只用 `$MCA_*` 变量 |
 | 一次性分析脚本、临时输出 | `work/tmp/` | 用完清理，不得长期驻留 |
 | 第三方 `.pxt64` 语料 | `work/fixtures/carts/` | 永远不进 git 仓库 |
 | 旧产物、旧快照、退役脚本 | `archive/<YYYYMMDD>/` | 只 `mv` 不 `rm`，并更新 `MANIFEST.md` |
+
+版本保留策略：`release/local` 与 `release/ci` 各保留最新 **5** 个完整版本，
+`build/test` 保留最新 **3** 个。完整版本须带标记文件：local/test 为 `BUILD-INFO.txt`，
+ci 为 `SOURCE.txt` + `SHA256SUMS`；不完整目录只告警不自动归档。
+超出版本由 `prune_versions.sh` 移到 `archive/<YYYYMMDD>/...` 并写 `MANIFEST.md`；
+先用 `prune_versions.sh --dry-run` 预览。
 
 命名与引用纪律：
 
@@ -119,6 +137,7 @@
 | `toolhost_daily.sh` | cron 每日 03:20：arm64 全量回归 + 在线掌机只读巡检 + 报告 |
 | `measure_stack.sh` | 栈用量测量 |
 | `vm_boot_check.sh` | arm64 虚拟机（TCG）启动自检 |
+| `prune_versions.sh [--dry-run]` | 按版本保留策略归档正式产物/测试版本的旧目录 |
 | `relay/fetch.sh` | 在 `$MCA_RELAY` 下逐 commit 增量拉取工具链 relay |
 
 `verify_release.py` 与 `check_pe.py` 必须成对部署，并与 Windows 项目的 `tools/` 保持同步；

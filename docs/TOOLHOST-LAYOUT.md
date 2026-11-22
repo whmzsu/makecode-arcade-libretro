@@ -38,7 +38,12 @@
 │   ├── sysroot-amd64/           ├─ amd64 干净 rootfs
 │   └── vm/                      └─ arm64 虚拟机镜像
 ├── work/                        ← 活跃层：全部可再生，可整体清空
-│   ├── build/                   ├─ 各目标构建产物（离源码树，见 §四）
+│   ├── build/                   ├─ 中间测试版本与活跃工作区（见 §四）
+│   │   ├── workspace/           ├─ ctr / vita / vm-measure
+│   │   └── test/                └─ 中间测试版本，按版本分目录
+│   ├── release/                 ├─ 正式发版产物（与 build 并排）
+│   │   ├── local/               ├─ 本地构建正式产物，按版本分目录
+│   │   └── ci/                  └─ GitHub CI 发版产物下载，按版本分目录
 │   ├── reports/                 ├─ 回归/矩阵/体检/每日报告
 │   ├── fixtures/carts/          ├─ 21 张 .pxt64 语料（第三方，勿入仓库）
 │   ├── scripts/                 ├─ 运维脚本
@@ -54,7 +59,7 @@
 |---|---|---|---|
 | `src/` | 天级 | 唯一真相源，git 管理 | 重新同步即可 |
 | `toolchain/` | 月级 | 编译器、SDK、chroot | 重新下载安装（代价高，故单独一层） |
-| `work/` | 天级 | 构建产物、报告、语料 | 全部可再生，语料需重新拷 |
+| `work/` | 天级 | 中间构建、正式产物、报告、语料 | 全部可再生，语料需重新拷 |
 | `archive/` | 只进不出 | 历史版本、旧产物、一次性探索 | 不可再生，故只移不删 |
 
 ---
@@ -84,7 +89,7 @@
 | `/opt/mca-work/repo` | `src/` | mv（作为唯一真相源） |
 | `/opt/mca-work/src` | 并入 `src/` 或归档 | 视构建脚本是否支持离树构建，见 §四 |
 | `/opt/mca-data/scratch/v0310` `repo-p2` | `archive/` | mv（旧快照） |
-| `/opt/mca-data/scratch/ctr-build` `vita-build` | `work/build/ctr` `work/build/vita` | mv（活跃构建工作区） |
+| `/opt/mca-data/scratch/ctr-build` `vita-build` | `work/build/workspace/ctr` `work/build/workspace/vita` | mv（活跃构建工作区） |
 | `/opt/mca-data/scratch/vm-measure` | `work/build/vm-measure` | mv（32 位栈测量） |
 
 ### 3.3 工作产物（进 `work/`）
@@ -114,11 +119,11 @@
 
 第一性原理要求唯一真相源，解法有两条，需先验证再选：
 
-- **方案 A（推荐）**：`src/` 为唯一源码；构建前 `rsync` 到 `work/build/<target>/` 再编译，
+- **方案 A（推荐）**：`src/` 为唯一源码；构建前 `rsync` 到 `work/build/workspace/<target>/` 再编译，
   产物永不落源码树。前提是 `build_target.sh` / `build_musl.sh` 不依赖脚本自身相对路径
   （脚本在 `tools/` 下，离树后要用绝对路径调用）。
-- **方案 B（保守）**：保留两份但明确分工——`src/` 唯一真相源，`work/build/` 是它的
-  构建 staging 副本；`repo/` 归档。若脚本无法离树，用 `cp -a src work/build/<target>` 后编译。
+- **方案 B（保守）**：保留两份但明确分工——`src/` 唯一真相源，`work/build/workspace/` 是它的
+  构建 staging 副本；`repo/` 归档。若脚本无法离树，用 `cp -a src work/build/workspace/<target>` 后编译。
 
 **这一步风险最高，放最后做，且先在一处验证脚本可离树。** 未验证前不删任何一份源码。
 
@@ -205,12 +210,21 @@
 | 根目录入口说明（仅此一份） | `/opt/mca/README.md` | 完整使用与规则；不得再添其他根文件 |
 | 编译器、SDK、venv、chroot、VM 镜像、长期工具 | `toolchain/` | 装好后基本不动；新增路径必须先写进 `env.sh` |
 | 源码、从 Windows 同步的文件 | `src/` | 唯一真相源；构建产物不落这里 |
-| 构建产物、staging 副本 | `work/build/<target>/` | 全部可再生；用完即弃 |
+| 活跃构建工作区、staging 副本 | `work/build/workspace/<name>/` | 全部可再生；用完即弃 |
+| 中间测试版本 | `work/build/test/<version>/` | 非正式产物；默认保留 3 个 |
+| 本地正式构建产物 | `work/release/local/<version>/` | 按版本；默认保留 5 个 |
+| GitHub CI 发版产物下载 | `work/release/ci/<version>/` | 按版本；默认保留 5 个，视为只读原件 |
 | 回归/矩阵/体检/每日报告 | `work/reports/` | 报告产出物，不放入口说明 |
 | 运维脚本 | `work/scripts/` | 脚本只 source `env.sh`，只用 `$MCA_*` 变量 |
 | 一次性分析脚本、临时输出 | `work/tmp/` | 用完清理；不得长期驻留 |
 | 第三方 `.pxt64` 语料 | `work/fixtures/carts/` | 永远不进 git 仓库 |
 | 旧产物、旧快照、退役脚本 | `archive/<YYYYMMDD>/` | 只 `mv` 不 `rm`，并更新 `MANIFEST.md` |
+
+版本保留策略：`release/local` 与 `release/ci` 各保留最新 **5** 个完整版本，
+`build/test` 保留最新 **3** 个。完整版本须带标记文件：
+local/test 为 `BUILD-INFO.txt`，ci 为 `SOURCE.txt` + `SHA256SUMS`；
+不完整目录只告警不自动归档。超出的版本由 `$MCA_BIN/prune_versions.sh`
+移到 `archive/<YYYYMMDD>/{release/local,release/ci,build/test}/`，并写 `MANIFEST.md`。
 
 命名与引用纪律：
 

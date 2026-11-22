@@ -91,7 +91,7 @@ SELF，无动态加载）。
 ## 构建（本地优先，GitHub 只兜底）
 
 核心形态 = RA 完整前端 + core 静态库，统一在 tool69 本地编（先 `source /opt/mca/env.sh`）：
-源码 `$MCA_WORK/build/{ctr,vita}`，RA 树
+源码 `$MCA_BUILD_WORKSPACE/{ctr,vita}`，RA 树
 `$MCA_TOOLCHAIN/relay/retroarch`（pin `d7cc9bc`）。
 工具链 `DEVKITPRO=$MCA_TOOLCHAIN/relay/extract/ctr/devkitpro`、
 `VITASDK=$MCA_TOOLCHAIN/relay/extract/vita/vitasdk`。
@@ -106,7 +106,7 @@ SELF，无动态加载）。
 export DEVKITPRO=$MCA_TOOLCHAIN/relay/extract/ctr/devkitpro
 export DEVKITARM=$DEVKITPRO/devkitARM
 export PATH=$DEVKITARM/bin:$DEVKITPRO/tools/bin:$PATH
-make -C $MCA_WORK/build/ctr/core platform=ctr -j3
+make -C $MCA_BUILD_WORKSPACE/ctr/core platform=ctr -j3
 # 拷 makecode_arcade_libretro_ctr.a → RA 树 libretro_ctr.a
 cd $MCA_TOOLCHAIN/relay/retroarch
 make -f Makefile.ctr clean
@@ -120,7 +120,7 @@ cp retroarch_3ds.cia makecode_arcade_libretro.cia
 # Vita core（VPK 线已放下，只出 self + info）
 export VITASDK=$MCA_TOOLCHAIN/relay/extract/vita/vitasdk
 export PATH=$VITASDK/bin:$PATH
-make -C $MCA_WORK/build/vita/core platform=vita -j3
+make -C $MCA_BUILD_WORKSPACE/vita/core platform=vita -j3
 # 拷 makecode_arcade_libretro_vita.a → RA 树 libretro_vita.a
 cd $MCA_TOOLCHAIN/relay/retroarch
 make -f Makefile.vita clean
