@@ -4,8 +4,11 @@
 #
 # 用法: build_frontend_bundles.sh [core-v0.3.11]
 # 前置: tool69 的 relay 工具链与 RetroArch 树已就绪；仅在本机运行。
+# 并行度: 取 env.sh 的 MCA_BUILD_JOBS（默认 6，留 2 核给系统）；可临时覆盖：
+#   MCA_BUILD_JOBS=4 "$MCA_BIN/build_frontend_bundles.sh" core-v0.3.11
 set -euo pipefail
 source /opt/mca/env.sh
+JOBS="${MCA_BUILD_JOBS:-6}"
 
 VERSION="$(sed -n 's/.*kCoreVersion = "\([^"]*\)".*/\1/p' \
   "$MCA_SRC/core/src/libretro_core.cpp" | head -1)"
@@ -19,7 +22,9 @@ LOGD="$MCA_REPORTS/frontend-build-$(date +%Y%m%d-%H%M%S)"
 
 mkdir -p "$D" "$LOGD"
 exec > >(tee "$LOGD/build.log") 2>&1
-echo "version=$VERSION tag=$TAG log=$LOGD/build.log"
+echo "version=$VERSION tag=$TAG log=$LOGD/build.log jobs=$JOBS"
+T0=$(date +%s)
+stage() { printf '\n>>> %s  (+%ss)\n' "$1" "$(( $(date +%s) - T0 ))"; }
 
 sync_src() { # $1=workspace dir
   mkdir -p "$1"
@@ -32,15 +37,16 @@ info_file() { # $1=output path
 }
 
 # --- 3DS: core 静态库 -> RetroArch 3DS CIA ---
+stage "CTR start"
 sync_src "$W/ctr"
 export DEVKITPRO="$MCA_TOOLCHAIN/relay/extract/ctr/devkitpro"
 export DEVKITARM="$DEVKITPRO/devkitARM"
 export PATH="$DEVKITARM/bin:$DEVKITPRO/tools/bin:$PATH"
-nice -n 5 make -C "$W/ctr/core" platform=ctr -j2
+nice -n 5 make -C "$W/ctr/core" platform=ctr -j"$JOBS"
 cp "$W/ctr/core/makecode_arcade_libretro_ctr.a" "$RA/libretro_ctr.a"
 cd "$RA"
 nice -n 5 make -f Makefile.ctr clean >/dev/null 2>&1 || true
-nice -n 5 make -f Makefile.ctr -j2 HAVE_RETRONFS=0 HAVE_CHEEVOS_RVZ=0
+nice -n 5 make -f Makefile.ctr -j"$JOBS" HAVE_RETRONFS=0 HAVE_CHEEVOS_RVZ=0
 rm -f retroarch_3ds.bnr retroarch_3ds.icn retroarch_3ds.smdh retroarch_3ds.cia
 nice -n 5 make -f Makefile.ctr retroarch_3ds.cia \
   APP_TITLE="MakeCode Arcade" \
@@ -59,15 +65,16 @@ info_file "$LOGD/stage/ctr/makecode_arcade_libretro.info"
 echo "ctr: $(stat -c %s "$D/makecode_arcade_ctr.zip") B"
 
 # --- Vita: core 静态库 -> RetroArch SELF ---
+stage "Vita start"
 sync_src "$W/vita"
 export VITASDK="$MCA_TOOLCHAIN/relay/extract/vita/vitasdk"
 export PATH="$VITASDK/bin:$PATH"
 unset DEVKITPRO DEVKITARM || true
-nice -n 5 make -C "$W/vita/core" platform=vita -j2
+nice -n 5 make -C "$W/vita/core" platform=vita -j"$JOBS"
 cp "$W/vita/core/makecode_arcade_libretro_vita.a" "$RA/libretro_vita.a"
 cd "$RA"
 nice -n 5 make -f Makefile.vita clean >/dev/null 2>&1 || true
-nice -n 5 make -f Makefile.vita retroarch_vita.self -j2
+nice -n 5 make -f Makefile.vita retroarch_vita.self -j"$JOBS"
 head -c 4 retroarch_vita.self | cmp -s - <(printf 'SCE\000') \
   || { echo "Vita SELF 头错误" >&2; exit 1; }
 mkdir -p "$LOGD/stage/vita"
@@ -77,15 +84,16 @@ info_file "$LOGD/stage/vita/makecode_arcade_libretro.info"
 echo "vita: $(stat -c %s "$D/makecode_arcade_vita.zip") B"
 
 # --- Switch: core 静态库 -> RetroArch NRO ---
+stage "Switch start"
 sync_src "$W/nx"
 export DEVKITPRO="$MCA_TOOLCHAIN/relay/extract/nx/devkitpro"
 export PATH="$DEVKITPRO/devkitA64/bin:$DEVKITPRO/tools/bin:$PATH"
 unset VITASDK || true
-nice -n 5 make -C "$W/nx/core" platform=libnx -j2
+nice -n 5 make -C "$W/nx/core" platform=libnx -j"$JOBS"
 cp "$W/nx/core/makecode_arcade_libretro_libnx.a" "$RA_NX/libretro_libnx.a"
 cd "$RA_NX"
 nice -n 5 make -f Makefile.libnx clean >/dev/null 2>&1 || true
-nice -n 5 make -f Makefile.libnx -j2
+nice -n 5 make -f Makefile.libnx -j"$JOBS"
 if [ -f retroarch_switch.elf ]; then
   n=$(aarch64-none-elf-nm retroarch_switch.elf \
       | grep -cE ' T (retro_load_game|pxt_vm_start_buffer|mca_tick_init)$' || true)
@@ -101,4 +109,5 @@ echo "switch: $(stat -c %s "$D/makecode_arcade_switch.zip") B"
 
 printf 'version=%s\nsource=%s\nfrontend_bundles=ctr/vita/switch\nlog=%s\n' \
   "$VERSION" "$MCA_SRC" "$LOGD/build.log" > "$LOGD/FRONTEND-INFO.txt"
-echo "DONE: $D now has $(find "$D" -maxdepth 1 -name '*.zip' | wc -l) release zips"
+stage "DONE"
+echo "DONE: $D now has $(find "$D" -maxdepth 1 -name '*.zip' | wc -l) release zips (elapsed $(( $(date +%s) - T0 ))s, jobs=$JOBS)"

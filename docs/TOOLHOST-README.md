@@ -19,8 +19,11 @@
 
 - tool69（192.168.1.69）是 MakeCode Arcade libretro 项目的常驻 Linux 验证节点，**不是发版机**。
 - Windows 本机只负责编辑与 git；交叉编译、arm64 行为回归、干净发行版构建都在这里跑。
-- 共用桌面机（3 个会话、Samba/Ceph）：不改服务、不重启；编译一律 `nice` + `-j2`，
-  不跑满 8 线程，不做性能基准（qemu 下的 fps 无参考价值，吞吐只认真机 cubexx / rgb30c）。
+- 共用桌面机（3 个会话、Samba/Ceph）：不改服务、不重启、不做性能基准（qemu 下的 fps 无参考价值，
+  吞吐只认真机 cubexx / rgb30c）。编译一律带 `nice`，但并行度分两类：
+  - 常规 CI 模拟（`ci_matrix.sh`）：`-j2`，刻意低负载，保持不变。
+  - 前端整包构建（`build_frontend_bundles.sh`）：`MCA_BUILD_JOBS` 默认 **6**，留 2 核给系统；
+    8 逻辑核心上可临时 `MCA_BUILD_JOBS=4` 覆盖。Vita 是主要瓶颈（编译器本身慢），受益最大。
 
 ---
 
@@ -83,6 +86,7 @@
 | `MCA_RELEASE_LOCAL` | `/opt/mca/work/release/local` | `MCA_RELEASE_CI` | `/opt/mca/work/release/ci` |
 | `MCA_BUILD_WORKSPACE` | `/opt/mca/work/build/workspace` | `MCA_BUILD_TEST` | `/opt/mca/work/build/test` |
 | `MCA_KEEP_RELEASE` | `5` | `MCA_KEEP_TEST` | `3` |
+| `MCA_BUILD_JOBS` | `6`（前端整包并行度，可临时覆盖） | | |
 
 新增路径必须先加进 `env.sh` 再写引用；脚本里禁止硬编码项目根路径前缀。
 

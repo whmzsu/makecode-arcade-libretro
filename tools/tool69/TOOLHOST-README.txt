@@ -4,9 +4,10 @@ tool69 / 192.168.1.69 —— MakeCode Arcade libretro 核心的工具机使用�
 
 【定位】常驻 Linux 验证节点，不是发版机。Windows 本机只负责编辑与 git，
 所有交叉编译、arm64 行为回归、干净发行版构建都在这里跑。
-这是共用桌面机（3 个会话、Samba/Ceph）：不改服务、不重启、编译一律 nice + -j2，
-不要跑满 8 线程，也不要在这里做性能基准（qemu 下的 fps 没有参考价值，
-吞吐只认 cubexx / rgb30c 真机）。
+这是共用桌面机（3 个会话、Samba/Ceph）：不改服务、不重启、编译一律 nice，
+不做性能基准（qemu 下的 fps 没有参考价值，吞吐只认 cubexx / rgb30c 真机）。
+并行度分两类：ci_matrix.sh 固定 -j2；前端整包 build_frontend_bundles.sh 取
+env.sh 的 MCA_BUILD_JOBS（默认 6，留 2 核给系统，可临时覆盖）。
 
 【铁律：路径只在 env.sh 定义一次】
   任何脚本或命令先 `source /opt/mca/env.sh`，之后只用变量，禁止写死 /opt/mca-* 路径。

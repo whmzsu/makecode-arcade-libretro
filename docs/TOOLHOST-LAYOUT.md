@@ -190,7 +190,9 @@
 
 - `/opt` 是 `LABEL=workbuddy` 整块分区（153G，剩约 128G）；根分区仅剩 39G，
   新增大文件一律进 `/opt`。同分区 `mv` 是原子改名，不复制数据。
-- 共用桌面机纪律：不改服务、不重启、编译 `nice` + `-j2`，不跑满 8 线程，不做性能基准。
+- 共用桌面机纪律：不改服务、不重启、编译一律带 `nice`、不做性能基准。并行度分两类：
+  CI 模拟 `ci_matrix.sh` 固定 `-j2`；前端整包 `build_frontend_bundles.sh` 取 `MCA_BUILD_JOBS`
+  （默认 6，留 2 核给系统，可临时覆盖）。
 - cron `20 3 * * *` 跑 `toolhost_daily.sh`，报告落 `work/reports/daily-<时间>/`。
 - 网络：github.com / raw / jsdelivr / Docker Hub 不通；api.github.com、清华 PyPI/apt、
   npmmirror、dl.google.com、cloud.debian.org 通。musl.cc 需分片并发下载。

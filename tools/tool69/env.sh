@@ -34,6 +34,10 @@ export MCA_BUILD_TEST=$MCA_BUILD/test
 export MCA_KEEP_RELEASE=5
 export MCA_KEEP_TEST=3
 
+# frontend bundle build parallelism (build_frontend_bundles.sh)
+# 8 logical cores on host: use 6, leave 2 for system/sessions; override per-run if needed.
+export MCA_BUILD_JOBS=${MCA_BUILD_JOBS:-6}
+
 export PATH="$MCA_MUSL_ROOT/bin:$MCA_TOOLCHAIN/bin:$PATH"
 
 # Android SDK / JDK
