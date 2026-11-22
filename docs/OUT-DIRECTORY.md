@@ -22,7 +22,7 @@
 |---|---|---|
 | （根）脚本自管路径 | `pxt64/`（探针卡带）、`testcarts/`（语料）、`core_test_data/`（host 存档）、`toolwrap/`（zig 包装）、`ndk/`、`fuzz/`、`coverage/` | 随脚本重建，不手工维护 |
 | `carts/` | 第三方游戏语料集（`carts63` 等） | 长期，不进库 |
-| `tool69/` | tool69 `/opt/mca-work/bin/` 的本地镜像（收编版在 `tools/tool69/`） | 与 tools/tool69 同步 |
+| `tool69/` | tool69 `/opt/mca/work/scripts/` 的本地镜像（收编版在 `tools/tool69/`） | 与 tools/tool69 同步 |
 | `toolcache/` | 本地工具链与校验工具（actionlint、zig、NDK 等） | 长期 |
 | `archive/` | 已完结任务的现场归档（调试取证、旧版本验收、实验线） | 30 天可清 |
 | `release/` | 各版本发版验收时的下载与核对产物 | 保留到下个版本发出 |

@@ -9,9 +9,10 @@
 #
 # 低负载：全程 nice，编译 -j2，不在共用桌面机上占满 8 线程。
 set -uo pipefail
-REPO=/opt/mca-work/repo
-NDK=/opt/mca-tools/ndk
-OUT=/opt/mca-work/reports/matrix-$(date +%Y%m%d-%H%M%S)
+source /opt/mca/env.sh
+REPO=$MCA_SRC
+NDK=$MCA_NDK
+OUT=$MCA_REPORTS/matrix-$(date +%Y%m%d-%H%M%S)
 mkdir -p "$OUT/artifacts"
 export ZIG=zig ANDROID_NDK_HOME="$NDK"
 cd "$REPO"
@@ -79,7 +80,7 @@ fi
 # aarch64-linux-musl-cross（GCC 11.2.1），build_musl.sh 两条都支持。
 log ""
 log "### B2. Lakka musl 全静态（musl.cc 工具链）"
-MUSL_TC=/opt/mca-data/tools/aarch64-linux-musl-cross/bin
+MUSL_TC=$MCA_MUSL_ROOT/bin
 if [ -x "$MUSL_TC/aarch64-linux-musl-g++" ]; then
   ( cd "$REPO" && PATH="$MUSL_TC:$PATH" nice -n 5 ./tools/build_musl.sh ) \
       > "$OUT/build-musl.log" 2>&1
@@ -101,7 +102,7 @@ log "### C. 发行包打包与体检"
 MCA_REQUIRE_STRIP=1 nice -n 5 ./tools/package_release.sh > "$OUT/package.log" 2>&1
 log "PACKAGE_RC=$?"
 tail -12 "$OUT/package.log" | tee -a "$S"
-python3 /opt/mca-work/bin/verify_release.py "$REPO/core/dist/release" \
+python3 "$MCA_BIN/verify_release.py" "$REPO/core/dist/release" \
         "$REPO/core/src/libretro_core.cpp" > "$OUT/release-verify.md" 2>&1
 log "VERIFY_RC=$?"
 cat "$OUT/release-verify.md" | tee -a "$S"

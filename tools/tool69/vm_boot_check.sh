@@ -5,7 +5,8 @@
 # 在 x86 上只能 TCG 全系统模拟，启动很慢。这里只验证「完整 arm64 Linux 能起来、
 # 能登录、能联网」，前端层验证另走宿主/arm64-chroot 的 RetroArch（见 README.txt）。
 set -uo pipefail
-V=/opt/mca-work/vm
+source /opt/mca/env.sh
+V=$MCA_VM
 IMG="$V/debian-12-genericcloud-arm64.qcow2"
 PUB=$(cat /root/.ssh/id_ed25519_mca.pub)
 LOG="$V/vm.log"

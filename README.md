@@ -128,7 +128,7 @@ makecode_arcade/
 │   ├── nx-probe/           Switch 启动诊断与符号定位
 │   ├── muos/               muOS 真机安装与稳定性工具
 │   ├── win32_shim/         PXT32 探针线的 Windows dlopen shim（存档）
-│   ├── tool69/             工具机（192.168.1.69）运维脚本归档（机器上主拷贝在 /opt/mca-work/bin/）
+│   ├── tool69/             工具机（192.168.1.69）运维脚本归档（机器上主拷贝在 /opt/mca/work/scripts/）
 │   └── experimental/       实验线：firmware-pr（ArkOS/dArkOS/muOS/knulli/arkos4clone 收录 PR）
 ├── png_examples/           真实卡带样本（ping / jumpy / cube-land / falling-duck / destroy-the-castle；转换样例与回归语料）
 └── test_cartridge.png      合成卡带样本（自测通过）
@@ -286,8 +286,10 @@ tools/package_release.sh  # 打包成可直接放进 RetroArch 的 zip
 > （8 个 64 位含 macOS 两架构 + 4 个 32 位）。3DS（new3ds 真机）与 PS Vita（真机，PATCH
 > 16-20 后多次开关内容颜色与稳定性已复验）均已验收；Vita 版 RetroArch 的
 > `Core provided` 比例不生效属**前端通病**（其他核心同样拉满），需手动设
-> 4:3 + Save Core Overrides，见 `docs/3DS-VITA-TEST.md`。老款 3DS 无设备
-> 未验。玩家遇到问题请提 issue 并附错误码 / `mca_trace.log` / dump。
+> 4:3 + Save Core Overrides，见 `docs/3DS-VITA-TEST.md`。老款 3DS 无真机，
+> 但在 new3ds 上关 clock/cache 模拟时明显卡顿（268MHz、无 L2 cache，硬件
+> 算力下限），只保证能跑、不保证流畅，想要流畅请用 new3ds。玩家遇到问题
+> 请提 issue 并附错误码 / `mca_trace.log` / dump。
 
 ### Lakka / LibreELEC（musl）
 

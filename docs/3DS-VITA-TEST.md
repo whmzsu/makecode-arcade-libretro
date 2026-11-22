@@ -14,7 +14,10 @@
 > **tool69 本地编译**，GitHub CI（`3ds-vita.yml`）只作回归兜底。
 >
 > **真机结论**：3DS 核心形态在 new3ds 验收通过，按键/菜单/卡带装载全绿，
-> 画面性能明显优于早先的 CPU 缩放前端；老款 3DS 手头无设备、暂不验。
+> 画面性能明显优于早先的 CPU 缩放前端；老款 3DS 手头无真机，但在 new3ds
+> 上关闭 RA 电源设置中的 New 3DS clock/cache 模拟 old3ds 后，jumpy 明显
+> 卡顿——old3ds 仅 268MHz、无 L2 cache，属硬件算力下限，同份 CIA 在
+> new3ds 上正常，不是构建或代码缺陷。old3ds 只保证能跑、不保证流畅。
 > Vita 核心形态此前 `self + info` 并入已装 RA 时报 `C2-12828-1`，已定位为
 > 核心 `mcaTrace()` 缓存 `FILE*` 在 RA 换 content 后悬垂（PATCH 16，v0.3.9
 > 修复），**真机复验通过**（0.3.10 连续开关内容颜色与稳定性均正常）。
@@ -87,11 +90,11 @@ SELF，无动态加载）。
 
 ## 构建（本地优先，GitHub 只兜底）
 
-核心形态 = RA 完整前端 + core 静态库，统一在 tool69 本地编：
-源码 `/opt/mca-data/scratch/{ctr-build,vita-build}`，RA 树
-`/opt/mca-data/tools/relay/retroarch`（pin `d7cc9bc`）。
-工具链 `DEVKITPRO=/opt/mca-data/tools/relay/extract/ctr/devkitpro`、
-`VITASDK=/opt/mca-data/tools/relay/extract/vita/vitasdk`。
+核心形态 = RA 完整前端 + core 静态库，统一在 tool69 本地编（先 `source /opt/mca/env.sh`）：
+源码 `$MCA_WORK/build/{ctr,vita}`，RA 树
+`$MCA_TOOLCHAIN/relay/retroarch`（pin `d7cc9bc`）。
+工具链 `DEVKITPRO=$MCA_TOOLCHAIN/relay/extract/ctr/devkitpro`、
+`VITASDK=$MCA_TOOLCHAIN/relay/extract/vita/vitasdk`。
 
 先编 core 静态库，再把 `.a` 拷进 RA 树改名 `libretro_ctr.a` /
 `libretro_vita.a`，**先 clean 再链**（旧 `.o` 带过期特性宏会报
@@ -100,12 +103,12 @@ SELF，无动态加载）。
 
 ```
 # 3DS core
-export DEVKITPRO=/opt/mca-data/tools/relay/extract/ctr/devkitpro
+export DEVKITPRO=$MCA_TOOLCHAIN/relay/extract/ctr/devkitpro
 export DEVKITARM=$DEVKITPRO/devkitARM
 export PATH=$DEVKITARM/bin:$DEVKITPRO/tools/bin:$PATH
-make -C /opt/mca-data/scratch/ctr-build/core platform=ctr -j3
+make -C $MCA_WORK/build/ctr/core platform=ctr -j3
 # 拷 makecode_arcade_libretro_ctr.a → RA 树 libretro_ctr.a
-cd /opt/mca-data/tools/relay/retroarch
+cd $MCA_TOOLCHAIN/relay/retroarch
 make -f Makefile.ctr clean
 make -f Makefile.ctr -j3 HAVE_RETRONFS=0 HAVE_CHEEVOS_RVZ=0
 make -f Makefile.ctr retroarch_3ds.cia HAVE_RETRONFS=0 HAVE_CHEEVOS_RVZ=0 \
@@ -115,11 +118,11 @@ make -f Makefile.ctr retroarch_3ds.cia HAVE_RETRONFS=0 HAVE_CHEEVOS_RVZ=0 \
 cp retroarch_3ds.cia makecode_arcade_libretro.cia
 
 # Vita core（VPK 线已放下，只出 self + info）
-export VITASDK=/opt/mca-data/tools/relay/extract/vita/vitasdk
+export VITASDK=$MCA_TOOLCHAIN/relay/extract/vita/vitasdk
 export PATH=$VITASDK/bin:$PATH
-make -C /opt/mca-data/scratch/vita-build/core platform=vita -j3
+make -C $MCA_WORK/build/vita/core platform=vita -j3
 # 拷 makecode_arcade_libretro_vita.a → RA 树 libretro_vita.a
-cd /opt/mca-data/tools/relay/retroarch
+cd $MCA_TOOLCHAIN/relay/retroarch
 make -f Makefile.vita clean
 make -f Makefile.vita retroarch_vita.self -j3
 cp retroarch_vita.self makecode_arcade_libretro.self
@@ -135,4 +138,6 @@ cp retroarch_vita.self makecode_arcade_libretro.self
 - **Vita 要手动把比例设成 4:3**（见「Vita 安装」第 6 步）：该版 RA 的
   `Core provided` 会拉满全屏（真机上其他核心同样如此，前端通病）；
   3DS 与桌面 RA 不需要这一步。
-- 老款 3DS 无设备未验；GPU 硬缩放线已放弃（真机黑屏）。
+- 老款 3DS 无真机，仅用 new3ds 关 clock/cache 模拟验证过：能跑但明显卡顿
+  （268MHz、无 L2 cache，硬件算力下限），只保证能跑、不保证流畅；想要流畅
+  请用 new3ds 或更高性能设备。GPU 硬缩放线已放弃（真机黑屏）。

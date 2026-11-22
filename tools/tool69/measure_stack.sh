@@ -1,10 +1,11 @@
 #!/bin/bash
 # VM 栈尺寸 × GC 堆高水位测量（3DS/Vita 定容，PXT32 = x86-32 构建 + 32 位 C 宿主）
 # 用法: ZIG=zig bash measure_stack.sh   （在 tool69 上跑）
-# 产物: /opt/mca-data/scratch/vm-measure/results/sweep.csv
+# 产物: $MCA_WORK/build/vm-measure/results/sweep.csv
 #       每行: tag,cart,rc,final_hash,hwm_kb
 set -u
-BASE=/opt/mca-data/scratch/vm-measure
+source /opt/mca/env.sh
+BASE=$MCA_WORK/build/vm-measure
 SRC=$BASE/src
 CARTS=$SRC/out/carts63
 OUT=$BASE/results

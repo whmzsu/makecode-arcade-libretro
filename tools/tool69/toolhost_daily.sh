@@ -5,13 +5,14 @@
 #   1) arm64 chroot 里跑 21 张语料 × 600 帧逐帧回归，与真机 0.3.3 基准比对；
 #   2) 在线的两台掌机（cubexx .149 / rgb30c .101）轻量巡检：温度、核心 md5、
 #      卡带数、governor（读不到就标 SKIP，不重试、不唤醒设备）；
-#   3) 汇总成一份报告，落在 /opt/mca-work/reports/daily-<日期>/。
+#   3) 汇总成一份报告，落在 $MCA_REPORTS/daily-<日期>/。
 #
 # 明确不做：不重新同步源码、不重装依赖、不跑性能基准（qemu 下的 fps 无意义）、
 # 不改任何服务、不重启设备。源码更新由 Windows 侧 scp 推送后手工触发全量矩阵。
 set -uo pipefail
-BIN=/opt/mca-work/bin
-REPORTS=/opt/mca-work/reports
+source /opt/mca/env.sh
+BIN=$MCA_BIN
+REPORTS=$MCA_REPORTS
 OUT="$REPORTS/daily-$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$OUT"
 exec 9>/tmp/mca-daily.lock

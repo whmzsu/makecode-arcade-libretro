@@ -125,7 +125,9 @@ This is the prerequisite — our files are just a **core** and need RA to run:
 3. Put **`makecode_arcade_libretro.info`** (works for both 3DS and Vita) into **`sdmc:/retroarch/cores/info/`**.
 4. Restart RetroArch → **Load Core → MakeCode Arcade** → **Load Content** → browse to wherever you put the cartridges and pick a `.pxt64`.
 
-> Alternatively just install `makecode_arcade_libretro.cia` with FBI: a standalone "MakeCode Arcade" icon appears (UniqueId `0xF1CA1`) that opens RA with the core inside. Both routes work; the one above is recommended so everything lives in official RA. Verified and smooth on new3ds; no old-3DS hardware available to test.
+> Alternatively just install `makecode_arcade_libretro.cia` with FBI: a standalone "MakeCode Arcade" icon appears (UniqueId `0xF1CA1`) that opens RA with the core inside. Both routes work; the one above is recommended so everything lives in official RA. Verified and smooth on new3ds.
+>
+> **Do not expect smooth play on old 3DS models**: with RetroArch's "New 3DS clock / cache" power setting disabled on a new3ds to emulate old3ds, even jumpy is noticeably sluggish. An old3ds has only 268 MHz and no L2 cache, which cannot sustain the pointer-chasing load of the bytecode interpreter. This is a hardware compute limit, not a build or code defect (the same CIA runs fine on new3ds). On old3ds, loading and playing are guaranteed but smooth frame rate is not; use a new3ds or a more powerful device for smooth play.
 
 ### PS Vita
 
