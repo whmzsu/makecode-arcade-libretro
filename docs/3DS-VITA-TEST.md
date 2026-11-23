@@ -144,12 +144,24 @@ cp retroarch_vita.self makecode_arcade_libretro.self
 
 ## 运行态测试（模拟器冒烟，非真机替代）
 
-前端整包不像标准 `.so` 那样能跑 golden frame hash。工具机上的兜底是
-`$MCA_BIN/vita3k_smoke.sh [tag]`：把官方 RA Vita VPK（1.22.2）装进 Vita3K，
-再把我们的 `makecode_arcade_libretro.self` + `.info` 拷进 `ux0/app/RETROVITA/`，
-启动后断言 RA 识别 core 并进主循环无崩溃。**只证明 self 可加载运行，不跑卡带、
-不出 frame hash，也不替代真机验收**（4:3 比例、`C2-12828-1` 都是真机专属）。
-环境、无头要点与实测证据见 `$MCA_REPORTS/vita3k-smoke-report-20261123.md`。
+前端整包不像标准 `.so` 那样能跑 golden frame hash。工具机上有两条兜底，
+都**只证明包能被识别并进入运行态，不跑卡带、不出 frame hash、不替代真机验收**：
+
+| 脚本 | 平台 | 做法 | 断言 |
+|---|---|---|---|
+| `$MCA_BIN/vita3k_smoke.sh [tag]` | Vita | 官方 RA Vita VPK（1.22.2）装进 Vita3K，导入我们的 self + info | RA 识别 core、进 Running、无崩溃 |
+| `$MCA_BIN/azahar_smoke.sh [tag]` | 3DS | Azahar（Citra 后继）`-i` 安装我们的 CIA，再启动已安装 title | title `000400000F1CA100` 加载、RA 写出 `retroarch.cfg`、无崩溃 |
+
+3DS 侧环境要点：AppImage 2126.2 放在 `$MCA_TOOLCHAIN/emulators/azahar/`；
+它只带 xcb/wayland Qt 插件（无 offscreen），必须 `xvfb-run` + llvmpipe 软件渲染，
+用户目录用 `XDG_DATA_HOME` 隔离。CIA 装到 `sdmc/.../title/00040000/0f1ca100/`；
+RA 真启动的证据是 `sdmc/retroarch/retroarch.cfg` 落盘（不只是停在 loader）。
+模拟器的 stub 未实现告警与 1×1 纹理告警属已知噪声，只记不判失败。
+实测：0.3.11 CIA（5 447 104 B）安装并运行 75s，RA 配置落盘、无崩溃信号。
+
+Vita 侧的 4:3 比例与 `C2-12828-1`、3DS 侧的 old3ds 算力都是真机专属。
+详细环境与证据见 `$MCA_REPORTS/vita3k-smoke-report-20261123.md`
+及 `$MCA_REPORTS/azahar-smoke-20261123-122355/`。
 
 ## 已知边界
 
