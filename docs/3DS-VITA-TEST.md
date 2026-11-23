@@ -144,13 +144,14 @@ cp retroarch_vita.self makecode_arcade_libretro.self
 
 ## 运行态测试（模拟器冒烟，非真机替代）
 
-前端整包不像标准 `.so` 那样能跑 golden frame hash。工具机上有两条兜底，
+前端整包不像标准 `.so` 那样能跑 golden frame hash。工具机上有三条兜底，
 都**只证明包能被识别并进入运行态，不跑卡带、不出 frame hash、不替代真机验收**：
 
 | 脚本 | 平台 | 做法 | 断言 |
 |---|---|---|---|
 | `$MCA_BIN/vita3k_smoke.sh [tag]` | Vita | 官方 RA Vita VPK（1.22.2）装进 Vita3K，导入我们的 self + info | RA 识别 core、进 Running、无崩溃 |
 | `$MCA_BIN/azahar_smoke.sh [tag]` | 3DS | Azahar（Citra 后继）`-i` 安装我们的 CIA，再启动已安装 title | title `000400000F1CA100` 加载、RA 写出 `retroarch.cfg`、无崩溃 |
+| `$MCA_BIN/eden_smoke.sh [tag]` | Switch | Eden（Yuzu 系）带 prod.keys 加载我们的 NRO | `Loading RetroArch`、OpenGL shader 编译、RA 写出 `retroarch.cfg`、无崩溃 |
 
 3DS 侧环境要点：AppImage 2126.2 放在 `$MCA_TOOLCHAIN/emulators/azahar/`；
 它只带 xcb/wayland Qt 插件（无 offscreen），必须 `xvfb-run` + llvmpipe 软件渲染，
@@ -159,9 +160,22 @@ RA 真启动的证据是 `sdmc/retroarch/retroarch.cfg` 落盘（不只是停在
 模拟器的 stub 未实现告警与 1×1 纹理告警属已知噪声，只记不判失败。
 实测：0.3.11 CIA（5 447 104 B）安装并运行 75s，RA 配置落盘、无崩溃信号。
 
-Vita 侧的 4:3 比例与 `C2-12828-1`、3DS 侧的 old3ds 算力都是真机专属。
-详细环境与证据见 `$MCA_REPORTS/vita3k-smoke-report-20261123.md`
-及 `$MCA_REPORTS/azahar-smoke-20261123-122355/`。
+Switch 侧环境要点：Eden v0.2.1 AppImage 放在 `$MCA_TOOLCHAIN/emulators/eden/`；
+它是 Yuzu 系，**必须有 prod.keys**（否则弹 "Derivation Components Missing" 卡死），
+key 放在 `$MCA_TOOLCHAIN/emulators/keys/`（21.2.0，用户自有 dump），脚本拷进隔离
+用户目录的 `eden/keys/`。无头渲染三个坑：Xvfb 下 Vulkan 无 present queue，
+必须把 `qt-config.ini` 的 `backend` 两处（`backend=` 与 `backend\default=`）都改成
+OpenGL；llvmpipe 只报 GL 4.5，需 `MESA_GL_VERSION_OVERRIDE=4.6` +
+`MESA_GLSL_VERSION_OVERRIDE=460` 才过 Eden 的 4.6 检查。RA 真启动的证据同样是
+`sdmc/retroarch/retroarch.cfg` 落盘；llvmpipe 的 shader 指令/未映射写告警属已知噪声。
+实测：0.3.11 NRO（16,627,110 B）加载并运行 75s，RA 配置落盘、无崩溃。
+注意这**绕过了 fw21/22 mesa `nv50_ir` 真机问题**（见 `docs/SWITCH-BUILD.md`），
+模拟器通过不代表真机通过。
+
+Vita 侧的 4:3 比例与 `C2-12828-1`、3DS 侧的 old3ds 算力、Switch 侧的
+fw21/22 `nv50_ir` 都是真机专属。详细环境与证据见
+`$MCA_REPORTS/vita3k-smoke-report-20261123.md`、
+`$MCA_REPORTS/azahar-smoke-20261123-122355/` 及 `$MCA_REPORTS/eden-smoke-*/`。
 
 ## 已知边界
 
