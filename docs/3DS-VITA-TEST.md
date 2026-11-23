@@ -142,6 +142,15 @@ cp retroarch_vita.self makecode_arcade_libretro.self
 打到 `release/local/<tag>/`。本地完整发版 = `package_release.sh` 的 12+5 标准包
 再加这 3 个前端整包，共 20 个 zip。
 
+## 运行态测试（模拟器冒烟，非真机替代）
+
+前端整包不像标准 `.so` 那样能跑 golden frame hash。工具机上的兜底是
+`$MCA_BIN/vita3k_smoke.sh [tag]`：把官方 RA Vita VPK（1.22.2）装进 Vita3K，
+再把我们的 `makecode_arcade_libretro.self` + `.info` 拷进 `ux0/app/RETROVITA/`，
+启动后断言 RA 识别 core 并进主循环无崩溃。**只证明 self 可加载运行，不跑卡带、
+不出 frame hash，也不替代真机验收**（4:3 比例、`C2-12828-1` 都是真机专属）。
+环境、无头要点与实测证据见 `$MCA_REPORTS/vita3k-smoke-report-20261123.md`。
+
 ## 已知边界
 
 - **只认 `.pxt64`**：官方编译器只产 pxt64，PNG 不处理也不提示；玩家侧

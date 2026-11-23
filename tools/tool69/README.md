@@ -18,6 +18,7 @@ tool69（192.168.1.69）是常驻 Linux 验证节点：交叉编译、arm64 行�
 | `prune_versions.sh [--dry-run]` | 版本保留归档：release/local+ci 各 5、build/test 3 |
 | `fetch_ci_release.sh <tag>` | GitHub Release 资产下载到 `release/ci/<tag>/` |
 | `build_frontend_bundles.sh [tag]` | 本地构建 3DS/Vita/Switch 前端整包 |
+| `vita3k_smoke.sh [tag]` | Vita 运行态冒烟：官方 RA VPK + 导入 self，验证被 RA 识别并进主循环（不跑卡带） |
 | `compare_release_assets.py` | 比对本地与 CI 发版 zip 内容 |
 
 `env.sh` 也在此处留仓库备份；现场权威版是 `/opt/mca/env.sh`，修改后两边保持一致。

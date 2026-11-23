@@ -65,6 +65,10 @@ env.sh 的 MCA_BUILD_JOBS（默认 6，留 2 核给系统，可临时覆盖）�
   build_frontend_bundles.sh  本地构建 3DS CIA / Vita SELF / Switch NRO 前端整包，
                             用 $MCA_SRC 0.3.11 刷新 build/workspace/{ctr,vita,nx}
                             后构建，产物落 release/local/<tag>/（共 20 个 zip）。
+  vita3k_smoke.sh [tag]     Vita 运行态冒烟：装官方 RA VPK（幂等）+ 导入 self/info，
+                            在 Vita3K 里启动并断言 RA 识别 core、进 Running 无崩溃。
+                            不跑卡带、不出 frame hash；环境在 toolchain/emulators/vita3k/。
+                            无头要点：offscreen+surfaceless、dummy 音频、-S 用 app0:/ 虚拟路径。
   compare_release_assets.py 比对本地与 CI 发版 zip 的字节及包内文件哈希。
   relay/fetch.sh           在 $MCA_RELAY 下逐 commit 增量拉取工具链 relay。
 

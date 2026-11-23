@@ -41,6 +41,7 @@
 │   ├── musl-cross/              ├─ Lakka 全静态（唯一一份）
 │   ├── venv/                    ├─ Python 3.12
 │   ├── relay/                   ├─ ctr/vita/nx 工具链 + RA 树 + fetch.sh
+│   ├── emulators/               ├─ Vita3K AppImage + 官方 RA Vita VPK（运行态冒烟）
 │   ├── sysroot-arm64/           ├─ arm64 chroot
 │   ├── sysroot-amd64/           ├─ amd64 干净 rootfs
 │   └── vm/                      └─ arm64 虚拟机镜像
@@ -144,6 +145,7 @@ ci 为 `SOURCE.txt` + `SHA256SUMS`；不完整目录只告警不自动归档。
 | `prune_versions.sh [--dry-run]` | 按版本保留策略归档正式产物/测试版本的旧目录 |
 | `fetch_ci_release.sh <tag>` | 从 GitHub Release 下载 CI 资产到 `release/ci/<tag>/` 并校验 size |
 | `build_frontend_bundles.sh [tag]` | 本地构建 3DS CIA / Vita SELF / Switch NRO 三套前端整包 |
+| `vita3k_smoke.sh [tag]` | Vita 运行态冒烟：官方 RA VPK + 导入 self，验证被 RA 识别并进主循环（不跑卡带） |
 | `compare_release_assets.py <local> <ci>` | 比对两目录 zip 字节与包内文件哈希 |
 | `relay/fetch.sh` | 在 `$MCA_RELAY` 下逐 commit 增量拉取工具链 relay |
 
