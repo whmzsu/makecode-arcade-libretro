@@ -147,6 +147,10 @@ cp retroarch_vita.self makecode_arcade_libretro.self
 前端整包不像标准 `.so` 那样能跑 golden frame hash。工具机上有三条兜底，
 都**只证明包能被识别并进入运行态，不跑卡带、不出 frame hash、不替代真机验收**：
 
+**自 2026-11-23 起纳入常规本地测试**：本地构建/发版流程在标准 `.so` 的
+golden hash + 回归夹具之外，固定追加跑这三条冒烟（每条约 1.5 分钟），
+作为前端整包的最低门槛；脚本输出与日志按约定落在 `$MCA_REPORTS/`。
+
 | 脚本 | 平台 | 做法 | 断言 |
 |---|---|---|---|
 | `$MCA_BIN/vita3k_smoke.sh [tag]` | Vita | 官方 RA Vita VPK（1.22.2）装进 Vita3K，导入我们的 self + info | RA 识别 core、进 Running、无崩溃 |
