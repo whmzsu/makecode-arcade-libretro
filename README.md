@@ -378,11 +378,13 @@ cp core/makecode_arcade_libretro_libnx.a /path/to/RetroArch/libretro_libnx.a
 cd /path/to/RetroArch && make -f Makefile.libnx   # -> retroarch_switch.nro
 ```
 
-安装：`makecode_arcade_libretro_libnx.nro` 放 SD 卡 **`sdmc:/switch/`**
-（它本身就是一个 homebrew 程序，hbmenu 只扫这个目录；**不是** `retroarch/cores/`
-——那是官方 RetroArch 自己的核心目录）。`.info` 可选，同样放 `switch/` 即可；
-卡带放哪都行（`sdmc:/roms/makecode/` 只是示例路径）。以 title takeover 启动（按住 R 点任意游戏进
-hbmenu）拿完整内存。
+安装：`makecode_arcade_libretro_libnx.nro` 放 SD 卡 **`sdmc:/retroarch/cores/`**
+（官方 RA 的核心目录：在线更新器装这里、启动器回退也扫这里），`.info` 放
+**`sdmc:/retroarch/info/`**（默认 info 目录）。启动走官方 RA → Load Core
+→ MakeCode Arcade → Load Content。备选：NRO 放 `sdmc:/switch/` 由 hbmenu
+直接启动也可（title takeover 拿完整内存；RA 的默认目录由写死的
+`sdmc:/retroarch/` 推导，与 NRO 实际位置无关）。卡带放哪都行
+（`sdmc:/roms/makecode/` 只是示例路径）。
 
 > **已知问题（2026-11 真机实测，固件 21/22 + 大气层 1.11~1.12）**：RetroArch
 > 前端在 title takeover 模式下**加载任何核心都会崩**（crash report 显示崩在

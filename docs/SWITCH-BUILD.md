@@ -15,7 +15,9 @@ Switch **没有 `dlopen`**，核心不能像桌面那样丢一个 `.so` 进 `cor
 
 - **一个 NRO 内含且仅含一个核心**，这正是官方在线更新器分发核心的形态；
 - `tools/package_release.sh` **不参与**这条线（它只打标准 libretro core 包）；
-- `.info` 可选、放同一目录即可；更新核心 = 换掉这个 NRO，`retroarch.cfg` 保留。
+- `.info` 可选，放默认 info 目录 `sdmc:/retroarch/info/` 即可（注意 Switch
+  与 3DS 不同：3DS 是 `cores/info/`，Switch 是 PORT_DIR 下直接 `info/`）；
+  更新核心 = 换掉这个 NRO，`retroarch.cfg` 保留。
 
 归档有个坑：GNU `ar` 只存基名，而 `runtime/pxtapp` 里 `base/control.cpp` 与
 `core---vm/control.cpp` 同名，直接归档会让后者静默覆盖前者（符号到链接期才报
@@ -85,12 +87,21 @@ CIA / SELF / NRO 三个前端整包，共 **20 个 zip**，与 CI 数量对齐�
 
 ## 四、安装与真机验收
 
-1. 把 `makecode_arcade_libretro_libnx.nro` 拷到 SD 卡 **`sdmc:/switch/`**
-   （是 `switch/`，**不是** `retroarch/cores/`）；`.info` 可选，同目录即可。
+1. 把 `makecode_arcade_libretro_libnx.nro` 拷到 SD 卡
+   **`sdmc:/retroarch/cores/`**（官方 RA 的核心目录：在线更新器装这里、
+   启动器回退也扫这里）；`.info` 放 **`sdmc:/retroarch/info/`**（默认 info
+   目录；没有就新建）。Switch 上 RA 的默认目录全部由写死的
+   `sdmc:/retroarch/retroarch_switch.nro` 推导，**与 NRO 实际放在哪无关**，
+   所以照官方布局放最稳。
 2. 卡带 `.pxt64` 随便放（示例 `sdmc:/roms/makecode/`）。
-3. **按住 R 点任意已装游戏**进 hbmenu → 选这个 NRO（title takeover，拿完整内存）。
-   不要从相册图标进——applet 模式内存只有几百 MB，前端不一定撑得住。
-   hbmenu 里按 R+方向键切到「应用模式」启动效果相同。
+3. hbmenu 启动官方 `retroarch_switch.nro` → **Load Core → MakeCode Arcade**
+   → Load Content 选卡带。Switch RA 不是动态加载（`HAVE_STATIC_CORES`），
+   Load Core 走 `FRONTEND_FORK_CORE` → `envSetNextLoad` 重启进核心 NRO
+   （与官方在线更新器装的核同形态）。
+   备选：把 NRO 放 `sdmc:/switch/` 由 hbmenu 直接启动也行（title takeover
+   拿完整内存，真机验收就是这条路；配置/存档仍落在 `sdmc:/retroarch/`）。
+   两种入口都不要从相册图标进——applet 模式内存只有几百 MB，前端不一定
+   撑得住；hbmenu 里按 R+方向键切到「应用模式」启动效果相同。
 4. 游戏内 Start = 菜单，Select = 重启；方向/ABXY 可在
    Quick Menu → Controls 改。
 5. 验收：probe 卡带逐键变色（A→红、B→黄、十字→绿橙蓝淡蓝、START→青、

@@ -402,12 +402,15 @@ cp core/makecode_arcade_libretro_libnx.a /path/to/RetroArch/libretro_libnx.a
 cd /path/to/RetroArch && make -f Makefile.libnx   # -> retroarch_switch.nro
 ```
 
-Install: copy `makecode_arcade_libretro_libnx.nro` (and optionally the
-`.info`) into **`sdmc:/switch/`** - the NRO is a standalone homebrew program
-(frontend + core linked together), and hbmenu only scans that directory; it is
-NOT a core for `sdmc:/retroarch/cores/`. Cartridges go anywhere (e.g.
-`sdmc:/roms/makecode/`). Start it via title takeover (hold R while launching
-any game to reach hbmenu) for full memory.
+Install: copy `makecode_arcade_libretro_libnx.nro` into
+**`sdmc:/retroarch/cores/`** (official RA's core directory - where the online
+updater installs cores and where the launcher fallback scans), and the
+`.info` into **`sdmc:/retroarch/info/`** (default info directory). Launch via
+official RA -> Load Core -> MakeCode Arcade -> Load Content. Alternative: the
+NRO also runs when placed in `sdmc:/switch/` and launched directly from hbmenu
+(title takeover, full memory; RA's default directories are derived from the
+hardcoded `sdmc:/retroarch/` prefix regardless of where the NRO lives).
+Cartridges go anywhere (e.g. `sdmc:/roms/makecode/`).
 
 > **Known issue (real-device tested 2026-11, firmware 21/22 + Atmosphere
 > 1.11~1.12)**: the RetroArch frontend crashes when **loading any core** in
