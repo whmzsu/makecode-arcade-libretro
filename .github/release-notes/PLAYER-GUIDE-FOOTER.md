@@ -28,7 +28,7 @@
 |---|---|
 | `makecode_arcade_ctr.zip` | 3DS 核心（内含 `makecode_arcade_libretro.cia` + `makecode_arcade_libretro.info`）：解压后把 cia 复制进官方 RA 的 `cores/`、info 放 `cores/info/`，new3ds 实测通过 |
 | `makecode_arcade_vita.zip` | PS Vita 核心（内含 `makecode_arcade_libretro.self` + `makecode_arcade_libretro.info`）：解压后并入官方 RA 的 app 目录 + `info/` |
-| `makecode_arcade_switch.zip` | Nintendo Switch（NRO，放 `sdmc:/switch/`） |
+| `makecode_arcade_switch.zip` | Nintendo Switch 核心（内含 `makecode_arcade_libretro_libnx.nro` + `makecode_arcade_libretro.info`）：解压后 NRO 放官方 RA 的 `sdmc:/retroarch/cores/`、info 放 `sdmc:/retroarch/info/` |
 
 > **3DS / Vita 都建议先装官方 RetroArch**（从 RetroArch 官网 / buildbot 下载），
 > 再把对应 zip 解压、按上面说明把里面的核心文件并入，和其他平台一样在 RA 里
@@ -44,6 +44,13 @@
 > `C2-12828-1` 已定位修复，请用最新版 self 复验；若仍崩附 `psp2core-*.psp2dmp`。
 > 画面被拉满全屏、改成 4:3 也不生效的，是早期存过的 core override 在覆盖全局设置：
 > 删掉 `ux0:/data/retroarch/config/MakeCode Arcade/` 整个目录重启 RA 即可（前端设置问题，与核心无关）。
+>
+> **Switch**：解压 `makecode_arcade_switch.zip`，把 `makecode_arcade_libretro_libnx.nro`
+> 放 `sdmc:/retroarch/cores/`、`makecode_arcade_libretro.info` 放 `sdmc:/retroarch/info/`
+> （Switch 默认 info 目录，注意与 3DS 的 `cores/info/` 不同）。启动官方 RA → Load Core
+> → MakeCode Arcade → Load Content 选卡带。（NRO 放 `sdmc:/switch/` 由 hbmenu 直接
+> 启动也可，title takeover 拿完整内存；RA 的默认目录固定在 `sdmc:/retroarch/`，与
+> NRO 实际位置无关。不要从相册图标进——applet 模式内存只有几百 MB。）
 >
 > **更名说明**：自本版起，3DS/Vita 的核心文件从旧短名 `mca_libretro.cia/.self`
 > 统一更名为 `makecode_arcade_libretro.cia/.self`（与 PC/Android/Switch 一致，
