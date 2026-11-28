@@ -6,7 +6,7 @@
 > **更新规则**：发版后用 `out/therm/softinfo.sh` 重采一遍，或手工改「核心」列；
 > 设备新增/退役就加删行，别让表滞后于现实。
 
-## 1. Linux 掌机（9 台）
+## 1. Linux 掌机（10 台）
 
 | 别名 | IP | 型号 | SoC / 内存 | 系统 / 内核 | RA | 核心 | 状态 |
 |---|---|---|---|---|---|---|---|
@@ -18,9 +18,10 @@
 | `rgb30a` | 192.168.1.26 | Powkiddy RGB30 | RK3566 1.99G / 967MB | Debian 13 / 5.10.226 | 1.22.2 | 0.3.3 | 关机 |
 | `rgb30b` | 192.168.1.85 | Powkiddy RGB30 | RK3566 1.99G / 967MB | Debian 13 / 5.10.226 | 1.22.2 | 0.3.3 | 关机 |
 | `r36sclonea` | 192.168.1.31 | R36S Clone Type2（RG351MP 壳，host `r36s-clone-a`） | RK3326 1.30G / 918MB | Debian 13 / **4.4.189** | 1.22.2 | 0.3.3 | 关机 |
-| `r36scloneb` | 192.168.1.137 | R36S Clone Type2（RG351MP 壳，host `r36s-clone-b`） | RK3326 1.30G / 918MB | Debian 13 / **4.4.189** | 1.22.2 | 0.3.3 | 关机 |
+| `r36scloneb` | 192.168.1.137（原，现被 K36 占用） | R36S Clone Type2（RG351MP 壳，host `r36s-clone-b`） | RK3326 1.30G / 918MB | Debian 13 / **4.4.189** | 1.22.2 | 0.3.3 | **离线：USB 网卡被新机 K36 拿走** |
+| `k36` | 192.168.1.137 | Kinhank K36（hostname/DTB 均为 `k36`/`Kinhank K36`，RK3326 克隆家族；2026-11-27 上线） | RK3326 1.30G / 918MB | Debian 13 / **4.4.189** | 1.22.2 | **0.3.11** | 在线 |
 
-系统分布：Debian 13 ×8（本表 7 + §2 的原 `r36s`）/ ArkOS ×1（rk2023，实为 Ubuntu 19.10 底）/ muOS ×1。
+系统分布：Debian 13 ×9（本表 8 + §2 的原 `r36s`）/ ArkOS ×1（rk2023，实为 Ubuntu 19.10 底）/ muOS ×1。
 卡带目录：Debian=`/roms/makecode`、ArkOS=`~/makecode`、muOS=`/mnt/mmc/ROMS/MakeCode Arcade`。
 
 ## 2. 其他平台
