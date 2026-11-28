@@ -46,6 +46,10 @@ env.sh 的 MCA_BUILD_JOBS（默认 6，留 2 核给系统，可临时覆盖）�
   regress_arm64.sh [帧数]  21 张语料 × 2 个核心（真机 0.3.3 vs 本地 zig 产物）
                             在 arm64 chroot 里逐张比对 FINAL-FRAME-HASH，
                             compare_regress.py 产出 report.md。
+  armhf_smoke.sh           32 位 armhf 运行时冒烟（golden 三例 + reject565 三例）：
+                            zig 编 32 位 C 宿主 + qemu-arm-static -L $MCA_SYSROOT_ARMHF
+                            跑 ELF32 core，比对末帧哈希。默认用现有 core/dist，
+                            --build-core 先重编；CI 的 64 位 Python 载不了 32 位 core。
   ci_matrix.sh             A zig 发版矩阵 5 目标 + B 发行版工具链 CI 构型
                             （gcc x64/arm64、MinGW x64、ndk-build arm64）
                             + B2 Lakka musl 全静态（musl.cc 工具链，替代 CI 的
@@ -98,6 +102,7 @@ env.sh 的 MCA_BUILD_JOBS（默认 6，留 2 核给系统，可临时覆盖）�
       /root/mca/core-stage033.so /root/mca/carts/ping.pxt64 120 --turbo \
       --data-dir=/tmp/mca_data                 # 必须带 --data-dir
   "$MCA_BIN/regress_arm64.sh" 600            # 全量回归
+  "$MCA_BIN/armhf_smoke.sh"                  # 32 位 armhf 六例冒烟
   "$MCA_BIN/ci_matrix.sh"                    # 全矩阵 + 发行包体检
 
 【同步源码（Windows 侧）】

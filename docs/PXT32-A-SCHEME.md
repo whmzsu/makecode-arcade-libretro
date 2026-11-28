@@ -161,8 +161,13 @@ Zig `arm-linux-gnueabihf.2.17` 全量重编：
 - core：`core/dist/arm-linux-gnueabihf.2.17/makecode_arcade_libretro.so`
   4372432 B，md5 `cf048347248982521180746bd896eee0`
 - host：`out/mca_host_armhf` 1134644 B，md5 `2bddfe5b2a38501d904e39d9a073b7b5`
-- tool69 上用 `qemu-arm-static -L /opt/armhf-sysroot` 运行；sysroot 从 Debian
-  bookworm armhf 的 libc6/libgcc-s1/libstdc++6 解包，不进仓库。
+- tool69 上用 `qemu-arm-static -L $MCA_SYSROOT_ARMHF` 运行（env.sh 变量，
+  指向 `/opt/mca/toolchain/sysroot-armhf`）；sysroot 从 Debian bookworm armhf
+  的 libc6/libgcc-s1/libstdc++6 解包，不进仓库。
+- 2026-11-28 起这六例（golden 三例 + `--reject-rgb565` 三例）已固化为
+  `tools/tool69/armhf_smoke.sh`（部署在 tool69 `$MCA_BIN/`），`--build-core`
+  可先重编 ELF32 core；CI 的 64 位 Python 宿主载不了 32 位 core，只能在
+  tool69 上跑。
 
 结果：
 

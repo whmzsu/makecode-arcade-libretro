@@ -17,6 +17,7 @@ export MCA_NDK=$MCA_TOOLCHAIN/ndk
 export MCA_MUSL_ROOT=$MCA_TOOLCHAIN/musl-cross
 export MCA_SYSROOT_ARM64=$MCA_TOOLCHAIN/sysroot-arm64
 export MCA_SYSROOT_AMD64=$MCA_TOOLCHAIN/sysroot-amd64
+export MCA_SYSROOT_ARMHF=$MCA_TOOLCHAIN/sysroot-armhf
 export MCA_VM=$MCA_TOOLCHAIN/vm
 export MCA_RELAY=$MCA_TOOLCHAIN/relay
 
@@ -47,3 +48,4 @@ export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
 export PATH=$ANDROID_HOME/platform-tools:$ANDROID_HOME/cmdline-tools/latest/bin:$JAVA_HOME/bin:$PATH
 
 export ZIG=$MCA_TOOLCHAIN/bin/zig
+export ANDROID_NDK_HOME=$MCA_NDK
